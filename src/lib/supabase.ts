@@ -46,7 +46,11 @@ export async function functionErrorMessage(err: unknown): Promise<string> {
       /* ignore */
     }
   }
-  return err instanceof Error ? err.message : String(err);
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/Failed to send a request to the Edge Function/i.test(msg)) {
+    return 'Could not reach the server function. It may not be deployed yet, or the network is down.';
+  }
+  return msg;
 }
 
 export async function invokeEdgeFunction<T = unknown>(
