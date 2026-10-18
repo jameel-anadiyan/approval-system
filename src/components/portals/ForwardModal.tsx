@@ -18,14 +18,18 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
 }) => {
   const [remarks, setRemarks] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setError(null);
     try {
       await onForward(remarks.trim() || undefined);
       setRemarks('');
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -57,6 +61,10 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
           />
         </div>
+
+        {error && (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{error}</div>
+        )}
 
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
           <button

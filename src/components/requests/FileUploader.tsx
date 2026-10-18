@@ -69,7 +69,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png,.webp"
+        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
         disabled={disabled}

@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
+import { useRequests } from '../../context/RequestContext';
 import { formatINR, formatISTDate } from '../../lib/formatters';
+import { invokeEdgeFunction } from '../../lib/supabase';
+import { downloadStoredFile } from '../../lib/files';
 import {
   CheckCircle2,
   FileCheck,
@@ -10,6 +13,7 @@ import {
   Download,
   Stamp,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface ApproveModalProps {
@@ -25,14 +29,28 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
   request,
   onApprove,
 }) => {
-  const { user } = useAuth();
+  const { user, isBackendConnected } = useAuth();
+  const { getRequestById } = useRequests();
   const [step, setStep] = useState<'preview' | 'signing' | 'success'>('preview');
   const [signingProgress, setSigningProgress] = useState(0);
   const [signingMessage, setSigningMessage] = useState('Initializing stamping process…');
   const [generatedApprovalNo, setGeneratedApprovalNo] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [creds, setCreds] = useState<{ seal_url: string | null; signature_url: string | null } | null>(null);
+  const [credsLoading, setCredsLoading] = useState(false);
 
-  const documentPagesCount = request.files?.reduce((acc, f) => acc + (f.page_count || 1), 0) || 1;
+  // Live: fetch my own seal/signature (short-lived URLs) so the approver sees exactly what gets stamped.
+  useEffect(() => {
+    if (!isOpen || !isBackendConnected) return;
+    setCredsLoading(true);
+    invokeEdgeFunction<{ seal_url: string | null; signature_url: string | null }>('credentials', { action: 'view' })
+      .then(({ data }) => setCreds(data ?? { seal_url: null, signature_url: null }))
+      .finally(() => setCredsLoading(false));
+  }, [isOpen, isBackendConnected]);
+
+  const missingCreds = isBackendConnected && !credsLoading && !!creds && (!creds.seal_url || !creds.signature_url);
+
+  const documentPagesCount = request.files?.filter((f) => f.kind === 'document').reduce((acc, f) => acc + (f.page_count || 1), 0) || 1;
 
   const handleStartApproval = async () => {
     setStep('signing');
@@ -65,7 +83,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
       if (res.success) {
         setSigningProgress(100);
         setSigningMessage('Stamping completed successfully!');
-        setGeneratedApprovalNo(res.approval_no || 'APR-2026-000125');
+        setGeneratedApprovalNo(res.approval_no || null);
         setTimeout(() => {
           setStep('success');
         }, 500);
@@ -80,8 +98,24 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
     }
   };
 
-  const handleDownload = () => {
-    alert(`Downloading signed approval packet (${generatedApprovalNo || request.approval_no})...`);
+  const handleDownload = async () => {
+    if (!isBackendConnected) {
+      setErrorMessage('Sandbox mode: the signed packet is only generated on the live server.');
+      return;
+    }
+    // The request list was reloaded after approval; read the fresh record for the packet path.
+    const fresh = getRequestById(request.id);
+    const packet = fresh?.signed_files?.find((s) => s.is_packet) || fresh?.signed_files?.[0];
+    if (!packet) {
+      setErrorMessage('Signed packet not found yet. Open the request page and try again.');
+      return;
+    }
+    const res = await downloadStoredFile(
+      'signed-documents',
+      packet.storage_path,
+      packet.file_name || `${generatedApprovalNo || 'approval'}_packet.pdf`
+    );
+    if (!res.success) setErrorMessage(res.error || 'Download failed');
   };
 
   const resetAndClose = () => {
@@ -139,32 +173,61 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
                 <Stamp className="w-4 h-4 text-indigo-600" />
                 <span>Credentials on File</span>
               </span>
-              <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                Verified PNG
-              </span>
+              {isBackendConnected ? (
+                credsLoading ? (
+                  <span className="text-[10px] text-slate-500 font-semibold">Checking…</span>
+                ) : missingCreds ? (
+                  <span className="text-[10px] text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                    Missing
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    On file
+                  </span>
+                )
+              ) : (
+                <span className="text-[10px] text-slate-500 font-semibold bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                  Sandbox preview
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              {/* Simulated Seal Box */}
-              <div className="border border-dashed border-indigo-200 rounded-xl p-3 text-center bg-indigo-50/30 flex flex-col items-center justify-center">
-                <div className="w-12 h-12 rounded-full border-2 border-indigo-600 flex items-center justify-center text-indigo-700 text-[9px] font-bold uppercase tracking-tighter p-1 shadow-inner text-center leading-none">
-                  OFFICIAL SEAL
-                </div>
+              <div className="border border-dashed border-indigo-200 rounded-xl p-3 text-center bg-indigo-50/30 flex flex-col items-center justify-center min-h-[92px]">
+                {isBackendConnected && creds?.seal_url ? (
+                  <img src={creds.seal_url} alt="Your official seal" className="h-14 object-contain" />
+                ) : (
+                  <div className="w-12 h-12 rounded-full border-2 border-indigo-600 flex items-center justify-center text-indigo-700 text-[9px] font-bold uppercase tracking-tighter p-1 shadow-inner text-center leading-none">
+                    {isBackendConnected ? 'NO SEAL' : 'OFFICIAL SEAL'}
+                  </div>
+                )}
                 <span className="text-[10px] text-slate-500 font-medium mt-1.5">
                   Authority Seal
                 </span>
               </div>
 
-              {/* Simulated Signature Box */}
-              <div className="border border-dashed border-slate-200 rounded-xl p-3 text-center bg-slate-50/50 flex flex-col items-center justify-center">
-                <div className="h-12 flex items-center justify-center font-display italic text-lg text-slate-800 font-bold tracking-wider">
-                  {user?.full_name?.split(' ')[0] || 'Approved'}
-                </div>
+              <div className="border border-dashed border-slate-200 rounded-xl p-3 text-center bg-slate-50/50 flex flex-col items-center justify-center min-h-[92px]">
+                {isBackendConnected && creds?.signature_url ? (
+                  <img src={creds.signature_url} alt="Your signature" className="h-14 object-contain" />
+                ) : (
+                  <div className="h-12 flex items-center justify-center font-display italic text-lg text-slate-800 font-bold tracking-wider">
+                    {isBackendConnected ? '—' : user?.full_name?.split(' ')[0] || 'Approved'}
+                  </div>
+                )}
                 <span className="text-[10px] text-slate-500 font-medium mt-1.5">
                   Digital Signature
                 </span>
               </div>
             </div>
+
+            {missingCreds && (
+              <div className="mt-3 p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-800 flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  Your seal and signature must both be uploaded by the Admin (Admin → Credentials) before you can approve.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Stamping Info note */}
@@ -185,7 +248,8 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             <button
               type="button"
               onClick={handleStartApproval}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all active:scale-95"
+              disabled={isBackendConnected && (credsLoading || missingCreds)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>Confirm & Approve</span>
@@ -251,6 +315,9 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             </span>
           </div>
 
+          {errorMessage && (
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl">{errorMessage}</div>
+          )}
           {/* Action buttons */}
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
             <button

@@ -9,6 +9,11 @@ export function formatINR(amount: number): string {
   }).format(amount);
 }
 
+/** ₹ amount without forced decimals, e.g. ₹10,000 (used for policy labels). */
+export function formatINRWhole(amount: number): string {
+  return `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
 export function formatISTDate(dateString: string | Date | null | undefined, includeTime = true): string {
   if (!dateString) return '—';
   try {

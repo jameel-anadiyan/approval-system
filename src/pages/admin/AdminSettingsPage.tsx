@@ -3,9 +3,11 @@ import { Settings, Check, Save, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { loadThreshold, saveThreshold } from '../../lib/directory';
 import { formatINR } from '../../lib/formatters';
+import { useRequests } from '../../context/RequestContext';
 
 export const AdminSettingsPage: React.FC = () => {
   const { isBackendConnected } = useAuth();
+  const { reloadThreshold } = useRequests();
   const [threshold, setThreshold] = useState<number>(10000);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
@@ -18,6 +20,7 @@ export const AdminSettingsPage: React.FC = () => {
     e.preventDefault();
     setSaving(true);
     const res = await saveThreshold(isBackendConnected, threshold);
+    if (res.success) await reloadThreshold();
     setSaving(false);
     setFlash(res.success ? { text: 'Threshold saved and recorded in the audit log.', ok: true } : { text: res.error!, ok: false });
     setTimeout(() => setFlash(null), 5000);

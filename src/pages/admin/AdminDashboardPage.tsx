@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
-import { formatINR } from '../../lib/formatters';
-import { MOCK_DEPARTMENTS, MOCK_USERS } from '../../lib/mockData';
+import { formatINR, formatINRWhole } from '../../lib/formatters';
+import { useDirectory } from '../../lib/directory';
 import {
   ShieldCheck,
   CheckCircle,
@@ -18,7 +18,8 @@ import {
 
 export const AdminDashboardPage: React.FC = () => {
   const { user } = useAuth();
-  const { requests } = useRequests();
+  const { requests, threshold } = useRequests();
+  const { departments } = useDirectory();
   const navigate = useNavigate();
 
   // Admin To-Approve: status === 'pending_admin_approval'
@@ -30,7 +31,7 @@ export const AdminDashboardPage: React.FC = () => {
     .reduce((sum, r) => sum + r.amount, 0);
 
   // High Value requests
-  const highValueCount = requests.filter((r) => r.amount > 10000).length;
+  const highValueCount = requests.filter((r) => r.amount > threshold).length;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -94,14 +95,14 @@ export const AdminDashboardPage: React.FC = () => {
             <Building2 className="w-4 h-4" />
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-display">
-            {MOCK_DEPARTMENTS.length}
+            {departments.filter((d) => d.is_active).length}
           </div>
           <span className="text-[11px] text-slate-400 mt-1 block">Active cost centers</span>
         </div>
 
         <div className="bg-white p-4 sm:p-5 rounded-2xl border border-amber-200/90 shadow-xs">
           <div className="flex items-center justify-between text-amber-600 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">High-Value (&gt; ₹10k)</span>
+            <span className="text-xs font-bold uppercase tracking-wider">High-Value (&gt; {formatINRWhole(threshold)})</span>
             <AlertTriangle className="w-4 h-4" />
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold text-amber-950 font-display">
@@ -182,7 +183,7 @@ export const AdminDashboardPage: React.FC = () => {
         >
           <TrendingUp className="w-5 h-5 text-amber-600 mb-2 group-hover:scale-105 transition-transform" />
           <div className="font-bold text-xs sm:text-sm text-slate-900">Settings</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">₹10,000 threshold & prefixes</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">High-value threshold ({formatINRWhole(threshold)})</p>
         </button>
       </div>
     </div>

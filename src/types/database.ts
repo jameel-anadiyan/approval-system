@@ -70,6 +70,7 @@ export interface RequestRecord {
   decided_by: string | null;
   decided_at: string | null;
   approver_role: AppRole | null;
+  approver_name?: string | null;
   verify_token: string | null;
   approving_by: string | null;
   approving_started_at: string | null;
@@ -109,6 +110,8 @@ export interface SignedFile {
   id: string;
   request_id: string;
   source_file_id: string | null;
+  is_packet?: boolean;
+  file_name?: string;
   storage_path: string;
   sha256: string;
   page_count: number;

@@ -16,11 +16,16 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const elapsedRef = useRef(0);
+
+  // Server accepts voice notes up to ~5 minutes.
+  const MAX_SECONDS = 300;
 
   useEffect(() => {
     return () => {
@@ -30,6 +35,11 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   }, [audioUrl]);
 
   const startRecording = async () => {
+    setMicError(null);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setMicError('Voice recording is not supported in this browser.');
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
@@ -59,9 +69,9 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         setAudioBlob(blob);
         setAudioUrl(url);
         onRecordingComplete({
-          name: `voice_note_${Date.now()}.${mimeType.includes('mp4') ? 'm4a' : 'webm'}`,
+          name: `voice_note_${Date.now()}.${mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm'}`,
           blob,
-          duration: recordTime,
+          duration: Math.max(1, elapsedRef.current),
         });
 
         // Stop all audio tracks
@@ -71,48 +81,21 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       mediaRecorder.start(250);
       setIsRecording(true);
       setRecordTime(0);
+      elapsedRef.current = 0;
 
       timerRef.current = setInterval(() => {
-        setRecordTime((t) => t + 1);
+        elapsedRef.current += 1;
+        setRecordTime(elapsedRef.current);
+        if (elapsedRef.current >= MAX_SECONDS) stopRecording();
       }, 1000);
     } catch {
-      // Simulate audio note for environments without mic permissions or headless testing
-      simulateMockRecording();
+      setMicError('Microphone access was blocked. Allow the microphone for this site in your browser settings and try again.');
     }
-  };
-
-  const simulateMockRecording = () => {
-    setIsRecording(true);
-    setRecordTime(0);
-    timerRef.current = setInterval(() => {
-      setRecordTime((t) => {
-        if (t >= 8) {
-          stopMockRecording(8);
-          return 8;
-        }
-        return t + 1;
-      });
-    }, 1000);
-  };
-
-  const stopMockRecording = (finalDuration = 8) => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setIsRecording(false);
-    const mockBlob = new Blob(['mock-audio-data'], { type: 'audio/webm' });
-    setAudioBlob(mockBlob);
-    setAudioUrl('mock-voice-url');
-    onRecordingComplete({
-      name: `voice_note_${Date.now()}.webm`,
-      blob: mockBlob,
-      duration: finalDuration,
-    });
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
-    } else {
-      stopMockRecording(recordTime);
     }
     if (timerRef.current) clearInterval(timerRef.current);
     setIsRecording(false);
@@ -204,7 +187,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
                 <span>Recorded Voice Note</span>
               </div>
               <div className="text-[11px] text-slate-500 font-mono">
-                Duration: {formatDuration(recordTime || 8)}
+                Duration: {formatDuration(recordTime)}
               </div>
             </div>
           </div>
@@ -218,6 +201,11 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
+      )}
+
+      {micError && <p className="mt-2 text-[11px] text-rose-700">{micError}</p>}
+      {isRecording && recordTime >= MAX_SECONDS - 30 && (
+        <p className="mt-2 text-[11px] text-amber-700">Recording stops automatically at 5 minutes.</p>
       )}
     </div>
   );

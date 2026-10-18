@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { DocumentViewer } from '../../components/requests/DocumentViewer';
-import { VoicePlayer } from '../../components/requests/VoicePlayer';
+import { SignedDocuments, VoiceNoteItem } from '../../components/requests/SignedDocuments';
+import { EditDraftModal } from '../../components/requests/EditDraftModal';
 import { RequestTimeline } from '../../components/requests/RequestTimeline';
 import { RouteModal } from '../../components/portals/RouteModal';
 import { ApproveModal } from '../../components/portals/ApproveModal';
@@ -14,6 +15,7 @@ import { ForwardModal } from '../../components/portals/ForwardModal';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import {
   formatINR,
+  formatINRWhole,
   formatISTDate,
   ROLE_LABELS,
 } from '../../lib/formatters';
@@ -29,19 +31,25 @@ import {
   ShieldAlert,
   Building2,
   FileCheck,
-  ExternalLink,
   Copy,
   Check,
+  Pencil,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, role } = useAuth();
   const {
     getRequestById,
+    isLoading,
+    threshold,
     submitRequest,
     withdrawRequest,
+    deleteDraft,
     routeRequest,
     forwardRequest,
     returnRequest,
@@ -51,18 +59,32 @@ export const RequestDetailPage: React.FC = () => {
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | null
   >(null);
   const [copiedNo, setCopiedNo] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(
+    (location.state as { notice?: string } | null)?.notice
+      ? { ok: false, text: (location.state as { notice: string }).notice }
+      : null
+  );
 
   const request = id ? getRequestById(id) : undefined;
+
+  if (!request && isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-16 flex justify-center text-slate-400">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
 
   if (!request) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-16 text-center">
         <h2 className="text-lg font-bold text-slate-800">Request Not Found</h2>
         <p className="text-xs text-slate-500 mt-1">
-          The requested voucher does not exist or has been removed.
+          The request does not exist, was deleted, or you do not have access to it.
         </p>
         <button
           type="button"
@@ -76,8 +98,11 @@ export const RequestDetailPage: React.FC = () => {
   }
 
   const isOwner = user?.id === request.requester_id;
-  const isHighValue = request.amount > 10000;
-  const voiceNote = request.files?.find((f) => f.kind === 'voice_note');
+  const isHighValue = request.amount > threshold;
+  const voiceNotes = (request.files || []).filter((f) => f.kind === 'voice_note');
+  // Disbursement only ever sees the stamped output, never the originals (storage policy agrees).
+  const showOriginals = role !== 'disbursement';
+  const editable = isOwner && (request.status === 'draft' || request.status === 'returned');
 
   const copyApprovalNo = (no: string) => {
     navigator.clipboard.writeText(no);
@@ -85,10 +110,20 @@ export const RequestDetailPage: React.FC = () => {
     setTimeout(() => setCopiedNo(false), 2000);
   };
 
-  const handleDownloadSignedPDF = () => {
-    alert(
-      `Downloading signed PDF packet for Approval ${request.approval_no || request.request_no}...\nEvery page contains the digital stamp, official seal, signature, IST timestamp, and SHA-256 hash.`
-    );
+  /** Turns a context result into a thrown error so the open modal can show it. */
+  const orThrow = async (p: Promise<{ success: boolean; error?: string }>, okText?: string) => {
+    const res = await p;
+    if (!res.success) throw new Error(res.error || 'Action failed');
+    if (okText) setBanner({ ok: true, text: okText });
+  };
+
+  const runInline = async (fn: () => Promise<{ success: boolean; error?: string }>, okText: string) => {
+    setBusy(true);
+    setBanner(null);
+    const res = await fn();
+    setBusy(false);
+    setBanner(res.success ? { ok: true, text: okText } : { ok: false, text: res.error || 'Action failed' });
+    return res.success;
   };
 
   return (
@@ -144,6 +179,20 @@ export const RequestDetailPage: React.FC = () => {
         </div>
       </div>
 
+      {banner && (
+        <div
+          role="status"
+          className={`mb-4 p-3.5 rounded-xl border text-xs flex items-start justify-between gap-3 ${
+            banner.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <span>{banner.text}</span>
+          <button type="button" onClick={() => setBanner(null)} className="font-bold opacity-60 hover:opacity-100" aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Main 2-Column Responsive Layout (Stacked on mobile, 2-column on desktop) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column (Details, Documents, Voice Note) - 7 cols on lg */}
@@ -163,7 +212,7 @@ export const RequestDetailPage: React.FC = () => {
                 <div className="text-right">
                   <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
                     <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
-                    <span>High Value (&gt; ₹10k)</span>
+                    <span>High Value (&gt; {formatINRWhole(threshold)})</span>
                   </span>
                 </div>
               )}
@@ -215,67 +264,50 @@ export const RequestDetailPage: React.FC = () => {
             )}
           </div>
 
-          {/* Voice Note Player (if present) */}
-          {voiceNote && (
-            <VoicePlayer
-              url={voiceNote.public_url}
-              duration={voiceNote.duration_sec}
-              title={voiceNote.original_name}
-            />
-          )}
+          {/* Voice Notes (if present) */}
+          {showOriginals && voiceNotes.map((vn) => <VoiceNoteItem key={vn.id} file={vn} />)}
 
           {/* Document Viewer (PDF or Photos) */}
-          {request.files && request.files.filter((f) => f.kind === 'document').length > 0 && (
+          {showOriginals && request.files && request.files.filter((f) => f.kind === 'document').length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Attached Invoices & Documents
+                  Attached Invoices &amp; Documents
                 </h3>
                 <span className="text-xs text-slate-400">
                   {request.files.filter((f) => f.kind === 'document').length} file(s)
                 </span>
               </div>
-              <DocumentViewer files={request.files} />
+              <DocumentViewer key={request.files.map((f) => f.id).join(',')} files={request.files} />
+            </div>
+          )}
+
+          {editable && !(request.files || []).some((f) => f.kind === 'document') && (
+            <div className="p-4 rounded-2xl border border-dashed border-amber-300 bg-amber-50 text-xs text-amber-900">
+              No document attached yet. Use <strong>Edit</strong> to attach at least one invoice or bill before submitting.
             </div>
           )}
 
           {/* Signed Approval Packet Card (when approved or paid) */}
-          {(request.status === 'approved' || request.status === 'paid') && (
-            <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 text-sm">
-                    Official Signed Approval Packet
-                  </h4>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    Approval No: <span className="font-mono font-bold">{request.approval_no}</span> •
-                    Stamped with seal, signature & date-time
-                  </p>
-                  {request.verify_token && (
-                    <a
-                      href={`/verify/${request.verify_token}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 hover:text-emerald-950 mt-1 underline"
-                    >
-                      <span>Public Verification Link</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
-                </div>
-              </div>
+          {(request.status === 'approved' || request.status === 'paid') && <SignedDocuments request={request} />}
 
-              <button
-                type="button"
-                onClick={handleDownloadSignedPDF}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all shrink-0"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download Signed PDF</span>
-              </button>
+          {request.status === 'paid' && (
+            <div className="bg-white rounded-2xl border border-teal-200 p-5 shadow-xs text-xs grid grid-cols-2 gap-3">
+              <div className="col-span-2 flex items-center gap-2 font-bold text-teal-800 text-sm">
+                <Banknote className="w-4 h-4" /> Payment recorded
+              </div>
+              <div>
+                <span className="text-slate-400 block">Paid on</span>
+                <span className="font-semibold text-slate-800">{formatISTDate(request.paid_at)}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block">Mode</span>
+                <span className="font-semibold text-slate-800">{request.payment_mode || '—'}</span>
+              </div>
+              <div className="col-span-2">
+                <span className="text-slate-400 block">Reference</span>
+                <span className="font-mono font-semibold text-slate-800">{request.payment_ref || '—'}</span>
+              </div>
             </div>
           )}
         </div>
@@ -305,29 +337,67 @@ export const RequestDetailPage: React.FC = () => {
 
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-end">
             {/* Requester Actions on Draft or Returned */}
-            {isOwner && request.status === 'draft' && (
+            {editable && (
               <button
                 type="button"
-                onClick={async () => {
-                  const res = await submitRequest(request.id);
-                  if (res.success) alert(`Request submitted as ${res.request_no}`);
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-xs shadow-md hover:bg-indigo-700"
+                id="edit-request"
+                onClick={() => setModalState('edit')}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50"
               >
-                <Send className="w-3.5 h-3.5" />
-                <span>Submit Request</span>
+                <Pencil className="w-3.5 h-3.5 text-slate-400" />
+                <span>Edit</span>
+              </button>
+            )}
+
+            {isOwner && request.status === 'draft' && !request.request_no && (
+              <button
+                type="button"
+                id="delete-draft"
+                disabled={busy}
+                onClick={async () => {
+                  if (!confirm('Delete this draft and its attachments? This cannot be undone.')) return;
+                  setBusy(true);
+                  const res = await deleteDraft(request.id);
+                  setBusy(false);
+                  if (res.success) navigate('/my', { replace: true });
+                  else setBanner({ ok: false, text: res.error || 'Could not delete draft' });
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete</span>
+              </button>
+            )}
+
+            {editable && (
+              <button
+                type="button"
+                id="submit-request"
+                disabled={busy}
+                onClick={() =>
+                  runInline(async () => {
+                    const res = await submitRequest(request.id);
+                    return res;
+                  }, request.status === 'returned' ? 'Request resubmitted.' : 'Request submitted.')
+                }
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-xs shadow-md hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                <span>{request.status === 'returned' ? 'Resubmit' : 'Submit Request'}</span>
               </button>
             )}
 
             {isOwner && (request.status === 'submitted' || request.status === 'returned') && (
               <button
                 type="button"
+                id="withdraw-request"
+                disabled={busy}
                 onClick={async () => {
                   if (confirm('Are you sure you want to withdraw this request?')) {
-                    await withdrawRequest(request.id);
+                    await runInline(() => withdrawRequest(request.id), 'Request withdrawn.');
                   }
                 }}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 disabled:opacity-50"
               >
                 <XCircle className="w-3.5 h-3.5 text-slate-400" />
                 <span>Withdraw</span>
@@ -454,31 +524,21 @@ export const RequestDetailPage: React.FC = () => {
                 <span>Mark as Paid</span>
               </button>
             )}
-
-            {/* Download Signed PDF for any user once approved */}
-            {(request.status === 'approved' || request.status === 'paid') && (
-              <button
-                type="button"
-                onClick={handleDownloadSignedPDF}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 text-white font-semibold text-xs hover:bg-slate-800"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Signed PDF</span>
-              </button>
-            )}
           </div>
         </div>
       </div>
 
       {/* Workflow Modals */}
+      {modalState === 'edit' && (
+        <EditDraftModal isOpen={true} onClose={() => setModalState(null)} request={request} />
+      )}
+
       {modalState === 'route' && (
         <RouteModal
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onRoute={async (rt, rm) => {
-            await routeRequest(request.id, rt, rm);
-          }}
+          onRoute={(rt, rm) => orThrow(routeRequest(request.id, rt, rm), `Routed via Route ${rt}.`)}
         />
       )}
 
@@ -498,9 +558,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onReturn={async (rm) => {
-            await returnRequest(request.id, rm);
-          }}
+          onReturn={(rm) => orThrow(returnRequest(request.id, rm), 'Returned to the requester for correction.')}
         />
       )}
 
@@ -509,9 +567,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onReject={async (rs) => {
-            await rejectRequest(request.id, rs);
-          }}
+          onReject={(rs) => orThrow(rejectRequest(request.id, rs), 'Request rejected.')}
         />
       )}
 
@@ -520,9 +576,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onForward={async (rm) => {
-            await forwardRequest(request.id, rm);
-          }}
+          onForward={(rm) => orThrow(forwardRequest(request.id, rm), 'Forwarded to Admin.')}
         />
       )}
 
@@ -531,9 +585,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onMarkPaid={async (dt) => {
-            await markAsPaid(request.id, dt);
-          }}
+          onMarkPaid={(dt) => orThrow(markAsPaid(request.id, dt), 'Marked as paid.')}
         />
       )}
     </div>

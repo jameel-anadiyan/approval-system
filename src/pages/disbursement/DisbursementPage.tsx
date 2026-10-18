@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -6,15 +6,32 @@ import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { RequestRecord } from '../../types/database';
 import { formatINR, formatISTDate } from '../../lib/formatters';
 import { Search, Banknote, Clock, CheckCircle, ShieldCheck, Download, ExternalLink } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { downloadSignedPacket } from '../../lib/files';
 
 export const DisbursementPage: React.FC = () => {
   const { requests, markAsPaid } = useRequests();
+  const { isBackendConnected } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'awaiting' | 'paid'>('awaiting');
+  const [activeTab, setActiveTab] = useState<'awaiting' | 'paid'>(
+    location.pathname.endsWith('/paid') ? 'paid' : 'awaiting'
+  );
   const [payTarget, setPayTarget] = useState<RequestRecord | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveTab(location.pathname.endsWith('/paid') ? 'paid' : 'awaiting');
+  }, [location.pathname]);
+
+  const handleDownload = async (req: RequestRecord) => {
+    setNotice(null);
+    const res = await downloadSignedPacket(req, isBackendConnected);
+    if (!res.success) setNotice(res.error || 'Download failed');
+  };
 
   // Awaiting payment: status === 'approved'
   const awaitingQueue = requests.filter((r) => r.status === 'approved');
@@ -58,6 +75,10 @@ export const DisbursementPage: React.FC = () => {
           <span>Verify QR Voucher</span>
         </button>
       </div>
+
+      {notice && (
+        <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-800">{notice}</div>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
@@ -182,11 +203,11 @@ export const DisbursementPage: React.FC = () => {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => alert(`Downloading payment voucher for ${req.approval_no}...`)}
+                    onClick={() => handleDownload(req)}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Voucher</span>
+                    <span>Signed PDF</span>
                   </button>
                 )}
               </div>
@@ -201,7 +222,8 @@ export const DisbursementPage: React.FC = () => {
           onClose={() => setPayTarget(null)}
           request={payTarget}
           onMarkPaid={async (dt) => {
-            await markAsPaid(payTarget.id, dt);
+            const res = await markAsPaid(payTarget.id, dt);
+            if (!res.success) throw new Error(res.error || 'Could not mark as paid');
           }}
         />
       )}

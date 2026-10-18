@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord, ApprovalRoute } from '../../types/database';
-import { formatINR } from '../../lib/formatters';
+import { formatINR, formatINRWhole } from '../../lib/formatters';
+import { useRequests } from '../../context/RequestContext';
 import { ShieldAlert, ArrowRight, UserCheck, ShieldCheck } from 'lucide-react';
 
 interface RouteModalProps {
@@ -21,7 +22,9 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   const [remarks, setRemarks] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const isHighValue = request.amount > 10000;
+  const { threshold } = useRequests();
+  const isHighValue = request.amount > threshold;
+  const limit = formatINRWhole(threshold);
   const isRequesterHead = request.requester_role === 'head';
 
   const isRouteBDisabled = isHighValue || isRequesterHead;
@@ -33,12 +36,17 @@ export const RouteModal: React.FC<RouteModalProps> = ({
     }
   }, [isRouteBDisabled]);
 
+  const [error, setError] = useState<string | null>(null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setError(null);
     try {
       await onRoute(selectedRoute, remarks);
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -69,14 +77,14 @@ export const RouteModal: React.FC<RouteModalProps> = ({
           </div>
         </div>
 
-        {/* ₹10,000 Threshold Notice */}
+        {/* High-value threshold notice */}
         {isHighValue && (
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900">
             <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <span className="font-bold">High Value Policy Rule:</span>
               <p className="mt-0.5 text-amber-800 leading-relaxed">
-                Since the requested amount exceeds ₹10,000.00, this request must be routed via{' '}
+                Since the requested amount exceeds {limit}, this request must be routed via{' '}
                 <strong>Route A</strong> for Department Head review and final Administrator sign-off.
               </p>
             </div>
@@ -152,7 +160,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
                 <span className="font-bold text-slate-900 text-sm">Route B — Head Direct Approval</span>
                 {isRouteBDisabled ? (
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-600">
-                    Disabled (&gt; ₹10k)
+                    {isRequesterHead ? 'Not allowed' : `Disabled (> ${limit})`}
                   </span>
                 ) : (
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700">
@@ -161,7 +169,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Department Head approves directly with their official seal and signature (for requests ≤ ₹10,000).
+                Department Head approves directly with their official seal and signature (for requests ≤ {limit}).
               </p>
             </div>
           </label>
@@ -180,6 +188,10 @@ export const RouteModal: React.FC<RouteModalProps> = ({
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
           />
         </div>
+
+        {error && (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{error}</div>
+        )}
 
         {/* Actions */}
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">

@@ -8,14 +8,24 @@ import {
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
-import { MOCK_REQUESTS, MOCK_SETTINGS } from '../lib/mockData';
+import { MOCK_REQUESTS } from '../lib/mockData';
+import { loadThreshold } from '../lib/directory';
+
+type Result = { success: boolean; error?: string };
 
 interface RequestContextType {
   requests: RequestRecord[];
   isLoading: boolean;
+  /** High-value threshold (₹) from app_settings; Route B is blocked above it. */
+  threshold: number;
+  reloadThreshold: () => Promise<void>;
   refreshRequests: () => Promise<void>;
   getRequestById: (id: string) => RequestRecord | undefined;
   createDraft: (data: { title: string; amount: number; notes?: string; files?: RequestFile[] }) => Promise<{ success: boolean; id?: string; error?: string }>;
+  updateDraft: (id: string, data: { title: string; amount: number; notes?: string }) => Promise<Result>;
+  addFiles: (id: string, files: RequestFile[]) => Promise<Result>;
+  removeFile: (requestId: string, fileId: string) => Promise<Result>;
+  deleteDraft: (id: string) => Promise<Result>;
   submitRequest: (id: string) => Promise<{ success: boolean; request_no?: string; error?: string }>;
   withdrawRequest: (id: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
   routeRequest: (id: string, route: ApprovalRoute, remarks?: string) => Promise<{ success: boolean; error?: string }>;
@@ -23,17 +33,33 @@ interface RequestContextType {
   returnRequest: (id: string, remarks: string) => Promise<{ success: boolean; error?: string }>;
   rejectRequest: (id: string, reason: string) => Promise<{ success: boolean; error?: string }>;
   approveRequest: (id: string) => Promise<{ success: boolean; approval_no?: string; error?: string }>;
-  markAsPaid: (id: string, details: { payment_mode?: string; payment_ref?: string; payment_remarks?: string }) => Promise<{ success: boolean; error?: string }>;
+  markAsPaid: (id: string, details: { payment_mode?: string; payment_ref?: string; payment_remarks?: string; payment_date?: string }) => Promise<{ success: boolean; error?: string }>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_REQ_KEY = 'approval_app_requests_store';
 
+const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Newest action first, files in upload order. */
+const normalize = (rows: RequestRecord[]) =>
+  rows.map((r) => ({
+    ...r,
+    amount: Number(r.amount),
+    actions: [...(r.actions || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    files: [...(r.files || [])].sort(
+      (a, b) =>
+        ((a as RequestFile & { sort_order?: number }).sort_order ?? 0) -
+          ((b as RequestFile & { sort_order?: number }).sort_order ?? 0) || a.created_at.localeCompare(b.created_at)
+    ),
+  }));
+
 export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isBackendConnected } = useAuth();
   const [requests, setRequests] = useState<RequestRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [threshold, setThreshold] = useState<number>(10000);
 
   const loadRequests = useCallback(async () => {
     setIsLoading(true);
@@ -48,7 +74,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         .select('*, department:departments(*), files:request_files(*), signed_files(*), actions:request_actions(*)')
         .order('created_at', { ascending: false });
       // RLS decides what each role sees; never substitute demo data in live mode.
-      setRequests(!error && data ? (data as RequestRecord[]) : []);
+      setRequests(!error && data ? normalize(data as RequestRecord[]) : []);
       setIsLoading(false);
       return;
     }
@@ -73,6 +99,37 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     loadRequests();
   }, [loadRequests]);
 
+  const reloadThreshold = useCallback(async () => {
+    setThreshold(await loadThreshold(isBackendConnected));
+  }, [isBackendConnected]);
+
+  useEffect(() => {
+    if (!user) return;
+    reloadThreshold();
+  }, [reloadThreshold, user?.id]);
+
+  // Live refresh: every workflow step notifies the next actor, so a new
+  // notification for me means some request I can see has changed.
+  useEffect(() => {
+    if (!isBackendConnected || !user) return;
+    const channel = supabase
+      .channel(`req-refresh-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        () => loadRequests()
+      )
+      .subscribe();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadRequests();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      supabase.removeChannel(channel);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isBackendConnected, user?.id, loadRequests]);
+
   const updateLocalRequests = (updater: (prev: RequestRecord[]) => RequestRecord[]) => {
     setRequests((prev) => {
       const updated = updater(prev);
@@ -85,6 +142,34 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return requests.find((r) => r.id === id);
   };
 
+  /** Upload straight to Storage (path must start with the request id), then register. */
+  const uploadFiles = async (requestId: string, files: RequestFile[]) => {
+    for (const f of files) {
+      if (!f.blob) continue;
+      const contentType = (f.mime_type || f.blob.type).split(';')[0];
+      const safe = f.original_name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
+      const path = `${requestId}/${crypto.randomUUID()}-${safe}`;
+      const { error: upErr } = await supabase.storage
+        .from('request-files')
+        .upload(path, f.blob, { contentType, upsert: false });
+      if (upErr) throw new Error(`Upload failed for ${f.original_name}: ${upErr.message}`);
+      const { error: regErr } = await supabase.rpc('register_file', {
+        p_request_id: requestId,
+        p_kind: f.kind,
+        p_storage_path: path,
+        p_original_name: f.original_name,
+        p_mime_type: contentType,
+        p_size_bytes: f.blob.size,
+        p_page_count: f.page_count,
+        p_duration_sec: f.duration_sec,
+      });
+      if (regErr) {
+        await supabase.storage.from('request-files').remove([path]);
+        throw new Error(`Could not attach ${f.original_name}: ${regErr.message}`);
+      }
+    }
+  };
+
   const createDraft = async (data: {
     title: string;
     amount: number;
@@ -94,6 +179,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!user) return { success: false, error: 'Must be logged in' };
 
     if (isBackendConnected) {
+      let requestId: string | undefined;
       try {
         const { data: newId, error } = await supabase.rpc('create_draft', {
           p_title: data.title,
@@ -101,35 +187,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_notes: data.notes || null,
         });
         if (error) throw error;
-        const requestId = newId as string;
-
-        // Upload straight to Storage (path must start with the request id), then register.
-        for (const f of data.files || []) {
-          if (!f.blob) continue;
-          const contentType = (f.mime_type || f.blob.type).split(';')[0];
-          const safe = f.original_name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
-          const path = `${requestId}/${crypto.randomUUID()}-${safe}`;
-          const { error: upErr } = await supabase.storage
-            .from('request-files')
-            .upload(path, f.blob, { contentType, upsert: false });
-          if (upErr) throw new Error(`Upload failed for ${f.original_name}: ${upErr.message}`);
-          const { error: regErr } = await supabase.rpc('register_file', {
-            p_request_id: requestId,
-            p_kind: f.kind,
-            p_storage_path: path,
-            p_original_name: f.original_name,
-            p_mime_type: contentType,
-            p_size_bytes: f.blob.size,
-            p_page_count: f.page_count,
-            p_duration_sec: f.duration_sec,
-          });
-          if (regErr) throw new Error(`Could not attach ${f.original_name}: ${regErr.message}`);
-        }
-
+        requestId = newId as string;
+        await uploadFiles(requestId, data.files || []);
         await loadRequests();
         return { success: true, id: requestId };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        if (requestId) await loadRequests();
+        // The draft (if created) stays in My Requests so attachments can be retried.
+        return { success: false, id: requestId, error: errMsg(err) };
       }
     }
 
@@ -174,17 +239,93 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true, id: newId };
   };
 
+  const updateDraft = async (id: string, data: { title: string; amount: number; notes?: string }): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      const { error } = await supabase.rpc('update_draft', {
+        p_request_id: id,
+        p_title: data.title,
+        p_amount: data.amount,
+        p_notes: data.notes || null,
+      });
+      if (error) return { success: false, error: error.message };
+      await loadRequests();
+      return { success: true };
+    }
+    updateLocalRequests((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? { ...r, title: data.title, amount: data.amount, notes: data.notes || null, updated_at: new Date().toISOString() }
+          : r
+      )
+    );
+    return { success: true };
+  };
+
+  const addFiles = async (id: string, files: RequestFile[]): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      try {
+        await uploadFiles(id, files);
+        await loadRequests();
+        return { success: true };
+      } catch (err) {
+        await loadRequests();
+        return { success: false, error: errMsg(err) };
+      }
+    }
+    const clean = files.map(({ blob: _blob, ...f }) => ({ ...f, request_id: id }));
+    updateLocalRequests((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, files: [...(r.files || []), ...clean] } : r))
+    );
+    return { success: true };
+  };
+
+  const removeFile = async (requestId: string, fileId: string): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      const { data: path, error } = await supabase.rpc('remove_file', { p_file_id: fileId });
+      if (error) return { success: false, error: error.message };
+      if (path) await supabase.storage.from('request-files').remove([path as string]);
+      await loadRequests();
+      return { success: true };
+    }
+    updateLocalRequests((prev) =>
+      prev.map((r) => (r.id === requestId ? { ...r, files: (r.files || []).filter((f) => f.id !== fileId) } : r))
+    );
+    return { success: true };
+  };
+
+  const deleteDraft = async (id: string): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const current = getRequestById(id);
+    if (isBackendConnected) {
+      // delete_draft requires the attachments to be removed first.
+      for (const f of current?.files || []) {
+        const res = await removeFile(id, f.id);
+        if (!res.success) return res;
+      }
+      const { error } = await supabase.rpc('delete_draft', { p_request_id: id });
+      if (error) return { success: false, error: error.message };
+      await loadRequests();
+      return { success: true };
+    }
+    updateLocalRequests((prev) => prev.filter((r) => r.id !== id));
+    return { success: true };
+  };
+
   const submitRequest = async (id: string): Promise<{ success: boolean; request_no?: string; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
     if (isBackendConnected) {
       try {
-        const { data: reqNo, error } = await supabase.rpc('submit_request', {
+        const { error } = await supabase.rpc('submit_request', {
           p_request_id: id,
         });
         if (error) throw error;
+        const { data: row } = await supabase.from('requests').select('request_no').eq('id', id).maybeSingle();
         await loadRequests();
-        return { success: true, request_no: reqNo };
+        return { success: true, request_no: row?.request_no ?? undefined };
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
@@ -287,11 +428,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const current = getRequestById(id);
     if (!current) return { success: false, error: 'Request not found' };
 
-    // ₹10,000 threshold validation: Route B is not allowed above threshold
-    if (route === 'B' && current.amount > MOCK_SETTINGS.high_value_threshold) {
+    // High-value rule: Route B is not allowed above the configured threshold
+    if (route === 'B' && current.amount > threshold) {
       return {
         success: false,
-        error: `Requests above ₹${MOCK_SETTINGS.high_value_threshold.toLocaleString('en-IN')} must take Route A (Admin approval required).`,
+        error: `Requests above ₹${threshold.toLocaleString('en-IN')} must take Route A (Admin approval required).`,
       };
     }
 
@@ -514,8 +655,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (isBackendConnected) {
       try {
-        const { data, error } = await invokeEdgeFunction<{ ok: boolean; approval_no: string }>('approve-request', {
+        const { data, error } = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
           request_id: id,
+          // Used for the QR / verify link stamped on every page.
+          app_url: window.location.origin,
         });
         if (error) throw error;
         await loadRequests();
@@ -579,7 +722,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const markAsPaid = async (
     id: string,
-    details: { payment_mode?: string; payment_ref?: string; payment_remarks?: string }
+    details: { payment_mode?: string; payment_ref?: string; payment_remarks?: string; payment_date?: string }
   ): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
@@ -587,6 +730,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       try {
         const { error } = await supabase.rpc('mark_paid', {
           p_request_id: id,
+          p_payment_date: details.payment_date || null,
           p_payment_mode: details.payment_mode || null,
           p_payment_ref: details.payment_ref || null,
           p_remarks: details.payment_remarks || null,
@@ -643,9 +787,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       value={{
         requests,
         isLoading,
+        threshold,
+        reloadThreshold,
         refreshRequests: loadRequests,
         getRequestById,
         createDraft,
+        updateDraft,
+        addFiles,
+        removeFile,
+        deleteDraft,
         submitRequest,
         withdrawRequest,
         routeRequest,

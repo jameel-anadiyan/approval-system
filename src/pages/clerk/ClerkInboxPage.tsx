@@ -7,10 +7,12 @@ import { RouteModal } from '../../components/portals/RouteModal';
 import { ReturnModal } from '../../components/portals/ReturnModal';
 import { RequestRecord } from '../../types/database';
 import { Inbox, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { formatINRWhole } from '../../lib/formatters';
 
 export const ClerkInboxPage: React.FC = () => {
   const { user } = useAuth();
-  const { requests, routeRequest, returnRequest } = useRequests();
+  const { requests, routeRequest, returnRequest, threshold } = useRequests();
+  const limit = formatINRWhole(threshold);
 
   const [activeRequest, setActiveRequest] = useState<RequestRecord | null>(null);
   const [modalType, setModalType] = useState<'route' | 'return' | null>(null);
@@ -42,14 +44,14 @@ export const ClerkInboxPage: React.FC = () => {
         </p>
       </div>
 
-      {/* ₹10,000 Rule Reminder Box */}
+      {/* High-value rule reminder */}
       <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-4 flex items-start gap-3 text-xs text-indigo-950">
         <ShieldAlert className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
         <div>
           <span className="font-bold">Workflow Routing Rule:</span>
           <p className="mt-0.5 text-indigo-800 leading-relaxed">
-            Requests <strong>above ₹10,000.00</strong> can only be routed to Route A (Admin). Requests{' '}
-            <strong>₹10,000.00 or less</strong> can be sent to either Route A or Route B (Department Head).
+            Requests <strong>above {limit}</strong> can only be routed to Route A (Admin). Requests{' '}
+            <strong>{limit} or less</strong> can be sent to either Route A or Route B (Department Head).
           </p>
         </div>
       </div>
@@ -79,7 +81,8 @@ export const ClerkInboxPage: React.FC = () => {
           }}
           request={activeRequest}
           onRoute={async (rt, rm) => {
-            await routeRequest(activeRequest.id, rt, rm);
+            const res = await routeRequest(activeRequest.id, rt, rm);
+            if (!res.success) throw new Error(res.error || 'Routing failed');
           }}
         />
       )}
@@ -93,7 +96,8 @@ export const ClerkInboxPage: React.FC = () => {
           }}
           request={activeRequest}
           onReturn={async (rm) => {
-            await returnRequest(activeRequest.id, rm);
+            const res = await returnRequest(activeRequest.id, rm);
+            if (!res.success) throw new Error(res.error || 'Return failed');
           }}
         />
       )}

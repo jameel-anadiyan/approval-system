@@ -5,12 +5,12 @@ import { useRequests } from '../../context/RequestContext';
 import { RequestFile } from '../../types/database';
 import { FileUploader } from '../../components/requests/FileUploader';
 import { VoiceRecorder } from '../../components/requests/VoiceRecorder';
-import { formatINR } from '../../lib/formatters';
+import { formatINR, formatINRWhole } from '../../lib/formatters';
 import { ShieldAlert, Send, Save, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 export const NewRequestPage: React.FC = () => {
   const { user } = useAuth();
-  const { createDraft, submitRequest } = useRequests();
+  const { createDraft, submitRequest, threshold } = useRequests();
   const navigate = useNavigate();
 
   const [title, setTitle] = useState('');
@@ -23,7 +23,7 @@ export const NewRequestPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const amount = parseFloat(amountStr) || 0;
-  const isHighValue = amount > 10000;
+  const isHighValue = amount > threshold;
 
   const allFiles = voiceFile ? [...files, voiceFile] : files;
 
@@ -72,6 +72,10 @@ export const NewRequestPage: React.FC = () => {
 
       if (res.success && res.id) {
         navigate(`/requests/${res.id}`);
+      } else if (res.id) {
+        navigate(`/requests/${res.id}`, {
+          state: { notice: `Draft saved, but an attachment failed: ${res.error}. Use Edit to attach it again.` },
+        });
       } else {
         setError(res.error || 'Failed to save draft.');
       }
@@ -109,6 +113,13 @@ export const NewRequestPage: React.FC = () => {
       });
 
       if (!draftRes.success || !draftRes.id) {
+        if (draftRes.id) {
+          // Draft exists but an upload failed: continue there rather than creating a duplicate.
+          navigate(`/requests/${draftRes.id}`, {
+            state: { notice: `Saved as a draft, but an attachment failed: ${draftRes.error}. Use Edit to attach it, then Submit.` },
+          });
+          return;
+        }
         setError(draftRes.error || 'Failed to create request.');
         setIsSubmitting(false);
         return;
@@ -118,7 +129,9 @@ export const NewRequestPage: React.FC = () => {
       if (submitRes.success) {
         navigate(`/requests/${draftRes.id}`);
       } else {
-        setError(submitRes.error || 'Failed to submit request.');
+        navigate(`/requests/${draftRes.id}`, {
+          state: { notice: `Saved as a draft but not submitted: ${submitRes.error}` },
+        });
       }
     } finally {
       setIsSubmitting(false);
@@ -210,7 +223,7 @@ export const NewRequestPage: React.FC = () => {
               <div>
                 <span className="font-bold">High Value — Admin Approval Required</span>
                 <p className="mt-0.5 text-amber-800 leading-relaxed">
-                  Amounts above ₹10,000 must take Route A: they will be reviewed by your Department Head
+                  Amounts above {formatINRWhole(threshold)} must take Route A: they will be reviewed by your Department Head
                   and signed off by the Administrator with their official seal.
                 </p>
               </div>

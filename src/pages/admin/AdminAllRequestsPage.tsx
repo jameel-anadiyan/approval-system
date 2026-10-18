@@ -3,12 +3,13 @@ import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { formatINR, formatISTDate } from '../../lib/formatters';
-import { MOCK_DEPARTMENTS } from '../../lib/mockData';
+import { useDirectory } from '../../lib/directory';
 import { Search, Download, Filter, FileSpreadsheet, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const AdminAllRequestsPage: React.FC = () => {
   const { requests } = useRequests();
+  const { departments } = useDirectory();
   const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
@@ -108,7 +109,7 @@ export const AdminAllRequestsPage: React.FC = () => {
           className="px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
         >
           <option value="all">All Departments</option>
-          {MOCK_DEPARTMENTS.map((d) => (
+          {departments.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name} ({d.code})
             </option>

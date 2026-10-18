@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { FileText, Image as ImageIcon, ZoomIn, ZoomOut, Maximize2, Minimize2, ExternalLink } from 'lucide-react';
+import { FileText, Image as ImageIcon, ZoomIn, ZoomOut, Maximize2, Minimize2, Download, Loader2 } from 'lucide-react';
 import { RequestFile } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
+import { useAuth } from '../../context/AuthContext';
+import { useSignedUrl, downloadStoredFile } from '../../lib/files';
 
 interface DocumentViewerProps {
   files: RequestFile[];
@@ -9,11 +11,15 @@ interface DocumentViewerProps {
 }
 
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({ files, title = 'Document Viewer' }) => {
+  const { isBackendConnected } = useAuth();
   const [activeFileIndex, setActiveFileIndex] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const documentFiles = files.filter((f) => f.kind === 'document');
+  const activeFile = documentFiles[activeFileIndex] || documentFiles[0];
+  const signed = useSignedUrl('request-files', activeFile?.storage_path, isBackendConnected);
 
   if (documentFiles.length === 0) {
     return (
@@ -23,11 +29,21 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ files, title = '
     );
   }
 
-  const activeFile = documentFiles[activeFileIndex] || documentFiles[0];
+  const previewUrl = isBackendConnected ? signed.url : activeFile.public_url;
   const isPdf = activeFile.mime_type.includes('pdf') || activeFile.original_name.toLowerCase().endsWith('.pdf');
 
   const handleZoomIn = () => setZoomLevel((z) => Math.min(200, z + 25));
   const handleZoomOut = () => setZoomLevel((z) => Math.max(50, z - 25));
+
+  const handleDownload = async () => {
+    setDownloadError(null);
+    if (!isBackendConnected) {
+      setDownloadError('Sandbox mode: demo files are not stored, so there is nothing to download.');
+      return;
+    }
+    const res = await downloadStoredFile('request-files', activeFile.storage_path, activeFile.original_name);
+    if (!res.success) setDownloadError(res.error || 'Download failed');
+  };
 
   return (
     <div
@@ -77,6 +93,16 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ files, title = '
 
           <button
             type="button"
+            onClick={handleDownload}
+            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700"
+            title="Download original"
+            aria-label={`Download ${activeFile.original_name}`}
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
             onClick={() => setIsFullScreen(!isFullScreen)}
             className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700"
             title={isFullScreen ? 'Exit fullscreen' : 'Fullscreen'}
@@ -85,6 +111,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ files, title = '
           </button>
         </div>
       </div>
+
+      {downloadError && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-[11px] text-amber-800">{downloadError}</div>
+      )}
 
       {/* Multiple Files Tab Bar */}
       {documentFiles.length > 1 && (
@@ -118,15 +148,24 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ files, title = '
           style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'center center' }}
           className="transition-transform duration-150 max-w-full"
         >
-          {activeFile.public_url && !isPdf ? (
+          {isBackendConnected && signed.loading ? (
+            <div className="flex flex-col items-center gap-2 text-slate-400 text-xs">
+              <Loader2 className="w-6 h-6 animate-spin" />
+              <span>Loading document…</span>
+            </div>
+          ) : isBackendConnected && !previewUrl ? (
+            <div className="text-center text-xs text-slate-500 max-w-xs">
+              {signed.error || 'This document cannot be previewed.'}
+            </div>
+          ) : previewUrl && !isPdf ? (
             <img
-              src={activeFile.public_url}
+              src={previewUrl}
               alt={activeFile.original_name}
               className="max-h-[380px] max-w-full rounded-lg shadow-lg object-contain bg-white"
             />
-          ) : activeFile.public_url && isPdf ? (
+          ) : previewUrl && isPdf ? (
             <iframe
-              src={activeFile.public_url}
+              src={previewUrl}
               title={activeFile.original_name}
               className="w-[320px] sm:w-[500px] h-[380px] rounded-lg shadow-lg bg-white border border-slate-300"
             />

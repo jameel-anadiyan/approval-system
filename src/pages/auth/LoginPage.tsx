@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { AppRole } from '../../types/database';
 import { MOCK_USERS } from '../../lib/mockData';
@@ -12,6 +12,10 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  // Only allow returning to in-app verify links (no open redirects).
+  const from = (location.state as { from?: string } | null)?.from;
+  const returnTo = from && /^\/verify\/[\w-]*$/.test(from) ? from : '/';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +25,7 @@ export const LoginPage: React.FC = () => {
     try {
       const res = await login(username, password);
       if (res.success) {
-        navigate('/');
+        navigate(returnTo);
       } else {
         setError(res.error || 'Failed to sign in. Please verify your credentials.');
       }

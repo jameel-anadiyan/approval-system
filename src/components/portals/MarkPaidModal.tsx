@@ -12,6 +12,7 @@ interface MarkPaidModalProps {
     payment_mode?: string;
     payment_ref?: string;
     payment_remarks?: string;
+    payment_date?: string;
   }) => Promise<void>;
 }
 
@@ -22,6 +23,8 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   onMarkPaid,
 }) => {
   const [paymentMode, setPaymentMode] = useState('NEFT');
+  const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const [paymentDate, setPaymentDate] = useState(todayIST);
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentRemarks, setPaymentRemarks] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -34,6 +37,7 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
     try {
       await onMarkPaid({
         payment_mode: paymentMode,
+        payment_date: paymentDate || undefined,
         payment_ref: paymentRef.trim() || undefined,
         payment_remarks: paymentRemarks.trim() || undefined,
       });
@@ -96,6 +100,21 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Payment Date */}
+        <div>
+          <label htmlFor="payment-date" className="text-xs font-bold text-slate-700 block mb-1">
+            Payment Date
+          </label>
+          <input
+            id="payment-date"
+            type="date"
+            value={paymentDate}
+            max={todayIST}
+            onChange={(e) => setPaymentDate(e.target.value)}
+            className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-hidden"
+          />
         </div>
 
         {/* Payment Reference Number */}

@@ -1,7 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RequestRecord } from '../../types/database';
-import { formatINR, formatISTDate } from '../../lib/formatters';
+import { formatINR, formatINRWhole, formatISTDate } from '../../lib/formatters';
+import { useRequests } from '../../context/RequestContext';
 import { StatusBadge } from '../common/StatusBadge';
 import { ChevronRight, Paperclip, Mic, ShieldAlert } from 'lucide-react';
 
@@ -12,7 +13,8 @@ interface RequestCardProps {
 
 export const RequestCard: React.FC<RequestCardProps> = ({ request, showDepartment = true }) => {
   const navigate = useNavigate();
-  const isHighValue = request.amount > 10000;
+  const { threshold } = useRequests();
+  const isHighValue = request.amount > threshold;
 
   const docCount = request.files?.filter((f) => f.kind === 'document').length || 0;
   const hasVoiceNote = request.files?.some((f) => f.kind === 'voice_note');
@@ -42,7 +44,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request, showDepartmen
           {isHighValue && (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
               <ShieldAlert className="w-3 h-3 text-amber-600" />
-              Above ₹10k
+              Above {formatINRWhole(threshold)}
             </span>
           )}
         </div>

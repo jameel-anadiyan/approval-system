@@ -34,7 +34,7 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, []);
+  }, [url]);
 
   const togglePlay = () => {
     if (!audioRef.current && !url) {
