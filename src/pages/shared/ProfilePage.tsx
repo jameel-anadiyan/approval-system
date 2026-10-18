@@ -1,12 +1,49 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_LABELS, ROLE_BADGES, formatISTDate } from '../../lib/formatters';
-import { User, KeyRound, Building2, ShieldCheck, Check, LogOut, ShieldAlert } from 'lucide-react';
+import { User, KeyRound, Building2, ShieldCheck, Check, LogOut, ShieldAlert, MessageCircle, Send } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { setPhone, sendWhatsAppTest } from '../../lib/directory';
 
 export const ProfilePage: React.FC = () => {
-  const { user, role, updatePassword, logout } = useAuth();
+  const { user, role, updatePassword, logout, isBackendConnected, refreshProfile } = useAuth();
   const navigate = useNavigate();
+
+  const [phone, setPhoneInput] = useState(user?.phone ?? '');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneMsg, setPhoneMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const handleSavePhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setPhoneMsg(null);
+    setPhoneBusy(true);
+    try {
+      const res = await setPhone(isBackendConnected, user.id, phone.trim());
+      if (res.success) {
+        setPhoneInput(res.phone ?? '');
+        await refreshProfile();
+        setPhoneMsg({ text: res.phone ? `Saved. Alerts will go to ${res.phone}.` : 'WhatsApp alerts turned off.', type: 'success' });
+      } else {
+        setPhoneMsg({ text: res.error || 'Could not save number.', type: 'error' });
+      }
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setPhoneMsg(null);
+    setPhoneBusy(true);
+    try {
+      const res = await sendWhatsAppTest(user?.phone || phone.trim());
+      setPhoneMsg(res.success
+        ? { text: 'Test message sent. Check WhatsApp.', type: 'success' }
+        : { text: res.error || 'Test failed.', type: 'error' });
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -108,6 +145,70 @@ export const ProfilePage: React.FC = () => {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* WhatsApp Alerts Card */}
+      <div id="whatsapp" className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs">
+        <h3 className="text-sm font-bold text-slate-900 font-display flex items-center gap-2 mb-1">
+          <MessageCircle className="w-4 h-4 text-emerald-600" />
+          <span>WhatsApp Alerts</span>
+        </h3>
+        <p className="text-[11px] text-slate-500 mb-4 pb-2 border-b border-slate-100">
+          Get a WhatsApp message with a link whenever a request needs your action or is approved.
+        </p>
+
+        {phoneMsg && (
+          <div
+            className={`p-3 rounded-xl text-xs mb-4 flex items-start gap-2 ${
+              phoneMsg.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : 'bg-rose-50 text-rose-800 border border-rose-200'
+            }`}
+          >
+            {phoneMsg.type === 'success' ? (
+              <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : (
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            )}
+            <span>{phoneMsg.text}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSavePhone} className="flex flex-col sm:flex-row gap-2 max-w-md">
+          <input
+            id="profile-phone"
+            type="tel"
+            inputMode="tel"
+            value={phone}
+            onChange={(e) => setPhoneInput(e.target.value)}
+            placeholder="+919876543210"
+            className="flex-1 text-sm p-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
+          />
+          <button
+            id="profile-phone-save"
+            type="submit"
+            disabled={phoneBusy}
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all disabled:opacity-50"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Save</span>
+          </button>
+          {role === 'admin' && isBackendConnected && (
+            <button
+              id="profile-phone-test"
+              type="button"
+              onClick={handleTest}
+              disabled={phoneBusy || !(user?.phone || phone.trim())}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-semibold text-xs transition-colors disabled:opacity-50"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Send test</span>
+            </button>
+          )}
+        </form>
+        <p className="text-[10px] text-slate-400 mt-2">
+          Include country code. Leave empty and save to turn alerts off.
+        </p>
       </div>
 
       {/* Change Password Card */}

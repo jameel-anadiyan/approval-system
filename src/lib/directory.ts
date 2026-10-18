@@ -16,6 +16,7 @@ export interface NewUserInput {
   role: AppRole;
   department_id?: string | null;
   password?: string;
+  phone?: string;
 }
 
 export function useDirectory() {
@@ -78,7 +79,7 @@ export function useDirectory() {
     setUsers((prev) => [{
       id: `user-${Date.now()}`, username: input.username, full_name: input.full_name,
       designation: input.designation ?? null, role: input.role, department_id: input.department_id ?? null,
-      is_active: true, must_change_password: true, created_at: new Date().toISOString(),
+      is_active: true, must_change_password: true, phone: input.phone ?? null, created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(), department: dept,
     }, ...prev]);
     return { success: true };
@@ -144,5 +145,18 @@ export async function saveThreshold(live: boolean, value: number): Promise<Resul
     return { success: true };
   }
   const { error } = await supabase.rpc('update_setting', { p_key: 'high_value_threshold', p_value: value });
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
+/** Save a WhatsApp number (self, Admin for anyone, Head for own clerks/employees). Empty clears it. */
+export async function setPhone(live: boolean, userId: string, phone: string): Promise<Result & { phone?: string | null }> {
+  if (!live) return { success: true, phone: phone || null };
+  const { data, error } = await supabase.rpc('set_phone', { p_user_id: userId, p_phone: phone });
+  return error ? { success: false, error: error.message } : { success: true, phone: (data as string | null) ?? null };
+}
+
+/** Admin only: send a WhatsApp test message through Twilio. */
+export async function sendWhatsAppTest(phone: string): Promise<Result> {
+  const { error } = await invokeEdgeFunction('whatsapp-notify', { action: 'test', phone });
   return error ? { success: false, error: error.message } : { success: true };
 }

@@ -9,6 +9,19 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
 
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
 
+/** Optional WhatsApp number -> E.164 (bare 10-digit Indian mobiles get +91). */
+function normalizePhone(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  let p = v.replace(/[\s\-().]/g, "");
+  if (!p) return null;
+  if (/^[6-9][0-9]{9}$/.test(p)) p = `+91${p}`;
+  else if (/^91[6-9][0-9]{9}$/.test(p)) p = `+${p}`;
+  if (!/^\+[1-9][0-9]{7,14}$/.test(p)) {
+    throw new HttpError(400, "bad_request", "Phone must be in international format, e.g. +919876543210.");
+  }
+  return p;
+}
+
 function canManage(me: Profile, target: { role: Role; department_id: string | null }): boolean {
   if (me.role === "admin") return target.role === "head" || target.role === "disbursement";
   if (me.role === "head") {
@@ -40,6 +53,7 @@ Deno.serve(handle(async (req) => {
         ? body.designation.trim().slice(0, 100) : null;
       const role = body.role as Role;
       const password = validatePassword(body.password);
+      const phone = normalizePhone(body.phone);
       let department_id: string | null = null;
       if (me.role === "head") {
         department_id = me.department_id;
@@ -68,7 +82,7 @@ Deno.serve(handle(async (req) => {
       if (error || !created.user) throw new HttpError(400, "auth_error", error?.message ?? "Could not create the login.");
 
       const { error: pErr } = await admin.from("profiles").insert({
-        id: created.user.id, username, full_name, designation, role, department_id,
+        id: created.user.id, username, full_name, designation, role, department_id, phone,
         must_change_password: true, created_by: me.id,
       });
       if (pErr) {

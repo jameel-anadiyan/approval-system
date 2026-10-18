@@ -31,6 +31,8 @@ export interface Profile {
   username: string;
   full_name: string;
   designation: string | null;
+  /** WhatsApp number in E.164 (e.g. +919876543210) */
+  phone?: string | null;
   role: AppRole;
   department_id: string | null;
   is_active: boolean;
