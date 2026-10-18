@@ -16,7 +16,6 @@ interface UserModalProps {
     role: AppRole;
     department_id?: string | null;
     password?: string;
-    phone?: string;
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -36,7 +35,6 @@ export const UserModal: React.FC<UserModalProps> = ({
     user?.department_id || departments[0]?.id || ''
   );
   const [password, setPassword] = useState('');
-  const [phone, setPhone] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,14 +64,12 @@ export const UserModal: React.FC<UserModalProps> = ({
         role,
         department_id: isDepartmentRequired ? departmentId : null,
         password,
-        phone: phone.trim() || undefined,
       });
 
       if (res.success) {
         setUsername('');
         setFullName('');
         setDesignation('');
-        setPhone('');
         onClose();
       } else {
         setError(res.error || 'Failed to create user account.');
@@ -188,24 +184,6 @@ export const UserModal: React.FC<UserModalProps> = ({
             </select>
           </div>
         )}
-
-        <div>
-          <label className="text-xs font-bold text-slate-700 block mb-1">
-            WhatsApp Number
-          </label>
-          <input
-            id="user-modal-phone"
-            type="tel"
-            inputMode="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+919876543210"
-            className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-mono"
-          />
-          <span className="text-[10px] text-slate-400 mt-1 block">
-            Optional. Used for WhatsApp alerts on requests and approvals.
-          </span>
-        </div>
 
         <div>
           <label className="text-xs font-bold text-slate-700 block mb-1">
