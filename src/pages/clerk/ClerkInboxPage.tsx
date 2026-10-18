@@ -1,0 +1,102 @@
+import React, { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
+import { useRequests } from '../../context/RequestContext';
+import { RequestCard } from '../../components/requests/RequestCard';
+import { EmptyState } from '../../components/common/EmptyState';
+import { RouteModal } from '../../components/portals/RouteModal';
+import { ReturnModal } from '../../components/portals/ReturnModal';
+import { RequestRecord } from '../../types/database';
+import { Inbox, CheckCircle2, ShieldAlert } from 'lucide-react';
+
+export const ClerkInboxPage: React.FC = () => {
+  const { user } = useAuth();
+  const { requests, routeRequest, returnRequest } = useRequests();
+
+  const [activeRequest, setActiveRequest] = useState<RequestRecord | null>(null);
+  const [modalType, setModalType] = useState<'route' | 'return' | null>(null);
+
+  // Clerk inbox: requests in 'submitted' status in own department, sorted oldest first
+  const pendingRouting = requests
+    .filter(
+      (r) =>
+        r.status === 'submitted' &&
+        (!user?.department_id || r.department_id === user.department_id)
+    )
+    .sort((a, b) => new Date(a.submitted_at || a.created_at).getTime() - new Date(b.submitted_at || b.created_at).getTime());
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
+      <div>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display">
+            Clerk Routing Queue
+          </h1>
+          {pendingRouting.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-xs font-bold">
+              {pendingRouting.length} waiting
+            </span>
+          )}
+        </div>
+        <p className="text-xs sm:text-sm text-slate-500 mt-1">
+          Review newly submitted department vouchers (oldest first) and assign approval routes.
+        </p>
+      </div>
+
+      {/* ₹10,000 Rule Reminder Box */}
+      <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-4 flex items-start gap-3 text-xs text-indigo-950">
+        <ShieldAlert className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+        <div>
+          <span className="font-bold">Workflow Routing Rule:</span>
+          <p className="mt-0.5 text-indigo-800 leading-relaxed">
+            Requests <strong>above ₹10,000.00</strong> can only be routed to Route A (Admin). Requests{' '}
+            <strong>₹10,000.00 or less</strong> can be sent to either Route A or Route B (Department Head).
+          </p>
+        </div>
+      </div>
+
+      {/* Queue Content */}
+      {pendingRouting.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle2}
+          title="All Caught Up!"
+          description="There are currently no new department requests waiting for routing."
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {pendingRouting.map((req) => (
+            <RequestCard key={req.id} request={req} />
+          ))}
+        </div>
+      )}
+
+      {/* Modals */}
+      {modalType === 'route' && activeRequest && (
+        <RouteModal
+          isOpen={true}
+          onClose={() => {
+            setModalType(null);
+            setActiveRequest(null);
+          }}
+          request={activeRequest}
+          onRoute={async (rt, rm) => {
+            await routeRequest(activeRequest.id, rt, rm);
+          }}
+        />
+      )}
+
+      {modalType === 'return' && activeRequest && (
+        <ReturnModal
+          isOpen={true}
+          onClose={() => {
+            setModalType(null);
+            setActiveRequest(null);
+          }}
+          request={activeRequest}
+          onReturn={async (rm) => {
+            await returnRequest(activeRequest.id, rm);
+          }}
+        />
+      )}
+    </div>
+  );
+};
