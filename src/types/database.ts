@@ -101,6 +101,8 @@ export interface RequestFile {
   sha256: string | null;
   created_at: string;
   public_url?: string;
+  /** Client-only: the picked/recorded file awaiting upload to Storage */
+  blob?: Blob;
 }
 
 export interface SignedFile {

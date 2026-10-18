@@ -34,7 +34,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [departmentId, setDepartmentId] = useState<string>(
     user?.department_id || departments[0]?.id || ''
   );
-  const [password, setPassword] = useState('ChangeMe@123');
+  const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

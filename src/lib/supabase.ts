@@ -16,25 +16,37 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
   },
 });
 
+// Reachability check against the Auth health endpoint. (Table reads as anon are
+// rightly refused by RLS, so they can't be used to detect connectivity.)
 export async function checkSupabaseConnection(): Promise<{ connected: boolean; message?: string }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
-    const timeoutPromise = new Promise<{ connected: boolean; message: string }>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection timed out')), 3500)
-    );
-
-    const testPromise = (async () => {
-      const { error } = await supabase.from('departments').select('id').limit(1);
-      if (error) {
-        return { connected: false, message: error.message };
-      }
-      return { connected: true };
-    })();
-
-    return await Promise.race([testPromise, timeoutPromise]);
+    const res = await fetch(`${supabaseUrl}/auth/v1/health`, {
+      headers: { apikey: supabaseKey },
+      signal: ctrl.signal,
+    });
+    return res.ok ? { connected: true } : { connected: false, message: `HTTP ${res.status}` };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Unreachable';
-    return { connected: false, message: msg };
+    return { connected: false, message: err instanceof Error ? err.message : 'Unreachable' };
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/** Extracts a readable message from Edge Function errors (FunctionsHttpError carries the JSON body). */
+export async function functionErrorMessage(err: unknown): Promise<string> {
+  // deno-style { error: { message } } bodies from our Edge Functions
+  const ctx = (err as { context?: Response })?.context;
+  if (ctx && typeof ctx.json === 'function') {
+    try {
+      const body = await ctx.json();
+      if (body?.error?.message) return body.error.message;
+    } catch {
+      /* ignore */
+    }
+  }
+  return err instanceof Error ? err.message : String(err);
 }
 
 export async function invokeEdgeFunction<T = unknown>(
@@ -48,6 +60,6 @@ export async function invokeEdgeFunction<T = unknown>(
     if (error) throw error;
     return { data, error: null };
   } catch (err) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    return { data: null, error: new Error(await functionErrorMessage(err)) };
   }
 }

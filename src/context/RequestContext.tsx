@@ -38,20 +38,19 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const loadRequests = useCallback(async () => {
     setIsLoading(true);
     if (isBackendConnected) {
-      try {
-        const { data, error } = await supabase
-          .from('requests')
-          .select('*, department:departments(*), files:request_files(*), signed_files(*), actions:request_actions(*)')
-          .order('created_at', { ascending: false });
-
-        if (!error && data) {
-          setRequests(data as RequestRecord[]);
-          setIsLoading(false);
-          return;
-        }
-      } catch {
-        // fallback
+      if (!user) {
+        setRequests([]);
+        setIsLoading(false);
+        return;
       }
+      const { data, error } = await supabase
+        .from('requests')
+        .select('*, department:departments(*), files:request_files(*), signed_files(*), actions:request_actions(*)')
+        .order('created_at', { ascending: false });
+      // RLS decides what each role sees; never substitute demo data in live mode.
+      setRequests(!error && data ? (data as RequestRecord[]) : []);
+      setIsLoading(false);
+      return;
     }
 
     const saved = localStorage.getItem(LOCAL_STORAGE_REQ_KEY);
@@ -68,7 +67,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setRequests(MOCK_REQUESTS);
     localStorage.setItem(LOCAL_STORAGE_REQ_KEY, JSON.stringify(MOCK_REQUESTS));
     setIsLoading(false);
-  }, [isBackendConnected]);
+  }, [isBackendConnected, user?.id]);
 
   useEffect(() => {
     loadRequests();
@@ -97,15 +96,38 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isBackendConnected) {
       try {
         const { data: newId, error } = await supabase.rpc('create_draft', {
-          p_department_id: user.department_id,
           p_title: data.title,
           p_amount: data.amount,
           p_notes: data.notes || null,
         });
-
         if (error) throw error;
+        const requestId = newId as string;
+
+        // Upload straight to Storage (path must start with the request id), then register.
+        for (const f of data.files || []) {
+          if (!f.blob) continue;
+          const contentType = (f.mime_type || f.blob.type).split(';')[0];
+          const safe = f.original_name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
+          const path = `${requestId}/${crypto.randomUUID()}-${safe}`;
+          const { error: upErr } = await supabase.storage
+            .from('request-files')
+            .upload(path, f.blob, { contentType, upsert: false });
+          if (upErr) throw new Error(`Upload failed for ${f.original_name}: ${upErr.message}`);
+          const { error: regErr } = await supabase.rpc('register_file', {
+            p_request_id: requestId,
+            p_kind: f.kind,
+            p_storage_path: path,
+            p_original_name: f.original_name,
+            p_mime_type: contentType,
+            p_size_bytes: f.blob.size,
+            p_page_count: f.page_count,
+            p_duration_sec: f.duration_sec,
+          });
+          if (regErr) throw new Error(`Could not attach ${f.original_name}: ${regErr.message}`);
+        }
+
         await loadRequests();
-        return { success: true, id: newId };
+        return { success: true, id: requestId };
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
@@ -565,8 +587,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       try {
         const { error } = await supabase.rpc('mark_paid', {
           p_request_id: id,
-          p_mode: details.payment_mode || null,
-          p_ref: details.payment_ref || null,
+          p_payment_mode: details.payment_mode || null,
+          p_payment_ref: details.payment_ref || null,
           p_remarks: details.payment_remarks || null,
         });
         if (error) throw error;

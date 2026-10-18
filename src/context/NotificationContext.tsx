@@ -22,26 +22,18 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!user) return;
 
     if (isBackendConnected) {
-      try {
-        const { data, error } = await supabase
-          .from('notifications')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(30);
-
-        if (!error && data) {
-          setNotifications(data as AppNotification[]);
-          return;
-        }
-      } catch {
-        // fallback to mock
-      }
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      setNotifications(!error && data ? (data as AppNotification[]) : []);
+      return;
     }
 
-    // Filter mock notifications for current user or show relevant role notifications
-    const userNotifs = MOCK_NOTIFICATIONS.filter((n) => n.user_id === user.id);
-    setNotifications(userNotifs.length > 0 ? userNotifs : MOCK_NOTIFICATIONS.slice(0, 3));
+    // Sandbox: demo notifications for the current persona
+    setNotifications(MOCK_NOTIFICATIONS.filter((n) => n.user_id === user.id));
   }, [user, isBackendConnected]);
 
   useEffect(() => {

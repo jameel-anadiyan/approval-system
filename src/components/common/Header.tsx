@@ -68,8 +68,8 @@ export const Header: React.FC = () => {
           </Link>
         </div>
 
-        {/* Quick Role Switcher (Crucial for Pair Programming & testing all 5 roles) */}
-        <div className="hidden lg:flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200">
+        {/* Demo role switcher — offline sandbox only */}
+        <div className={`${isBackendConnected ? 'hidden' : 'hidden lg:flex'} items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200`}>
           <span className="text-xs font-semibold text-slate-400 px-2 uppercase tracking-wider">
             Switch Role:
           </span>
@@ -94,8 +94,8 @@ export const Header: React.FC = () => {
 
         {/* Actions & Profile */}
         <div className="flex items-center gap-2">
-          {/* Mobile Role Switcher Trigger */}
-          <div className="relative lg:hidden">
+          {/* Mobile demo role switcher — offline sandbox only */}
+          <div className={isBackendConnected ? 'hidden' : 'relative lg:hidden'}>
             <button
               type="button"
               onClick={() => setShowRoleSwitcher(!showRoleSwitcher)}

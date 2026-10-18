@@ -50,6 +50,7 @@ export const NewRequestPage: React.FC = () => {
       sha256: null,
       created_at: new Date().toISOString(),
       public_url: tempUrl,
+      blob: recorded.blob,
     });
   };
 

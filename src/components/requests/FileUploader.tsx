@@ -32,7 +32,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
       }
 
       // Validate allowed formats
-      const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+      const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
       if (!allowed.includes(file.type)) {
         alert(`Format ${file.type} is not supported. Please upload PDF, JPG, or PNG.`);
         return;
@@ -53,6 +53,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         sha256: null,
         created_at: new Date().toISOString(),
         public_url: tempUrl,
+        blob: file,
       });
     });
 

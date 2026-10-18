@@ -7,8 +7,8 @@ import { Lock, ArrowRight, ShieldCheck, Sparkles, AlertCircle } from 'lucide-rea
 
 export const LoginPage: React.FC = () => {
   const { login, isBackendConnected, switchMockRole } = useAuth();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('Admin@5005');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
@@ -114,7 +114,8 @@ export const LoginPage: React.FC = () => {
             </button>
           </form>
 
-          {/* Quick Demo Role Switcher for Pair-Programming & Instant Testing */}
+          {/* Demo personas: offline sandbox only — never shown against live Supabase */}
+          {!isBackendConnected && (
           <div className="mt-8 pt-6 border-t border-slate-700/60">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
@@ -147,6 +148,7 @@ export const LoginPage: React.FC = () => {
               ))}
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>
