@@ -15,6 +15,11 @@ export interface VerifyResult {
   department: string | null;
   requester_name: string;
   can_open: boolean;
+  request_type?: string | null;
+  shop_name?: string | null;
+  paid_amount: number;
+  balance: number;
+  payments: { amount: number; payment_date: string }[];
   files: { file_name: string; sha256: string; page_count: number; is_packet: boolean }[];
 }
 
@@ -59,6 +64,11 @@ export async function verifyApproval(
         department: r.department?.name ?? null,
         requester_name: r.requester_name,
         can_open: true,
+        request_type: r.request_type ?? null,
+        shop_name: r.shop_name ?? null,
+        paid_amount: Number(r.paid_amount ?? (r.status === 'paid' ? r.amount : 0)),
+        balance: Math.max(r.amount - Number(r.paid_amount ?? (r.status === 'paid' ? r.amount : 0)), 0),
+        payments: (r.payments || []).map((p) => ({ amount: Number(p.amount), payment_date: p.payment_date })),
         files: (r.signed_files || []).map((s) => ({
           file_name: s.file_name || 'packet.pdf',
           sha256: s.sha256,
@@ -74,5 +84,16 @@ export async function verifyApproval(
   if (error) return { result: null, error: error.message };
   if (!data) return { result: null };
   const d = data as VerifyResult;
-  return { result: { ...d, amount: Number(d.amount), files: d.files || [] } };
+  const amount = Number(d.amount);
+  const paid = Number(d.paid_amount ?? (d.status === 'paid' ? amount : 0));
+  return {
+    result: {
+      ...d,
+      amount,
+      paid_amount: paid,
+      balance: d.balance != null ? Number(d.balance) : Math.max(amount - paid, 0),
+      payments: (d.payments || []).map((p) => ({ amount: Number(p.amount), payment_date: p.payment_date })),
+      files: d.files || [],
+    },
+  };
 }

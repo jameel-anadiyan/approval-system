@@ -4,7 +4,7 @@ import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatINR, formatISTDate, ROLE_LABELS } from '../../lib/formatters';
 import { verifyApproval, VerifyResult } from '../../lib/verify';
-import { ShieldCheck, CheckCircle2, Search, Building2, Loader2, ShieldX, LogIn, ArrowRight } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, Search, Building2, Loader2, ShieldX, ArrowRight } from 'lucide-react';
 
 export const VerifyPage: React.FC = () => {
   const { token } = useParams<{ token?: string }>();
@@ -18,8 +18,7 @@ export const VerifyPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Verification is restricted to signed-in staff (RPC is authenticated-only).
-  const needsLogin = isBackendConnected && !authLoading && !user;
+  // Verification is public: anyone holding the QR token can view it (no sign-in).
 
   const run = useCallback(
     async (code: string) => {
@@ -36,9 +35,9 @@ export const VerifyPage: React.FC = () => {
   );
 
   useEffect(() => {
-    if (token && !needsLogin && !authLoading) run(token);
+    if (token && !authLoading) run(token);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, needsLogin, authLoading, isBackendConnected]);
+  }, [token, authLoading, isBackendConnected]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,21 +61,7 @@ export const VerifyPage: React.FC = () => {
           </p>
         </div>
 
-        {needsLogin ? (
-          <div className="bg-slate-800/80 rounded-2xl border border-slate-700 p-6 text-center space-y-3">
-            <LogIn className="w-8 h-8 text-emerald-400 mx-auto" />
-            <p className="text-sm text-slate-200 font-semibold">Sign in to verify this approval</p>
-            <p className="text-xs text-slate-400">Verification is available to staff accounts only.</p>
-            <button
-              type="button"
-              onClick={() => navigate('/login', { state: { from: `/verify/${token || ''}` } })}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs"
-            >
-              <span>Sign in</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ) : (
+        {(
           <>
             <form onSubmit={handleSearch} className="mb-6">
               <div className="relative">
@@ -132,17 +117,56 @@ export const VerifyPage: React.FC = () => {
                   <Row label="Approved at">
                     <span className="font-mono">{formatISTDate(result.decided_at)}</span>
                   </Row>
-                  <Row label="Payment">
+                  {result.shop_name && <Row label="Store">{result.shop_name}</Row>}
+                  <Row label="Payment status">
                     <span
                       className={`font-bold px-2 py-0.5 rounded-md ${
-                        result.status === 'paid'
+                        result.status === 'paid' || (result.balance <= 0 && result.paid_amount > 0)
                           ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                          : result.paid_amount > 0
+                          ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
                           : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                       }`}
                     >
-                      {result.status === 'paid' ? `Paid on ${formatISTDate(result.paid_at, false)}` : 'Not yet paid'}
+                      {result.status === 'paid' || (result.balance <= 0 && result.paid_amount > 0)
+                        ? `Paid in full${result.paid_at ? ` · ${formatISTDate(result.paid_at, false)}` : ''}`
+                        : result.paid_amount > 0
+                        ? 'Partially paid'
+                        : 'Not yet paid'}
                     </span>
                   </Row>
+                  {result.request_type !== 'discount' && (
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <div className="rounded-xl bg-slate-900/70 border border-slate-700 p-2.5 text-center min-w-0">
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wide">Approved</p>
+                        <p className="font-bold text-slate-100 text-xs sm:text-sm truncate">{formatINR(result.amount)}</p>
+                      </div>
+                      <div className="rounded-xl bg-teal-500/10 border border-teal-500/30 p-2.5 text-center min-w-0">
+                        <p className="text-[10px] text-teal-300 uppercase tracking-wide">Paid</p>
+                        <p className="font-bold text-teal-200 text-xs sm:text-sm truncate">{formatINR(result.paid_amount)}</p>
+                      </div>
+                      <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-2.5 text-center min-w-0">
+                        <p className="text-[10px] text-amber-300 uppercase tracking-wide">Balance</p>
+                        <p className="font-bold text-amber-200 text-xs sm:text-sm truncate">{formatINR(result.balance)}</p>
+                      </div>
+                    </div>
+                  )}
+                  {result.payments.length > 0 && (
+                    <div className="pt-1">
+                      <span className="text-slate-400 block mb-1.5">Payments ({result.payments.length})</span>
+                      <ul className="space-y-1">
+                        {result.payments.map((p, i) => (
+                          <li
+                            key={i}
+                            className="flex items-center justify-between bg-slate-900/60 border border-slate-700/70 rounded-lg px-3 py-1.5"
+                          >
+                            <span className="font-mono text-slate-300">{formatISTDate(p.payment_date, false)}</span>
+                            <span className="font-semibold text-teal-200">{formatINR(p.amount)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {packet && (
                     <div className="pt-2">
                       <span className="text-slate-400 block mb-1">
@@ -185,7 +209,7 @@ export const VerifyPage: React.FC = () => {
 
       <div className="text-center py-4 text-xs text-slate-500">
         <Link to="/" className="text-emerald-400 hover:text-emerald-300 font-semibold">
-          {user ? 'Back to portal' : 'Go to sign in'}
+          {user ? 'Back to portal' : 'SWA Diamonds staff sign in'}
         </Link>
       </div>
     </div>

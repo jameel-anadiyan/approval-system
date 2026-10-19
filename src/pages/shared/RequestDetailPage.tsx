@@ -21,6 +21,7 @@ import {
   ROLE_LABELS,
   typeOf,
 } from '../../lib/formatters';
+import { paymentSummary } from '../../types/database';
 import {
   ArrowLeft,
   Download,
@@ -109,6 +110,8 @@ export const RequestDetailPage: React.FC = () => {
   // Disbursement only ever sees the stamped output, never the originals (storage policy agrees).
   const showOriginals = role !== 'disbursement';
   const editable = isOwner && (request.status === 'draft' || request.status === 'returned');
+  const pay = paymentSummary(request);
+  const payments = request.payments || [];
 
   const copyApprovalNo = (no: string) => {
     navigator.clipboard.writeText(no);
@@ -309,23 +312,67 @@ export const RequestDetailPage: React.FC = () => {
           {/* Signed Approval Packet Card (when approved or paid) */}
           {(request.status === 'approved' || request.status === 'paid') && <SignedDocuments request={request} />}
 
-          {request.status === 'paid' && (
-            <div className="bg-white rounded-2xl border border-teal-200 p-5 shadow-xs text-xs grid grid-cols-2 gap-3">
-              <div className="col-span-2 flex items-center gap-2 font-bold text-teal-800 text-sm">
-                <Banknote className="w-4 h-4" /> Payment recorded
+          {rType !== 'discount' && (request.status === 'paid' || (request.status === 'approved' && pay.paid > 0)) && (
+            <div className="bg-white rounded-2xl border border-teal-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 font-bold text-teal-800 text-sm">
+                  <Banknote className="w-4 h-4" /> Payments
+                </div>
+                <span
+                  className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
+                    pay.balance > 0
+                      ? 'bg-sky-50 text-sky-700 border-sky-200'
+                      : 'bg-teal-50 text-teal-700 border-teal-200'
+                  }`}
+                >
+                  {pay.balance > 0 ? 'Partially paid' : 'Paid in full'}
+                </span>
               </div>
-              <div>
-                <span className="text-slate-400 block">Paid on</span>
-                <span className="font-semibold text-slate-800">{formatISTDate(request.paid_at)}</span>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-2.5 text-center min-w-0">
+                  <p className="text-[10px] text-slate-500 uppercase">Approved</p>
+                  <p className="font-bold text-slate-800 truncate">{formatINR(request.amount)}</p>
+                </div>
+                <div className="rounded-xl bg-teal-50 border border-teal-200 p-2.5 text-center min-w-0">
+                  <p className="text-[10px] text-teal-600 uppercase">Paid</p>
+                  <p className="font-bold text-teal-800 truncate">{formatINR(pay.paid)}</p>
+                </div>
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-center min-w-0">
+                  <p className="text-[10px] text-amber-600 uppercase">Balance</p>
+                  <p className="font-bold text-amber-800 truncate">{formatINR(pay.balance)}</p>
+                </div>
               </div>
-              <div>
-                <span className="text-slate-400 block">Mode</span>
-                <span className="font-semibold text-slate-800">{request.payment_mode || '—'}</span>
-              </div>
-              <div className="col-span-2">
-                <span className="text-slate-400 block">Reference</span>
-                <span className="font-mono font-semibold text-slate-800">{request.payment_ref || '—'}</span>
-              </div>
+              {payments.length > 0 ? (
+                <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl">
+                  {payments.map((p, i) => (
+                    <li key={p.id || i} className="p-2.5 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-800">
+                          #{i + 1} · {formatISTDate(p.payment_date, false)}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {[p.payment_mode, p.payment_ref, p.paid_by_name].filter(Boolean).join(' · ') || '—'}
+                        </p>
+                        {p.remarks && <p className="text-[11px] text-slate-500 italic break-words">{p.remarks}</p>}
+                      </div>
+                      <span className="font-bold text-teal-700 shrink-0">{formatINR(p.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-slate-400 block">Paid on</span>
+                    <span className="font-semibold text-slate-800">{formatISTDate(request.paid_at)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">Mode / Ref</span>
+                    <span className="font-semibold text-slate-800 break-all">
+                      {[request.payment_mode, request.payment_ref].filter(Boolean).join(' · ') || '—'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -539,7 +586,7 @@ export const RequestDetailPage: React.FC = () => {
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs shadow-md hover:bg-teal-700"
               >
                 <Banknote className="w-4 h-4" />
-                <span>Mark as Paid</span>
+                <span>{pay.paid > 0 ? `Pay Balance ${formatINR(pay.balance)}` : 'Record Payment'}</span>
               </button>
             )}
           </div>
@@ -603,7 +650,14 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onMarkPaid={(dt) => orThrow(markAsPaid(request.id, dt), 'Marked as paid.')}
+          onMarkPaid={async (dt) => {
+            const res = await markAsPaid(request.id, dt);
+            if (!res.success) throw new Error(res.error || 'Action failed');
+            setBanner({
+              ok: true,
+              text: res.fully_paid ? 'Paid in full.' : 'Partial payment recorded. Balance is still pending.',
+            });
+          }}
         />
       )}
     </div>

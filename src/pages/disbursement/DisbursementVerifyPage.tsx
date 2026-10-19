@@ -92,6 +92,15 @@ export const DisbursementVerifyPage: React.FC = () => {
               </span>
             </div>
           )}
+          {result.status === 'approved' && result.paid_amount > 0 && (
+            <div className="p-3 rounded-xl bg-sky-50 border border-sky-300 text-xs text-sky-900 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                <strong>Partially paid:</strong> {formatINR(result.paid_amount)} paid, balance{' '}
+                <strong>{formatINR(result.balance)}</strong> due. Pay only the balance.
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 text-xs pt-3 border-t border-emerald-200">
             <div className="col-span-2">
@@ -101,6 +110,11 @@ export const DisbursementVerifyPage: React.FC = () => {
             <div>
               <span className="text-slate-500 block">Amount</span>
               <span className="font-extrabold text-slate-900 text-base font-display block">{formatINR(result.amount)}</span>
+              {result.paid_amount > 0 && (
+                <span className="text-[11px] text-slate-500 block">
+                  Paid {formatINR(result.paid_amount)} · Balance {formatINR(result.balance)}
+                </span>
+              )}
             </div>
             <div>
               <span className="text-slate-500 block">Requester</span>
@@ -145,7 +159,7 @@ export const DisbursementVerifyPage: React.FC = () => {
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs"
                 >
                   <Banknote className="w-4 h-4" />
-                  <span>Go to Mark as Paid</span>
+                  <span>{result.paid_amount > 0 ? 'Go to Pay Balance' : 'Go to Record Payment'}</span>
                 </button>
               )}
             </div>

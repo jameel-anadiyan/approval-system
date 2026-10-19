@@ -4,7 +4,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { TypeBadge } from '../../components/common/StatusBadge';
 import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
-import { RequestRecord } from '../../types/database';
+import { RequestRecord, paymentSummary } from '../../types/database';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import { Banknote, Clock, CheckCircle, ShieldCheck, Download } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -47,9 +47,11 @@ export const DisbursementPage: React.FC = () => {
     sort: activeTab === 'awaiting' ? 'oldest' : 'newest',
   });
   const search = filters.q;
+  const partialCount = awaitingQueue.filter((r) => paymentSummary(r).partial).length;
+  const awaitingBalance = awaitingQueue.reduce((s, r) => s + paymentSummary(r).balance, 0);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
+    <div className="max-w-5xl mx-auto px-1 sm:px-4 py-4 sm:py-8 space-y-6 pb-24">
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -78,8 +80,22 @@ export const DisbursementPage: React.FC = () => {
         <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-800">{notice}</div>
       )}
 
+      {awaitingQueue.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-2xl bg-white border border-slate-200 p-4">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Balance to pay</span>
+            <span className="text-lg sm:text-xl font-extrabold font-display text-slate-900">{formatINR(awaitingBalance)}</span>
+          </div>
+          <div className="rounded-2xl bg-white border border-amber-200 p-4">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">Partially paid</span>
+            <span className="text-lg sm:text-xl font-extrabold font-display text-amber-800">{partialCount}</span>
+            <span className="text-[11px] text-slate-500"> of {awaitingQueue.length} awaiting</span>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto scrollbar-none">
         <button
           type="button"
           onClick={() => setActiveTab('awaiting')}
@@ -138,20 +154,27 @@ export const DisbursementPage: React.FC = () => {
         />
       ) : (
         <div className="space-y-3">
-          {filtered.map((req) => (
+          {filtered.map((req) => {
+            const pay = paymentSummary(req);
+            return (
             <div
               key={req.id}
               className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs hover:border-teal-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
             >
               <div
                 onClick={() => navigate(`/requests/${req.id}`)}
-                className="cursor-pointer flex-1"
+                className="cursor-pointer flex-1 min-w-0"
               >
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <span className="font-mono text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-md">
                     {req.approval_no || req.request_no}
                   </span>
                   <TypeBadge type={typeOf(req)} />
+                  {pay.partial && (
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                      Partially paid
+                    </span>
+                  )}
                   <span className="text-xs text-slate-500">
                     Dept: <strong>{req.department?.code}</strong>
                   </span>
@@ -161,15 +184,15 @@ export const DisbursementPage: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <h3 className="font-bold text-slate-900 text-sm sm:text-base hover:text-teal-600 transition-colors">
+                <h3 className="font-bold text-slate-900 text-sm sm:text-base hover:text-teal-600 transition-colors break-words">
                   {req.title}
                 </h3>
                 <div className="text-xs text-slate-500 mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap">
                   <span>Beneficiary: <strong>{req.requester_name}</strong></span>
                   <span>Approved: {formatISTDate(req.decided_at, false)}</span>
-                  {req.payment_mode && (
+                  {(req.payments?.length ?? 0) > 0 && (
                     <span className="font-semibold text-teal-700">
-                      Paid via {req.payment_mode} (Ref: {req.payment_ref || 'N/A'})
+                      {req.payments!.length} payment{req.payments!.length === 1 ? '' : 's'} · last {formatISTDate(req.payments![req.payments!.length - 1].payment_date, false)}
                     </span>
                   )}
                 </div>
@@ -177,12 +200,24 @@ export const DisbursementPage: React.FC = () => {
 
               <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-3 sm:pt-0 border-t sm:border-0 border-slate-100">
                 <div className="text-left sm:text-right">
-                  <span className="text-[10px] font-semibold uppercase text-slate-400 block">
-                    Settlement Amount
-                  </span>
-                  <span className="font-display font-extrabold text-base sm:text-lg text-slate-900">
-                    {formatINR(req.amount)}
-                  </span>
+                  {req.status === 'approved' && pay.paid > 0 ? (
+                    <>
+                      <span className="text-[10px] font-semibold uppercase text-amber-700 block">Balance</span>
+                      <span className="font-display font-extrabold text-base sm:text-lg text-amber-800">{formatINR(pay.balance)}</span>
+                      <span className="text-[11px] text-slate-500 block">
+                        Paid {formatINR(pay.paid)} of {formatINR(req.amount)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[10px] font-semibold uppercase text-slate-400 block">
+                        {req.status === 'paid' ? 'Paid in full' : 'Amount to pay'}
+                      </span>
+                      <span className="font-display font-extrabold text-base sm:text-lg text-slate-900">
+                        {formatINR(req.amount)}
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 {req.status === 'approved' ? (
@@ -192,7 +227,7 @@ export const DisbursementPage: React.FC = () => {
                     className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-md shadow-teal-200 transition-all active:scale-95"
                   >
                     <Banknote className="w-4 h-4" />
-                    <span>Mark as Paid</span>
+                    <span>{pay.paid > 0 ? 'Pay Balance' : 'Record Payment'}</span>
                   </button>
                 ) : (
                   <button
@@ -206,7 +241,8 @@ export const DisbursementPage: React.FC = () => {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -217,7 +253,8 @@ export const DisbursementPage: React.FC = () => {
           request={payTarget}
           onMarkPaid={async (dt) => {
             const res = await markAsPaid(payTarget.id, dt);
-            if (!res.success) throw new Error(res.error || 'Could not mark as paid');
+            if (!res.success) throw new Error(res.error || 'Could not record payment');
+            setNotice(res.fully_paid ? 'Paid in full — request closed.' : 'Partial payment recorded. Balance stays in Awaiting Payment.');
           }}
         />
       )}

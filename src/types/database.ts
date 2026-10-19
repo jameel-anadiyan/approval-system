@@ -153,6 +153,29 @@ export interface RequestRecord {
   files?: RequestFile[];
   signed_files?: SignedFile[];
   actions?: RequestAction[];
+  /** Total disbursed so far (partial payments add up until it equals amount) */
+  paid_amount?: number;
+  payments?: RequestPayment[];
+}
+
+export interface RequestPayment {
+  id: string;
+  request_id: string;
+  amount: number;
+  payment_date: string;
+  payment_mode: string | null;
+  payment_ref: string | null;
+  remarks: string | null;
+  paid_by: string | null;
+  paid_by_name: string | null;
+  created_at: string;
+}
+
+/** Paid so far, balance left, and whether some (but not all) has been paid. */
+export function paymentSummary(r: Pick<RequestRecord, 'amount' | 'paid_amount' | 'status'>) {
+  const paid = r.status === 'paid' ? Math.max(Number(r.paid_amount ?? 0), Number(r.amount)) : Number(r.paid_amount ?? 0);
+  const balance = Math.max(0, Math.round((Number(r.amount) - paid) * 100) / 100);
+  return { paid, balance, partial: paid > 0 && balance > 0 };
 }
 
 export interface RequestFile {

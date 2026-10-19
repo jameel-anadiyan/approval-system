@@ -30,6 +30,14 @@ export interface DraftInput {
   files?: RequestFile[];
 }
 
+export interface PaymentInput {
+  amount?: number;
+  payment_mode?: string;
+  payment_ref?: string;
+  payment_remarks?: string;
+  payment_date?: string;
+}
+
 interface RequestContextType {
   requests: RequestRecord[];
   isLoading: boolean;
@@ -54,7 +62,8 @@ interface RequestContextType {
     voice?: ActionVoice | null,
     opts?: { reload?: boolean }
   ) => Promise<{ success: boolean; approval_no?: string; error?: string }>;
-  markAsPaid: (id: string, details: { payment_mode?: string; payment_ref?: string; payment_remarks?: string; payment_date?: string }) => Promise<{ success: boolean; error?: string }>;
+  /** Records a payment. `amount` omitted = pay the whole remaining balance. */
+  markAsPaid: (id: string, details: PaymentInput) => Promise<{ success: boolean; error?: string; fully_paid?: boolean }>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -68,6 +77,10 @@ const normalize = (rows: RequestRecord[]) =>
   rows.map((r) => ({
     ...r,
     amount: Number(r.amount),
+    paid_amount: Number(r.paid_amount ?? 0),
+    payments: [...(r.payments || [])]
+      .map((p) => ({ ...p, amount: Number(p.amount) }))
+      .sort((a, b) => a.payment_date.localeCompare(b.payment_date) || a.created_at.localeCompare(b.created_at)),
     actions: [...(r.actions || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     files: [...(r.files || [])].sort(
       (a, b) =>
@@ -92,7 +105,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       const { data, error } = await supabase
         .from('requests')
-        .select('*, department:departments(*), files:request_files(*), signed_files(*), actions:request_actions(*)')
+        .select('*, department:departments(*), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)')
         .order('created_at', { ascending: false });
       // RLS decides what each role sees; never substitute demo data in live mode.
       setRequests(!error && data ? normalize(data as RequestRecord[]) : []);
@@ -778,14 +791,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const markAsPaid = async (
     id: string,
-    details: { payment_mode?: string; payment_ref?: string; payment_remarks?: string; payment_date?: string }
-  ): Promise<{ success: boolean; error?: string }> => {
+    details: PaymentInput
+  ): Promise<{ success: boolean; error?: string; fully_paid?: boolean }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
     if (isBackendConnected) {
       try {
-        const { error } = await supabase.rpc('mark_paid', {
+        const { data, error } = await supabase.rpc('add_payment', {
           p_request_id: id,
+          p_amount: details.amount ?? null,
           p_payment_date: details.payment_date || null,
           p_payment_mode: details.payment_mode || null,
           p_payment_ref: details.payment_ref || null,
@@ -793,15 +807,25 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         if (error) throw error;
         await loadRequests();
-        return { success: true };
+        return { success: true, fully_paid: !!(data as { fully_paid?: boolean } | null)?.fully_paid };
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     }
 
+    // Offline sandbox mirrors the add_payment rules
     const current = getRequestById(id);
     if (!current) return { success: false, error: 'Request not found' };
-    if (current.status === 'paid') return { success: false, error: 'This request has already been marked as paid.' };
+    if (current.status === 'paid') return { success: false, error: 'This request is already fully paid.' };
+    const already = Number(current.paid_amount ?? 0);
+    const balance = Math.round((current.amount - already) * 100) / 100;
+    const amt = Math.round((details.amount ?? balance) * 100) / 100;
+    if (amt <= 0) return { success: false, error: 'Payment amount must be more than zero.' };
+    if (amt > balance) return { success: false, error: `Payment is more than the balance of ₹${balance.toFixed(2)}.` };
+    const paid = already + amt;
+    const full = paid >= current.amount;
+    const now = new Date().toISOString();
+    const date = details.payment_date || now.slice(0, 10);
 
     const action: RequestAction = {
       id: `act-${Date.now()}`,
@@ -809,12 +833,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       actor_id: user.id,
       actor_name: user.full_name,
       actor_role: user.role,
-      action: 'paid',
+      action: full ? 'paid' : 'partial_payment',
       from_status: current.status,
-      to_status: 'paid',
-      remarks: `Paid via ${details.payment_mode || 'Direct Transfer'}. Ref: ${details.payment_ref || 'N/A'}. ${details.payment_remarks || ''}`,
+      to_status: full ? 'paid' : current.status,
+      remarks: full
+        ? `Paid via ${details.payment_mode || 'Direct Transfer'}. Ref: ${details.payment_ref || 'N/A'}. ${details.payment_remarks || ''}`
+        : `Paid ₹${amt.toFixed(2)} · balance ₹${(current.amount - paid).toFixed(2)}`,
       visible_to_requester: true,
-      created_at: new Date().toISOString(),
+      created_at: now,
     };
 
     updateLocalRequests((prev) =>
@@ -822,20 +848,29 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         r.id === id
           ? {
               ...r,
-              status: 'paid',
-              paid_by: user.id,
-              paid_at: new Date().toISOString(),
-              payment_mode: details.payment_mode || 'NEFT',
-              payment_ref: details.payment_ref || null,
-              payment_remarks: details.payment_remarks || null,
-              updated_at: new Date().toISOString(),
+              status: full ? 'paid' : r.status,
+              paid_amount: paid,
+              paid_by: full ? user.id : r.paid_by,
+              paid_at: full ? now : r.paid_at,
+              payment_mode: full ? details.payment_mode || 'NEFT' : r.payment_mode,
+              payment_ref: full ? details.payment_ref || null : r.payment_ref,
+              payment_remarks: full ? details.payment_remarks || null : r.payment_remarks,
+              updated_at: now,
+              payments: [
+                ...(r.payments || []),
+                {
+                  id: `pay-${Date.now()}`, request_id: id, amount: amt, payment_date: date,
+                  payment_mode: details.payment_mode || null, payment_ref: details.payment_ref || null,
+                  remarks: details.payment_remarks || null, paid_by: user.id, paid_by_name: user.full_name, created_at: now,
+                },
+              ],
               actions: [action, ...(r.actions || [])],
             }
           : r
       )
     );
 
-    return { success: true };
+    return { success: true, fully_paid: full };
   };
 
   return (

@@ -202,7 +202,8 @@ export const ACTION_LABELS: Record<string, string> = {
   rejected: 'Rejected',
   withdrawn: 'Withdrawn',
   approved: 'Approved & Signed',
-  paid: 'Payment Disbursed',
+  paid: 'Payment Disbursed (Paid in full)',
+  partial_payment: 'Partial payment recorded',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition'];
