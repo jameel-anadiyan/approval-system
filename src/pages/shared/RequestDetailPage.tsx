@@ -45,6 +45,7 @@ import {
   Loader2,
   Store,
   Users,
+  AlertCircle,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -107,6 +108,33 @@ export const RequestDetailPage: React.FC = () => {
   }
 
   const isOwner = user?.id === request.requester_id;
+  const isOwningHead = role === 'head' && !!user?.department_id && user.department_id === request.department_id;
+  const isConsultedHead = role === 'head' && !isOwningHead;
+
+  // Inter-department consultations status & blocking rules:
+  // If any consultation is pending or disagreed, forwarding to Admin and Approval are blocked!
+  const consultations = request.consultations || [];
+  const pendingConsultations = consultations.filter((c) => c.status === 'pending');
+  const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
+  const hasPendingConsultations = pendingConsultations.length > 0;
+  const hasDisagreedConsultations = disagreedConsultations.length > 0;
+  const isConsultationBlocked = hasPendingConsultations || hasDisagreedConsultations;
+
+  let consultationBlockReason = '';
+  if (hasPendingConsultations && hasDisagreedConsultations) {
+    consultationBlockReason = `Approval & Forwarding blocked: Awaiting review response from ${pendingConsultations.map((c) => c.head_name).join(', ')}, and disagreed by ${disagreedConsultations.map((c) => c.head_name).join(', ')}.`;
+  } else if (hasPendingConsultations) {
+    consultationBlockReason = `Approval & Forwarding blocked: Awaiting review response from ${pendingConsultations.map((c) => c.head_name).join(', ')}.`;
+  } else if (hasDisagreedConsultations) {
+    consultationBlockReason = `Approval & Forwarding blocked: One or more consulted department heads (${disagreedConsultations.map((c) => c.head_name).join(', ')}) disagreed with this request.`;
+  }
+
+  const isFinalized = ['approved', 'rejected', 'paid', 'withdrawn'].includes(request.status);
+  const canRequestConsultation =
+    (isOwningHead || role === 'admin') &&
+    request.status !== 'draft' &&
+    !isFinalized;
+
   const rType = typeOf(request);
   const isHighValue = rType === 'general' && request.amount > threshold;
   const amountLabel =
@@ -203,7 +231,7 @@ export const RequestDetailPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          {(role === 'head' || role === 'admin') && request.status !== 'draft' && request.status !== 'withdrawn' && (
+          {canRequestConsultation && (
             <button
               type="button"
               id="request-other-head-header-btn"
@@ -328,10 +356,12 @@ export const RequestDetailPage: React.FC = () => {
             <HeadConsultationsSection
               consultations={request.consultations}
               requestId={request.id}
+              canRequestMore={canRequestConsultation}
+              requestStatus={request.status}
               onRequestMore={() => setModalState('consult')}
             />
           ) : (
-            (role === 'head' || role === 'admin') && request.status !== 'draft' && request.status !== 'withdrawn' && (
+            canRequestConsultation && (
               <div className="bg-white rounded-2xl border border-purple-200/90 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 border border-purple-200 flex items-center justify-center shrink-0">
@@ -478,8 +508,8 @@ export const RequestDetailPage: React.FC = () => {
           </div>
 
           <div className="action-bar-buttons flex items-center gap-2 flex-wrap w-full sm:w-auto justify-end">
-            {/* Universal Request Other Head button for Heads & Admin */}
-            {(role === 'head' || role === 'admin') && request.status !== 'draft' && request.status !== 'withdrawn' && (
+            {/* Universal Request Other Head button for Owning Head & Admin (Only 1 button in bottom bar) */}
+            {canRequestConsultation && (
               <button
                 type="button"
                 id="request-other-head-bar-btn"
@@ -489,6 +519,27 @@ export const RequestDetailPage: React.FC = () => {
                 <Users className="w-3.5 h-3.5 text-purple-600" />
                 <span>Request Other Head</span>
               </button>
+            )}
+
+            {/* Warning when inter-department consultation blocks Forwarding or Approval */}
+            {isConsultationBlocked && (isOwningHead || role === 'admin') && (
+              <div
+                role="status"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-semibold max-w-md"
+              >
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{consultationBlockReason}</span>
+              </div>
+            )}
+
+            {/* Informative notice for consulted inter-head */}
+            {isConsultedHead && (
+              <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 text-xs font-semibold">
+                <Users className="w-4 h-4 text-purple-600 shrink-0" />
+                <span>
+                  Inter-Department Reviewer · Please submit your Agree / Disagree response in the review section above
+                </span>
+              </div>
             )}
 
             {/* Requester Actions on Draft or Returned */}
@@ -582,22 +633,13 @@ export const RequestDetailPage: React.FC = () => {
               </>
             )}
 
-            {/* Head Actions (Route A review vs Route B approval) */}
-            {role === 'head' && request.status === 'pending_head_review' && (
+            {/* Head Actions (Route A review) - ONLY for the original owning department head */}
+            {isOwningHead && request.status === 'pending_head_review' && (
               <>
                 <button
                   type="button"
-                  onClick={() => setModalState('consult')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 font-semibold text-xs hover:bg-purple-100"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Consult Other Heads…</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setModalState('reject')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100 cursor-pointer"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   <span>Reject</span>
@@ -606,7 +648,7 @@ export const RequestDetailPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setModalState('return')}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-amber-200 text-amber-800 bg-amber-50 font-semibold text-xs hover:bg-amber-100"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-amber-200 text-amber-800 bg-amber-50 font-semibold text-xs hover:bg-amber-100 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Return for Correction</span>
@@ -614,8 +656,14 @@ export const RequestDetailPage: React.FC = () => {
 
                 <button
                   type="button"
+                  disabled={isConsultationBlocked}
                   onClick={() => setModalState('forward')}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-xs shadow-md hover:bg-indigo-700"
+                  title={isConsultationBlocked ? consultationBlockReason : undefined}
+                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+                    isConsultationBlocked
+                      ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer shadow-indigo-200'
+                  }`}
                 >
                   <CornerDownRight className="w-3.5 h-3.5" />
                   <span>Forward to Admin…</span>
@@ -623,21 +671,13 @@ export const RequestDetailPage: React.FC = () => {
               </>
             )}
 
-            {role === 'head' && (request.status === 'pending_head_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
+            {/* Head Actions (Route B approval) - ONLY for the original owning department head */}
+            {isOwningHead && (request.status === 'pending_head_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
               <>
                 <button
                   type="button"
-                  onClick={() => setModalState('consult')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 font-semibold text-xs hover:bg-purple-100"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Consult Other Heads…</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setModalState('return')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Return</span>
@@ -646,7 +686,7 @@ export const RequestDetailPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setModalState('reject')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100 cursor-pointer"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   <span>Reject</span>
@@ -654,8 +694,14 @@ export const RequestDetailPage: React.FC = () => {
 
                 <button
                   type="button"
+                  disabled={isConsultationBlocked}
                   onClick={() => setModalState('approve')}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-semibold text-xs shadow-md hover:bg-emerald-700"
+                  title={isConsultationBlocked ? consultationBlockReason : undefined}
+                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+                    isConsultationBlocked
+                      ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-emerald-200'
+                  }`}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Approve & Sign</span>
@@ -668,17 +714,8 @@ export const RequestDetailPage: React.FC = () => {
               <>
                 <button
                   type="button"
-                  onClick={() => setModalState('consult')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 font-semibold text-xs hover:bg-purple-100"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Consult Heads…</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setModalState('return')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Return</span>
@@ -687,7 +724,7 @@ export const RequestDetailPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setModalState('reject')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100 cursor-pointer"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   <span>Reject</span>
@@ -695,8 +732,14 @@ export const RequestDetailPage: React.FC = () => {
 
                 <button
                   type="button"
+                  disabled={isConsultationBlocked}
                   onClick={() => setModalState('approve')}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-semibold text-xs shadow-md hover:bg-emerald-700"
+                  title={isConsultationBlocked ? consultationBlockReason : undefined}
+                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+                    isConsultationBlocked
+                      ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-emerald-200'
+                  }`}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Approve & Digital Sign</span>

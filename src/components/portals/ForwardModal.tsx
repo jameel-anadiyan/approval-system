@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord } from '../../types/database';
-import { CornerDownRight } from 'lucide-react';
+import { CornerDownRight, AlertTriangle } from 'lucide-react';
 import type { ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 
@@ -23,8 +23,14 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const consultations = request.consultations || [];
+  const pendingConsultations = consultations.filter((c) => c.status === 'pending');
+  const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
+  const isConsultationBlocked = pendingConsultations.length > 0 || disagreedConsultations.length > 0;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isConsultationBlocked) return;
     setIsSubmitting(true);
     setError(null);
     try {
@@ -47,10 +53,27 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 leading-relaxed">
-          As Department Head, you are confirming that you have reviewed the request details, verified
-          the invoices, and recommend it for final Admin sign-off.
-        </div>
+        {isConsultationBlocked ? (
+          <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">Inter-department consultation in progress:</span>
+              <p className="mt-0.5">
+                {pendingConsultations.length > 0 && disagreedConsultations.length > 0
+                  ? 'Awaiting response from pending heads and received disagreement.'
+                  : pendingConsultations.length > 0
+                  ? `Waiting for review response from ${pendingConsultations.map((c) => c.head_name).join(', ')}.`
+                  : `Disagreed by ${disagreedConsultations.map((c) => c.head_name).join(', ')}.`}
+                {' '}Cannot forward to Admin until all consulted heads agree.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 leading-relaxed">
+            As Department Head, you are confirming that you have reviewed the request details, verified
+            the invoices, and recommend it for final Admin sign-off.
+          </div>
+        )}
 
         <div>
           <label className="text-xs font-bold text-slate-700 block mb-1">
@@ -81,8 +104,12 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
           </button>
           <button
             type="submit"
-            disabled={isSubmitting}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-md shadow-indigo-200 transition-all disabled:opacity-50"
+            disabled={isSubmitting || isConsultationBlocked}
+            className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+              isConsultationBlocked
+                ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200'
+            }`}
           >
             <CornerDownRight className="w-3.5 h-3.5" />
             <span>Forward to Admin</span>

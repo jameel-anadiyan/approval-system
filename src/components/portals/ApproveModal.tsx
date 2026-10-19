@@ -51,6 +51,11 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
 
   const missingCreds = isBackendConnected && !credsLoading && !!creds && (!creds.seal_url || !creds.signature_url);
 
+  const consultations = request.consultations || [];
+  const pendingConsultations = consultations.filter((c) => c.status === 'pending');
+  const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
+  const isConsultationBlocked = pendingConsultations.length > 0 || disagreedConsultations.length > 0;
+
   const [voice, setVoice] = useState<ActionVoice | null>(null);
   const rType = typeOf(request);
   const hasForm = rType !== 'general';
@@ -58,6 +63,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
   const documentPagesCount = hasForm ? uploadedPages : uploadedPages || 1;
 
   const handleStartApproval = async () => {
+    if (isConsultationBlocked) return;
     setStep('signing');
     setSigningProgress(15);
     setSigningMessage('Verifying credentials & acquiring lock…');
@@ -227,6 +233,23 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
               </div>
             </div>
 
+            {isConsultationBlocked && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-[11px] text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Inter-department consultation in progress:</span>
+                  <p className="mt-0.5">
+                    {pendingConsultations.length > 0 && disagreedConsultations.length > 0
+                      ? 'Awaiting response from pending heads and received disagreement.'
+                      : pendingConsultations.length > 0
+                      ? `Waiting for review from ${pendingConsultations.map((c) => c.head_name).join(', ')}.`
+                      : `Disagreed by ${disagreedConsultations.map((c) => c.head_name).join(', ')}.`}
+                    {' '}Cannot approve until all consulted heads agree.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {missingCreds && (
               <div className="mt-3 p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-800 flex items-start gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -257,7 +280,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             <button
               type="button"
               onClick={handleStartApproval}
-              disabled={isBackendConnected && (credsLoading || missingCreds)}
+              disabled={isConsultationBlocked || (isBackendConnected && (credsLoading || missingCreds))}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
