@@ -551,7 +551,7 @@ export const RequestDetailPage: React.FC = () => {
               </>
             )}
 
-            {role === 'head' && request.status === 'pending_head_approval' && (
+            {role === 'head' && (request.status === 'pending_head_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
               <>
                 <button
                   type="button"
@@ -583,7 +583,7 @@ export const RequestDetailPage: React.FC = () => {
             )}
 
             {/* Admin Actions */}
-            {role === 'admin' && request.status === 'pending_admin_approval' && (
+            {role === 'admin' && (request.status === 'pending_admin_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
               <>
                 <button
                   type="button"

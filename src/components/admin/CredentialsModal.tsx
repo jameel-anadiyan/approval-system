@@ -10,6 +10,41 @@ interface CredentialsModalProps {
   onSaveCredentials: (data: { sealFile?: File; signatureFile?: File }) => Promise<void>;
 }
 
+function optimizeImage(file: File, maxDim = 400): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width <= maxDim && height <= maxDim) {
+        resolve(file);
+        return;
+      }
+      const scale = Math.min(maxDim / width, maxDim / height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          resolve(file);
+          return;
+        }
+        resolve(new File([blob], file.name.replace(/\.[^.]+$/, '') + '.png', { type: 'image/png' }));
+      }, 'image/png');
+    };
+    img.onerror = () => resolve(file);
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 export const CredentialsModal: React.FC<CredentialsModalProps> = ({
   isOpen,
   onClose,
@@ -23,19 +58,21 @@ export const CredentialsModal: React.FC<CredentialsModalProps> = ({
   const [sigPreview, setSigPreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSealChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSealChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setSealFile(file);
-      setSealPreview(URL.createObjectURL(file));
+      const opt = await optimizeImage(file, 400);
+      setSealFile(opt);
+      setSealPreview(URL.createObjectURL(opt));
     }
   };
 
-  const handleSigChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSigChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setSigFile(file);
-      setSigPreview(URL.createObjectURL(file));
+      const opt = await optimizeImage(file, 500);
+      setSigFile(opt);
+      setSigPreview(URL.createObjectURL(opt));
     }
   };
 

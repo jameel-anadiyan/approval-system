@@ -22,8 +22,10 @@ export const AdminDashboardPage: React.FC = () => {
   const { departments } = useDirectory();
   const navigate = useNavigate();
 
-  // Admin To-Approve: status === 'pending_admin_approval'
-  const pendingApprovals = requests.filter((r) => r.status === 'pending_admin_approval');
+  // Admin To-Approve: status === 'pending_admin_approval' (or stuck approving > 1m)
+  const pendingApprovals = requests.filter(
+    (r) => r.status === 'pending_admin_approval' || (r.status === 'approving' && (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
+  );
 
   // Total Disbursed / Approved (discount values are not payouts)
   const totalApproved = requests

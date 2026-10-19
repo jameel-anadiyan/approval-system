@@ -6,7 +6,9 @@ import { CheckCircle2, ShieldCheck } from 'lucide-react';
 export const AdminApprovePage: React.FC = () => {
   const { requests } = useRequests();
 
-  const toApproveQueue = requests.filter((r) => r.status === 'pending_admin_approval');
+  const toApproveQueue = requests.filter(
+    (r) => r.status === 'pending_admin_approval' || (r.status === 'approving' && (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">

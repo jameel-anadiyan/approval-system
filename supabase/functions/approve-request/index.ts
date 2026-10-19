@@ -3,7 +3,7 @@
 // stamp each file → build packet → upload (no overwrite) → finalize_approval.
 // On any error: abort_approval (status goes back, approval number stays reserved).
 import { getCaller, handle, HttpError, json, readJson, requireUuid } from "../_shared/common.ts";
-import { buildFormPdf, buildPacket, type FormSection, loadFonts, stampDocument, type StampContext } from "./stamp.ts";
+import { buildFormPdf, buildPacket, type FormSection, stampDocument, type StampContext } from "./stamp.ts";
 
 const ACTION_LABEL: Record<string, string> = {
   submitted: "Submitted", resubmitted: "Resubmitted after correction", routed_A: "Routed to A (Admin)",
@@ -23,7 +23,7 @@ function ist(d: string | Date, withTime = true): string {
   return withTime ? `${date}, ${parts.hour}:${parts.minute} ${String(parts.dayPeriod).toUpperCase()} IST` : date;
 }
 
-const inr = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(n);
+const inr = (n: number) => `Rs. ${new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
 
 function safeName(name: string): string {
   const base = name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
@@ -98,8 +98,8 @@ function formSections(r: any, submitted: string): { subtitle: string; sections: 
         ] },
         { title: "3  Event team will provide", text: provides.length ? provides.join("  ·  ") : "—" },
         { title: "4  Our promotion plan", rows: [
-          ["₹1,000 Vouchers (Qty)", txt(d.voucher_1000_qty)], ["₹500 Vouchers (Qty)", txt(d.voucher_500_qty)],
-          ["₹1,000 Voucher Min. Purchase", money(d.voucher_1000_min)], ["₹500 Voucher Min. Purchase", money(d.voucher_500_min)],
+          ["Rs. 1,000 Vouchers (Qty)", txt(d.voucher_1000_qty)], ["Rs. 500 Vouchers (Qty)", txt(d.voucher_500_qty)],
+          ["Rs. 1,000 Voucher Min. Purchase", money(d.voucher_1000_min)], ["Rs. 500 Voucher Min. Purchase", money(d.voucher_500_min)],
           ["Voucher Validity", txt(d.voucher_validity)], ["Lucky Draw Prize & Value", txt(d.lucky_draw)],
           ["No. of Winners & Draw Date", txt(d.winners_draw)], ["Other Costs (printing, branding, staff)", money(d.other_costs)],
           ["Total Budget", money(d.total_budget)],
@@ -130,8 +130,8 @@ Deno.serve(handle(async (req) => {
       if (error || !data) throw new Error(`Could not read ${path.split("/").pop()}`);
       return new Uint8Array(await data.arrayBuffer());
     };
-    const [fonts, seal, signature] = await Promise.all([
-      loadFonts(), download("credentials", b.seal_path), download("credentials", b.signature_path),
+    const [seal, signature] = await Promise.all([
+      download("credentials", b.seal_path), download("credentials", b.signature_path),
     ]);
     const origin = appOrigin(body.app_url);
     const r = b.request;
@@ -146,7 +146,7 @@ Deno.serve(handle(async (req) => {
       reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at
         ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
       verifyUrl: origin ? `${origin}/verify/${r.verify_token}` : null,
-      fonts, seal, signature,
+      seal, signature,
     };
 
     // Clear leftovers from an earlier failed run for this approval number (never finalized).
@@ -176,7 +176,7 @@ Deno.serve(handle(async (req) => {
 
     let n = 0;
     if (form) {
-      const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections, fonts);
+      const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections);
       const out = await stampDocument(formPdf, ctx);
       await store(out.bytes, ++n, r.request_type === "discount" ? "discount_form" : "exhibition_form", null, out.pageCount);
     }

@@ -54,7 +54,7 @@ export const Navigation: React.FC = () => {
   ).length;
 
   const adminToApproveCount = requests.filter(
-    (r) => r.status === 'pending_admin_approval'
+    (r) => r.status === 'pending_admin_approval' || (r.status === 'approving' && (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
   ).length;
 
   const disbAwaitingCount = requests.filter(

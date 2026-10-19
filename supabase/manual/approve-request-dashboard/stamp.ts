@@ -1,26 +1,22 @@
 // PDF stamping (server only). Adds an approval band below every page's content by extending the
 // page box on the edge that is visually at the bottom, so nothing on the original page is covered.
-import { degrees, PDFDocument, type PDFFont, type PDFImage, type PDFPage, rgb } from "npm:pdf-lib@1.17.1";
-import fontkit from "npm:@pdf-lib/fontkit@1.1.1";
+import { degrees, PDFDocument, type PDFFont, type PDFImage, type PDFPage, rgb, StandardFonts } from "npm:pdf-lib@1.17.1";
 import QRCode from "npm:qrcode@1.5.4";
 
-const FONT_URLS = {
-  regular: "https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSans/hinted/ttf/NotoSans-Regular.ttf",
-  bold: "https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSans/hinted/ttf/NotoSans-Bold.ttf",
-};
-let fontCache: { regular: Uint8Array; bold: Uint8Array } | null = null;
-
 export async function loadFonts() {
-  if (fontCache) return fontCache;
-  const [regular, bold] = await Promise.all(
-    [FONT_URLS.regular, FONT_URLS.bold].map(async (u) => {
-      const res = await fetch(u);
-      if (!res.ok) throw new Error(`Font download failed (${res.status})`);
-      return new Uint8Array(await res.arrayBuffer());
-    }),
-  );
-  fontCache = { regular, bold };
-  return fontCache;
+  return null;
+}
+
+export function toSafePdfText(str: unknown): string {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/₹/g, "Rs. ")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/\u00A0/g, " ")
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ");
 }
 
 export interface StampContext {
@@ -28,10 +24,10 @@ export interface StampContext {
   approverLine: string; // "Name, Designation, Department"
   dateTime: string; // "08 Oct 2026, 06:01 PM IST"
   requestNo: string;
-  amount: string; // "₹9,500.00"
+  amount: string; // "Rs. 9,500.00"
   reviewedLine: string | null; // "Reviewed by: Head, 08 Oct 2026"
   verifyUrl: string | null;
-  fonts: { regular: Uint8Array; bold: Uint8Array };
+  fonts?: { regular?: Uint8Array; bold?: Uint8Array } | null;
   seal: Uint8Array;
   signature: Uint8Array;
 }
@@ -44,10 +40,9 @@ const A4 = { w: 595.28, h: 841.89 };
 interface Assets { regular: PDFFont; bold: PDFFont; seal: PDFImage; signature: PDFImage }
 
 async function embedAssets(doc: PDFDocument, ctx: StampContext): Promise<Assets> {
-  doc.registerFontkit(fontkit);
   return {
-    regular: await doc.embedFont(ctx.fonts.regular, { subset: true }),
-    bold: await doc.embedFont(ctx.fonts.bold, { subset: true }),
+    regular: await doc.embedFont(StandardFonts.Helvetica),
+    bold: await doc.embedFont(StandardFonts.HelveticaBold),
     seal: await doc.embedPng(ctx.seal),
     signature: await doc.embedPng(ctx.signature),
   };
@@ -144,10 +139,11 @@ function getPreformattedA4Frame(page: PDFPage): Frame {
 }
 
 function fit(text: string, font: PDFFont, size: number, maxWidth: number): string {
-  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
-  let t = text;
-  while (t.length > 1 && font.widthOfTextAtSize(t + "…", size) > maxWidth) t = t.slice(0, -1);
-  return t + "…";
+  const safeText = toSafePdfText(text);
+  if (font.widthOfTextAtSize(safeText, size) <= maxWidth) return safeText;
+  let t = safeText;
+  while (t.length > 1 && font.widthOfTextAtSize(t + "...", size) > maxWidth) t = t.slice(0, -1);
+  return t + "...";
 }
 
 function drawImageFit(page: PDFPage, f: Frame, img: PDFImage, lx: number, ly: number, bw: number, bh: number) {
@@ -188,8 +184,9 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
   const x0 = 236 * s;
   const maxW = W - x0 - (qrSize ? qrSize + 18 * s : 12 * s);
   const line = (text: string, ly: number, size: number, font: PDFFont, color = INK) => {
+    const safe = toSafePdfText(text);
     const p = at(f, x0, ly);
-    page.drawText(fit(text, font, size * s, maxW), { x: p.x, y: p.y, size: size * s, font, color, rotate: rot });
+    page.drawText(fit(safe, font, size * s, maxW), { x: p.x, y: p.y, size: size * s, font, color, rotate: rot });
   };
   line(`APPROVED · Approval No: ${ctx.approvalNo}`, H - 22 * s, 11, a.bold, GREEN);
   line(`Approved by: ${ctx.approverLine}`, H - 39 * s, 8.5, a.regular);
@@ -245,8 +242,9 @@ export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promi
 }
 
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const safeText = toSafePdfText(text);
   const out: string[] = [];
-  for (const para of text.split(/\r?\n/)) {
+  for (const para of safeText.split(/\r?\n/)) {
     let cur = "";
     for (const word of para.split(/\s+/)) {
       const next = cur ? `${cur} ${word}` : word;
@@ -277,8 +275,9 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
     if (y - need < 110 + 20) { page = doc.addPage([A4.w, A4.h]); y = A4.h - M; }
   };
   const text = (t: string, size: number, font = a.regular, color = INK, x = M) => {
+    const safe = toSafePdfText(t);
     newPageIfNeeded(size + 6);
-    page.drawText(t, { x, y: y - size, size, font, color });
+    page.drawText(safe, { x, y: y - size, size, font, color });
     y -= size + 6;
   };
 
@@ -289,7 +288,7 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
   y -= 14;
   for (const [k, v] of info.rows) {
     newPageIfNeeded(18);
-    page.drawText(k, { x: M, y: y - 10, size: 10, font: a.bold, color: GREY });
+    page.drawText(toSafePdfText(k), { x: M, y: y - 10, size: 10, font: a.bold, color: GREY });
     const lines = wrap(v, a.regular, 10, maxW - 140);
     lines.forEach((l, i) => page.drawText(l, { x: M + 140, y: y - 10 - i * 14, size: 10, font: a.regular, color: INK }));
     y -= Math.max(1, lines.length) * 14 + 4;
@@ -299,11 +298,11 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
     for (const l of wrap(info.notes, a.regular, 9.5, maxW).slice(0, 40)) text(l, 9.5);
   }
   y -= 8; text("Documents", 12, a.bold);
-  info.documents.forEach((d, i) => text(fit(`${i + 1}. ${d.name} — ${d.pages} page${d.pages === 1 ? "" : "s"}`, a.regular, 9.5, maxW), 9.5));
+  info.documents.forEach((d, i) => text(fit(`${i + 1}. ${d.name} - ${d.pages} page${d.pages === 1 ? "" : "s"}`, a.regular, 9.5, maxW), 9.5));
   y -= 8; text("Timeline", 12, a.bold);
   for (const t of info.timeline) {
     text(fit(`${t.when} · ${t.who} · ${t.what}`, a.regular, 9.5, maxW), 9.5);
-    if (t.remarks) for (const l of wrap(`“${t.remarks}”`, a.regular, 9, maxW - 16).slice(0, 6)) text(l, 9, a.regular, GREY, M + 16);
+    if (t.remarks) for (const l of wrap(`"${t.remarks}"`, a.regular, 9, maxW - 16).slice(0, 6)) text(l, 9, a.regular, GREY, M + 16);
   }
   const coverPages = doc.getPages();
   coverPages.forEach((p, i) => drawBand(p, a, ctx, coverPages.length > 1 ? `Cover ${i + 1} of ${coverPages.length}` : "Cover page", true));

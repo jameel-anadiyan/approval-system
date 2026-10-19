@@ -208,7 +208,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   /** Approver voice note: upload to {request_id}/voice-… then register it on the request. */
   const uploadActionVoice = async (requestId: string, voice?: ActionVoice | null) => {
     if (!voice || !isBackendConnected) return;
-    const contentType = (voice.blob.type || 'audio/webm').split(';')[0];
+    const rawType = (voice.blob.type || '').split(';')[0];
+    const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
     const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
     const path = `${requestId}/voice-${crypto.randomUUID()}.${ext}`;
     const { error: upErr } = await supabase.storage
