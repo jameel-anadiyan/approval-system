@@ -142,7 +142,7 @@ export const NewRequestPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 sm:py-8 pb-32">
+    <div className="max-w-3xl mx-auto px-1 sm:px-4 py-4 sm:py-8 has-action-bar">
       <button
         type="button"
         onClick={() => navigate(-1)}
@@ -300,27 +300,27 @@ export const NewRequestPage: React.FC = () => {
         </div>
 
         {/* Sticky action bar */}
-        <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-lg">
+        <div className="action-bar">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
             <div className="hidden sm:block text-xs text-slate-500">
               {TYPE_LABELS[type]} · <span className="font-bold text-slate-800">{formatINR(amount)}</span>
             </div>
-            <div className="flex flex-1 sm:flex-none items-center gap-3">
+            <div className="action-bar-buttons flex flex-1 sm:flex-none items-center gap-2 sm:gap-3">
               <button
                 type="button"
                 id="save-draft"
                 onClick={() => save(false)}
                 disabled={isSavingDraft || isSubmitting}
-                className="inline-flex items-center gap-1.5 px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs sm:text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 sm:px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs sm:text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                <span>{isSavingDraft ? 'Saving…' : 'Save as Draft'}</span>
+                <span>{isSavingDraft ? 'Saving…' : <><span className="sm:hidden">Draft</span><span className="hidden sm:inline">Save as Draft</span></>}</span>
               </button>
               <button
                 type="submit"
                 id="submit-request"
                 disabled={isSubmitting || isSavingDraft}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm shadow-md shadow-indigo-200 transition-all active:scale-98 disabled:opacity-50"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 sm:px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md shadow-indigo-200 transition-all active:scale-98 disabled:opacity-50 whitespace-nowrap"
               >
                 <Send className="w-4 h-4" />
                 <span>{isSubmitting ? 'Submitting…' : 'Submit for Approval'}</span>

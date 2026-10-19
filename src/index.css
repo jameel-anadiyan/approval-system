@@ -66,6 +66,59 @@
   input, select, textarea {
     font-size: 16px;
   }
+
+  /* Never allow sideways scrolling on phones */
+  html, body, #root {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  img, video, canvas, iframe {
+    max-width: 100%;
+  }
+}
+
+/* ── Bottom action bar (Submit / Approve / …) ──
+   Phones: sits directly above the bottom tab bar (h-16 + safe area).
+   Desktop (lg): pinned to the bottom, to the right of the 16rem sidebar. */
+.action-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(4rem + env(safe-area-inset-bottom));
+  z-index: 35;
+  background: rgb(255 255 255 / 0.97);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--color-slate-200);
+  box-shadow: 0 -6px 20px -8px rgb(15 23 42 / 0.15);
+  padding: 0.625rem 0.75rem;
+}
+@media (min-width: 1024px) {
+  .action-bar {
+    bottom: 0;
+    left: 16rem;
+    padding: 0.75rem 1.5rem calc(0.75rem + env(safe-area-inset-bottom));
+  }
+}
+/* On phones every action button stretches so labels stay readable and tappable */
+@media (max-width: 639px) {
+  .action-bar .action-bar-buttons {
+    width: 100%;
+  }
+  .action-bar .action-bar-buttons > button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+/* Space under page content so the last field is never hidden behind the action bar */
+.has-action-bar {
+  padding-bottom: 6rem;
+}
+@media (max-width: 639px) {
+  .has-action-bar {
+    padding-bottom: 9rem;
+  }
 }
 
 /* Custom utility classes */
@@ -86,4 +139,11 @@
 .scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Phones: hide the action bar entirely when the user has no action on this screen */
+@media (max-width: 1023px) {
+  .action-bar:has(.action-bar-buttons:empty) {
+    display: none;
+  }
 }

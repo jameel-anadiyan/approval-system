@@ -59,7 +59,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ files, title = '
           ) : (
             <ImageIcon className="w-4 h-4 text-emerald-400 shrink-0" />
           )}
-          <span className="text-xs font-semibold truncate max-w-[180px] sm:max-w-xs">
+          <span className="text-xs font-semibold truncate max-w-[45vw] sm:max-w-xs">
             {activeFile.original_name}
           </span>
           <span className="text-[10px] text-slate-400 hidden sm:inline">
@@ -167,11 +167,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ files, title = '
             <iframe
               src={previewUrl}
               title={activeFile.original_name}
-              className="w-[320px] sm:w-[500px] h-[380px] rounded-lg shadow-lg bg-white border border-slate-300"
+              className="w-full max-w-[560px] h-[60dvh] sm:h-[420px] rounded-lg shadow-lg bg-white border border-slate-300"
             />
           ) : (
             /* Elegant Mock / Standard Render View */
-            <div className="w-[320px] sm:w-[480px] min-h-[380px] bg-white rounded-xl shadow-md border border-slate-200 p-6 flex flex-col justify-between">
+            <div className="w-full max-w-[480px] min-h-[320px] sm:min-h-[380px] bg-white rounded-xl shadow-md border border-slate-200 p-4 sm:p-6 flex flex-col justify-between">
               <div className="border-b border-slate-100 pb-3 flex items-start justify-between">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">

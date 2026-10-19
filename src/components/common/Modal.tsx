@@ -51,7 +51,7 @@ export const Modal: React.FC<ModalProps> = ({
       <div
         role="dialog"
         aria-modal="true"
-        className={`relative z-10 w-full ${maxWidthClasses[maxWidth]} bg-white rounded-t-3xl md:rounded-2xl shadow-2xl border border-slate-200/80 max-h-[90dvh] flex flex-col overflow-hidden animate-in slide-in-from-bottom md:zoom-in-95 duration-200`}
+        className={`relative z-10 w-full ${maxWidthClasses[maxWidth]} bg-white rounded-t-3xl md:rounded-2xl shadow-2xl border border-slate-200/80 max-h-[92dvh] flex flex-col overflow-hidden animate-in slide-in-from-bottom md:zoom-in-95 duration-200`}
       >
         {/* Mobile drag handle */}
         <div className="md:hidden pt-3 pb-1 flex justify-center">
@@ -59,7 +59,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 flex items-start justify-between gap-2">
           <div>
             <h2 className="text-lg font-bold text-slate-900 font-display">{title}</h2>
             {description && <p className="text-xs sm:text-sm text-slate-500 mt-0.5">{description}</p>}
@@ -75,7 +75,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Body content with scrollable overflow */}
-        <div className="px-6 py-5 overflow-y-auto overscroll-contain flex-1">
+        <div className="px-4 sm:px-6 py-4 sm:py-5 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-5 overflow-y-auto overscroll-contain flex-1">
           {children}
         </div>
       </div>

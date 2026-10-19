@@ -133,7 +133,7 @@ export const RequestDetailPage: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 pb-32">
+    <div className="max-w-6xl mx-auto px-1 sm:px-4 py-4 sm:py-8 has-action-bar">
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
@@ -347,13 +347,13 @@ export const RequestDetailPage: React.FC = () => {
       </div>
 
       {/* Sticky Bottom Action Bar with Role-based workflow controls */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-lg">
+      <div className="action-bar">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap">
           <div className="text-xs text-slate-500 hidden sm:block">
             Signed in as: <strong className="text-slate-800">{user?.full_name}</strong> ({role})
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-end">
+          <div className="action-bar-buttons flex items-center gap-2 flex-wrap w-full sm:w-auto justify-end">
             {/* Requester Actions on Draft or Returned */}
             {editable && (
               <button

@@ -32,16 +32,16 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
         <h3 className="text-sm font-bold text-slate-900 font-display mb-4 flex items-center gap-2">
           <Percent className="w-4 h-4 text-amber-600" /> Discount details
         </h3>
-        <div className="grid grid-cols-3 gap-3 text-center mb-4">
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center mb-4">
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-2 sm:p-3 min-w-0">
             <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">Before</span>
-            <span className="text-sm font-bold text-slate-800">{money(d.before_amount) ?? '—'}</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-800 break-words">{money(d.before_amount) ?? '—'}</span>
           </div>
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-2 sm:p-3 min-w-0">
             <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">After</span>
-            <span className="text-sm font-bold text-slate-800">{money(d.after_amount) ?? '—'}</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-800 break-words">{money(d.after_amount) ?? '—'}</span>
           </div>
-          <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+          <div className="rounded-xl bg-amber-50 border border-amber-200 p-2 sm:p-3 min-w-0">
             <span className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold block">Discount</span>
             <span className="text-sm font-bold text-amber-800">
               {d.discount_pct !== undefined && d.discount_pct !== null ? `${Number(d.discount_pct).toFixed(2)}%` : '—'}

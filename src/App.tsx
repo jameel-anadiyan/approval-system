@@ -83,7 +83,7 @@ const AppLayout: React.FC = () => {
       <Header />
       <div className="flex-1 flex w-full">
         <Navigation />
-        <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8">
+        <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-8">
           <Suspense fallback={<PageSpinner />}>
             <Outlet />
           </Suspense>
