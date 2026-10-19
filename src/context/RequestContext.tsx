@@ -7,6 +7,7 @@ import {
   RequestAction,
   RequestType,
   RequestDetails,
+  Profile,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -64,6 +65,18 @@ interface RequestContextType {
   ) => Promise<{ success: boolean; approval_no?: string; error?: string }>;
   /** Records a payment. `amount` omitted = pay the whole remaining balance. */
   markAsPaid: (id: string, details: PaymentInput) => Promise<{ success: boolean; error?: string; fully_paid?: boolean }>;
+  /** Inter-department head consultations */
+  requestHeadConsultations: (
+    requestId: string,
+    headIds: string[],
+    note?: string
+  ) => Promise<{ success: boolean; count?: number; error?: string }>;
+  respondHeadConsultation: (
+    consultationId: string,
+    status: 'agreed' | 'disagreed',
+    remarks?: string
+  ) => Promise<Result>;
+  loadConsultableHeads: () => Promise<Profile[]>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -83,6 +96,7 @@ const normalize = (rows: RequestRecord[]) =>
       .map((p) => ({ ...p, amount: Number(p.amount) }))
       .sort((a, b) => a.payment_date.localeCompare(b.payment_date) || a.created_at.localeCompare(b.created_at)),
     actions: [...(r.actions || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    consultations: [...(r.consultations || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)),
     files: [...(r.files || [])].sort(
       (a, b) =>
         ((a as RequestFile & { sort_order?: number }).sort_order ?? 0) -
@@ -106,7 +120,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       const { data, error } = await supabase
         .from('requests')
-        .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)')
+        .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))')
         .order('created_at', { ascending: false });
       // RLS decides what each role sees; never substitute demo data in live mode.
       setRequests(!error && data ? normalize(data as RequestRecord[]) : []);
@@ -875,6 +889,60 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true, fully_paid: full };
   };
 
+  const requestHeadConsultations = async (
+    requestId: string,
+    headIds: string[],
+    note?: string
+  ): Promise<{ success: boolean; count?: number; error?: string }> => {
+    if (!headIds.length) return { success: false, error: 'Select at least one department head' };
+    if (isBackendConnected) {
+      const { data, error } = await supabase.rpc('request_head_consultations', {
+        p_request_id: requestId,
+        p_head_ids: headIds,
+        p_note: note || null,
+      });
+      if (error) return { success: false, error: error.message };
+      await loadRequests(true);
+      return { success: true, count: data?.count };
+    }
+    return { success: true, count: headIds.length };
+  };
+
+  const respondHeadConsultation = async (
+    consultationId: string,
+    status: 'agreed' | 'disagreed',
+    remarks?: string
+  ): Promise<Result> => {
+    if (isBackendConnected) {
+      const { error } = await supabase.rpc('respond_head_consultation', {
+        p_consultation_id: consultationId,
+        p_status: status,
+        p_remarks: remarks || null,
+      });
+      if (error) return { success: false, error: error.message };
+      await loadRequests(true);
+      return { success: true };
+    }
+    return { success: true };
+  };
+
+  const loadConsultableHeads = async (): Promise<Profile[]> => {
+    if (isBackendConnected) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*, department:departments(*)')
+        .eq('role', 'head')
+        .eq('is_active', true)
+        .order('full_name', { ascending: true });
+      if (error) {
+        console.error('Failed to load heads:', error);
+        return [];
+      }
+      return (data || []) as Profile[];
+    }
+    return [];
+  };
+
   return (
     <RequestContext.Provider
       value={{
@@ -897,6 +965,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         rejectRequest,
         approveRequest,
         markAsPaid,
+        requestHeadConsultations,
+        respondHeadConsultation,
+        loadConsultableHeads,
       }}
     >
       {children}

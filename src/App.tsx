@@ -31,6 +31,7 @@ const page = <K extends string>(loader: () => Promise<Record<K, React.ComponentT
 
 const VerifyPage = page(() => import('./pages/shared/VerifyPage'), 'VerifyPage');
 const HeadUsersPage = page(() => import('./pages/head/HeadUsersPage'), 'HeadUsersPage');
+const HeadConsultationsPage = page(() => import('./pages/head/HeadConsultationsPage'), 'HeadConsultationsPage');
 const AdminDepartmentsPage = page(() => import('./pages/admin/AdminDepartmentsPage'), 'AdminDepartmentsPage');
 const AdminShopsPage = page(() => import('./pages/admin/AdminShopsPage'), 'AdminShopsPage');
 const AdminHeadsPage = page(() => import('./pages/admin/AdminHeadsPage'), 'AdminHeadsPage');
@@ -162,6 +163,7 @@ export const App: React.FC = () => {
                 <Route element={<RequireRole roles={['head']} />}>
                   <Route path="head" element={<HeadDashboardPage />} />
                   <Route path="head/review" element={<HeadReviewPage />} />
+                  <Route path="head/consultations" element={<HeadConsultationsPage />} />
                   <Route path="head/users" element={<HeadUsersPage />} />
                   <Route path="head/department" element={<ClerkDeptRequestsPage />} />
                   <Route path="head/credentials" element={<AdminCredentialsPage />} />

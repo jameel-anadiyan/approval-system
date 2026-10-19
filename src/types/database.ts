@@ -15,6 +15,8 @@ export type RequestStatus =
 
 export type ApprovalRoute = 'A' | 'B';
 
+export type HeadConsultationStatus = 'pending' | 'agreed' | 'disagreed';
+
 export type FileKind = 'document' | 'voice_note';
 
 export type RequestType = 'general' | 'discount' | 'exhibition';
@@ -165,8 +167,27 @@ export interface RequestRecord {
   /** Total disbursed so far (partial payments add up until it equals amount) */
   paid_amount?: number;
   payments?: RequestPayment[];
+  consultations?: HeadConsultation[];
   requester?: Pick<Profile, 'id' | 'full_name' | 'designation' | 'photo_path'> | null;
   requester_photo_path?: string | null;
+}
+
+export interface HeadConsultation {
+  id: string;
+  request_id: string;
+  requested_by: string;
+  requested_by_name: string;
+  head_id: string;
+  head_name: string;
+  department_id?: string | null;
+  department_name?: string | null;
+  status: HeadConsultationStatus;
+  request_note?: string | null;
+  response_remarks?: string | null;
+  responded_at?: string | null;
+  created_at: string;
+  head_photo_path?: string | null;
+  head?: Pick<Profile, 'id' | 'full_name' | 'designation' | 'photo_path'> | null;
 }
 
 export interface RequestPayment {

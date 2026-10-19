@@ -53,6 +53,13 @@ export const Navigation: React.FC = () => {
     (r) => r.status === 'pending_head_review' && (!user?.department_id || r.department_id === user.department_id)
   ).length;
 
+  const headConsultationsCount = requests.reduce((count, r) => {
+    const pendingForMe = (r.consultations || []).filter(
+      (c) => c.head_id === user?.id && c.status === 'pending'
+    ).length;
+    return count + pendingForMe;
+  }, 0);
+
   const adminToApproveCount = requests.filter(
     (r) => r.status === 'pending_admin_approval' || (r.status === 'approving' && (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
   ).length;
@@ -89,6 +96,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
+        { label: 'From Other Heads', path: '/head/consultations', icon: Users, badge: headConsultationsCount },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [

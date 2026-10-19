@@ -204,6 +204,9 @@ export const ACTION_LABELS: Record<string, string> = {
   approved: 'Approved & Signed',
   paid: 'Payment Disbursed (Paid in full)',
   partial_payment: 'Partial payment recorded',
+  consultation_requested: 'Requested Inter-Department Head Review',
+  consultation_agreed: 'Head Review: Agreed',
+  consultation_disagreed: 'Head Review: Disagreed',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition'];

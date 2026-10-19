@@ -14,6 +14,8 @@ import { ReturnModal } from '../../components/portals/ReturnModal';
 import { RejectModal } from '../../components/portals/RejectModal';
 import { ForwardModal } from '../../components/portals/ForwardModal';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
+import { ConsultHeadsModal } from '../../components/portals/ConsultHeadsModal';
+import { HeadConsultationsSection } from '../../components/requests/HeadConsultationsSection';
 import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
 import { UserAvatar } from '../../components/common/UserAvatar';
 import {
@@ -42,6 +44,7 @@ import {
   Trash2,
   Loader2,
   Store,
+  Users,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -65,7 +68,7 @@ export const RequestDetailPage: React.FC = () => {
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | null
   >(null);
   const [copiedNo, setCopiedNo] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -309,6 +312,14 @@ export const RequestDetailPage: React.FC = () => {
 
           <RequestDetailsPanel request={request} />
 
+          {/* Inter-Department Head Consultations Section */}
+          {request.consultations && request.consultations.length > 0 && (
+            <HeadConsultationsSection
+              consultations={request.consultations}
+              requestId={request.id}
+            />
+          )}
+
           {/* Voice Notes (if present) */}
           {showOriginals && voiceNotes.map((vn) => <VoiceNoteItem key={vn.id} file={vn} />)}
 
@@ -524,6 +535,15 @@ export const RequestDetailPage: React.FC = () => {
               <>
                 <button
                   type="button"
+                  onClick={() => setModalState('consult')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 font-semibold text-xs hover:bg-purple-100"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Consult Other Heads…</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setModalState('reject')}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100"
                 >
@@ -553,6 +573,15 @@ export const RequestDetailPage: React.FC = () => {
 
             {role === 'head' && (request.status === 'pending_head_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
               <>
+                <button
+                  type="button"
+                  onClick={() => setModalState('consult')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 font-semibold text-xs hover:bg-purple-100"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Consult Other Heads…</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setModalState('return')}
@@ -585,6 +614,15 @@ export const RequestDetailPage: React.FC = () => {
             {/* Admin Actions */}
             {role === 'admin' && (request.status === 'pending_admin_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
               <>
+                <button
+                  type="button"
+                  onClick={() => setModalState('consult')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 font-semibold text-xs hover:bg-purple-100"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Consult Heads…</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setModalState('return')}
@@ -630,6 +668,15 @@ export const RequestDetailPage: React.FC = () => {
       </div>
 
       {/* Workflow Modals */}
+      {modalState === 'consult' && (
+        <ConsultHeadsModal
+          isOpen={true}
+          onClose={() => setModalState(null)}
+          request={request}
+          onSuccess={() => setBanner({ ok: true, text: 'Consultation request sent to department heads.' })}
+        />
+      )}
+
       {modalState === 'edit' && (
         <EditDraftModal isOpen={true} onClose={() => setModalState(null)} request={request} />
       )}
