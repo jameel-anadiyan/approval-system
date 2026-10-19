@@ -1,5 +1,42 @@
 @import "tailwindcss";
 
+/* SWA Diamonds brand — deep teal from the logo (#00727C) */
+@theme {
+  --color-brand-50: #eefafa;
+  --color-brand-100: #d3f1f2;
+  --color-brand-200: #a8e2e5;
+  --color-brand-300: #6fcbd0;
+  --color-brand-400: #33abb2;
+  --color-brand-500: #138d95;
+  --color-brand-600: #00727c;
+  --color-brand-700: #045c65;
+  --color-brand-800: #0a4b53;
+  --color-brand-900: #0d3f46;
+  --color-brand-950: #03282e;
+
+  /* Existing screens use indigo-* for accents: map them onto the brand scale */
+  --color-indigo-50: var(--color-brand-50);
+  --color-indigo-100: var(--color-brand-100);
+  --color-indigo-200: var(--color-brand-200);
+  --color-indigo-300: var(--color-brand-300);
+  --color-indigo-400: var(--color-brand-400);
+  --color-indigo-500: var(--color-brand-500);
+  --color-indigo-600: var(--color-brand-600);
+  --color-indigo-700: var(--color-brand-700);
+  --color-indigo-800: var(--color-brand-800);
+  --color-indigo-900: var(--color-brand-900);
+  --color-indigo-950: var(--color-brand-950);
+
+  /* Champagne gold accent for diamond-jewellery feel */
+  --color-gold-50: #fbf8ef;
+  --color-gold-100: #f4ecd2;
+  --color-gold-200: #e9d8a5;
+  --color-gold-300: #dcbf72;
+  --color-gold-400: #cfa74c;
+  --color-gold-500: #b88d34;
+  --color-gold-600: #9a702a;
+}
+
 @layer base {
   :root {
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -12,7 +49,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100dvh;
-    background-color: #f8fafc;
+    background-color: #f6f9f9;
     color: #0f172a;
   }
 

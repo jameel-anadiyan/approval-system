@@ -1,20 +1,15 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { RequestCard } from '../../components/requests/RequestCard';
-import { EmptyState } from '../../components/common/EmptyState';
-import { ApproveModal } from '../../components/portals/ApproveModal';
-import { formatINR } from '../../lib/formatters';
+import { RequestQueue } from '../../components/requests/RequestQueue';
+import { formatINR, typeOf } from '../../lib/formatters';
 import { CheckCircle2, Clock, CheckCircle, PlusCircle, Building2, TrendingUp } from 'lucide-react';
-import { RequestRecord } from '../../types/database';
 
 export const HeadDashboardPage: React.FC = () => {
   const { user } = useAuth();
-  const { requests, approveRequest } = useRequests();
+  const { requests } = useRequests();
   const navigate = useNavigate();
-
-  const [activeRequest, setActiveRequest] = useState<RequestRecord | null>(null);
 
   // Department requests
   const deptRequests = requests.filter(
@@ -27,9 +22,9 @@ export const HeadDashboardPage: React.FC = () => {
   // Queue 2: To Review (Route A requests waiting for Head review)
   const toReviewQueue = deptRequests.filter((r) => r.status === 'pending_head_review');
 
-  // Total department amount approved/paid
+  // Total department amount approved/paid (discount values are not payouts)
   const sanctionedTotal = deptRequests
-    .filter((r) => r.status === 'approved' || r.status === 'paid')
+    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount')
     .reduce((sum, r) => sum + r.amount, 0);
 
   return (
@@ -128,32 +123,15 @@ export const HeadDashboardPage: React.FC = () => {
           </span>
         </div>
 
-        {toApproveQueue.length === 0 ? (
-          <EmptyState
-            icon={CheckCircle2}
-            title="No Pending Direct Approvals"
-            description="You have cleared all Route B requests waiting for your approval and signature."
-          />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {toApproveQueue.map((req) => (
-              <RequestCard key={req.id} request={req} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Approve Modal */}
-      {activeRequest && (
-        <ApproveModal
-          isOpen={true}
-          onClose={() => setActiveRequest(null)}
-          request={activeRequest}
-          onApprove={async () => {
-            return await approveRequest(activeRequest.id);
-          }}
+        <RequestQueue
+          items={toApproveQueue}
+          bulkApprove
+          initialFilters={{ sort: 'oldest' }}
+          emptyIcon={CheckCircle2}
+          emptyTitle="No Pending Direct Approvals"
+          emptyDescription="You have cleared all Route B requests waiting for your approval and signature."
         />
-      )}
+      </div>
     </div>
   );
 };

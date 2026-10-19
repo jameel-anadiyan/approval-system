@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
+import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { EmptyState } from '../../components/common/EmptyState';
-import { PlusCircle, Search, Filter, FileText } from 'lucide-react';
-import { RequestStatus } from '../../types/database';
+import { PlusCircle, FileText } from 'lucide-react';
 
 type TabKey = 'under_process' | 'returned' | 'approved' | 'rejected' | 'paid' | 'draft';
 
@@ -15,7 +15,6 @@ export const MyRequestsPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<TabKey>('under_process');
-  const [searchQuery, setSearchQuery] = useState('');
 
   // Filter requests belonging to current user
   const myRequests = requests.filter((r) => r.requester_id === user?.id);
@@ -46,13 +45,8 @@ export const MyRequestsPage: React.FC = () => {
   };
 
   const tabRequests = getRequestsForTab(activeTab);
-
-  const filtered = tabRequests.filter(
-    (r) =>
-      r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (r.request_no && r.request_no.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (r.approval_no && r.approval_no.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const { filters, setFilters, result: filtered } = useRequestFilters(tabRequests);
+  const searchQuery = filters.q;
 
   const tabs: { key: TabKey; label: string; count: number }[] = [
     { key: 'under_process', label: 'Under Process', count: getRequestsForTab('under_process').length },
@@ -113,17 +107,13 @@ export const MyRequestsPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Search Input */}
-      <div className="relative">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search by title or request number…"
-          className="w-full text-xs sm:text-sm pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-        />
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-      </div>
+      <RequestFilters
+        value={filters}
+        onChange={setFilters}
+        source={tabRequests}
+        showEmployee={false}
+        resultCount={filtered.length}
+      />
 
       {/* Request Cards Grid */}
       {filtered.length === 0 ? (

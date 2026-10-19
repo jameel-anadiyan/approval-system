@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord } from '../../types/database';
-import { Send, CornerDownRight } from 'lucide-react';
+import { CornerDownRight } from 'lucide-react';
+import type { ActionVoice } from '../../context/RequestContext';
+import { ActionVoiceField } from '../requests/ActionVoiceField';
 
 interface ForwardModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onForward: (remarks?: string) => Promise<void>;
+  onForward: (remarks?: string, voice?: ActionVoice | null) => Promise<void>;
 }
 
 export const ForwardModal: React.FC<ForwardModalProps> = ({
@@ -17,6 +19,7 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
   onForward,
 }) => {
   const [remarks, setRemarks] = useState('');
+  const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +28,7 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      await onForward(remarks.trim() || undefined);
+      await onForward(remarks.trim() || undefined, voice);
       setRemarks('');
       onClose();
     } catch (err) {
@@ -61,6 +64,8 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
           />
         </div>
+
+        <ActionVoiceField onChange={setVoice} label="Voice message for Admin (optional)" />
 
         {error && (
           <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{error}</div>

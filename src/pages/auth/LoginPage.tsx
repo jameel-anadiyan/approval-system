@@ -42,29 +42,29 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[100dvh] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-slate-900 text-white relative overflow-hidden">
+    <div className="min-h-[100dvh] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-brand-950 text-white relative overflow-hidden">
       {/* Decorative gradient glow */}
-      <div className="absolute top-0 -left-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 -right-40 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 -left-40 w-96 h-96 bg-brand-500/25 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 -right-40 w-96 h-96 bg-gold-400/15 rounded-full blur-3xl pointer-events-none" />
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         {/* App Logo */}
-        <div className="flex justify-center mb-4">
-          <div className="w-14 h-14 rounded-2xl bg-linear-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 text-white font-display text-2xl font-extrabold">
-            ₹
+        <div className="flex justify-center mb-5">
+          <div className="w-24 h-24 rounded-3xl bg-white overflow-hidden flex items-center justify-center shadow-2xl shadow-brand-500/30 ring-1 ring-gold-300/40">
+            <img src="/swa-logo.jpg" alt="SWA Diamonds" className="w-full h-full object-contain scale-110" />
           </div>
         </div>
 
         <h1 className="text-center text-2xl sm:text-3xl font-extrabold text-white font-display tracking-tight">
-          Approval Workflow App
+          SWA Diamonds Approvals
         </h1>
-        <p className="mt-1 text-center text-xs sm:text-sm text-slate-400">
-          Digital request, multi-level review, stamping & disbursement
+        <p className="mt-1 text-center text-xs sm:text-sm text-brand-200/80">
+          Digital request, multi-level review, stamping &amp; disbursement
         </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
-        <div className="bg-slate-800/90 backdrop-blur-xl py-8 px-6 sm:px-10 shadow-2xl rounded-3xl border border-slate-700/80">
+        <div className="bg-brand-900/60 backdrop-blur-xl py-8 px-6 sm:px-10 shadow-2xl rounded-3xl border border-brand-700/60">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-start gap-2 animate-in fade-in">
@@ -111,7 +111,7 @@ export const LoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-98 disabled:opacity-50"
+              className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-linear-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold text-sm shadow-lg shadow-brand-900/40 ring-1 ring-gold-300/30 transition-all active:scale-98 disabled:opacity-50"
             >
               <span>{isLoading ? 'Signing In…' : 'Sign In to Portal'}</span>
               <ArrowRight className="w-4 h-4" />

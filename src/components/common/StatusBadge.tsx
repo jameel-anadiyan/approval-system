@@ -1,23 +1,30 @@
 import React from 'react';
-import { RequestStatus } from '../../types/database';
-import { STATUS_META } from '../../lib/formatters';
+import { RequestStatus, RequestType } from '../../types/database';
+import { STATUS_META, TYPE_BADGES, TYPE_LABELS } from '../../lib/formatters';
 
 interface StatusBadgeProps {
   status: RequestStatus;
   size?: 'sm' | 'md' | 'lg';
   showDescription?: boolean;
+  /** Discount approvals end at "Approved" (no payment step). */
+  requestType?: RequestType | null;
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
   status,
   size = 'md',
   showDescription = false,
+  requestType,
 }) => {
-  const meta = STATUS_META[status] || {
+  const base = STATUS_META[status] || {
     label: status,
     badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
     description: '',
   };
+  const meta =
+    status === 'approved' && requestType === 'discount'
+      ? { ...base, label: 'Approved', description: 'Discount approved and signed. No payment step.' }
+      : base;
 
   const sizeClasses = {
     sm: 'text-xs px-2 py-0.5 rounded-md font-medium',
@@ -37,5 +44,17 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
         <span className="text-xs text-slate-500 mt-1">{meta.description}</span>
       )}
     </div>
+  );
+};
+
+/** Small pill showing General / Discount / Exhibition. */
+export const TypeBadge: React.FC<{ type?: RequestType | null; className?: string }> = ({ type, className = '' }) => {
+  const t = type ?? 'general';
+  return (
+    <span
+      className={`inline-flex items-center text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-md border ${TYPE_BADGES[t]} ${className}`}
+    >
+      {TYPE_LABELS[t]}
+    </span>
   );
 };

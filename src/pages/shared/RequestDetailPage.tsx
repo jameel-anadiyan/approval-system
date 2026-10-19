@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { StatusBadge } from '../../components/common/StatusBadge';
+import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
 import { DocumentViewer } from '../../components/requests/DocumentViewer';
 import { SignedDocuments, VoiceNoteItem } from '../../components/requests/SignedDocuments';
 import { EditDraftModal } from '../../components/requests/EditDraftModal';
 import { RequestTimeline } from '../../components/requests/RequestTimeline';
+import { RequestDetailsPanel } from '../../components/requests/RequestDetailsPanel';
 import { RouteModal } from '../../components/portals/RouteModal';
 import { ApproveModal } from '../../components/portals/ApproveModal';
 import { ReturnModal } from '../../components/portals/ReturnModal';
@@ -18,6 +19,7 @@ import {
   formatINRWhole,
   formatISTDate,
   ROLE_LABELS,
+  typeOf,
 } from '../../lib/formatters';
 import {
   ArrowLeft,
@@ -36,6 +38,7 @@ import {
   Pencil,
   Trash2,
   Loader2,
+  Store,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -98,7 +101,10 @@ export const RequestDetailPage: React.FC = () => {
   }
 
   const isOwner = user?.id === request.requester_id;
-  const isHighValue = request.amount > threshold;
+  const rType = typeOf(request);
+  const isHighValue = rType === 'general' && request.amount > threshold;
+  const amountLabel =
+    rType === 'discount' ? 'Discount Value' : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)' : 'Total Requested Amount';
   const voiceNotes = (request.files || []).filter((f) => f.kind === 'voice_note');
   // Disbursement only ever sees the stamped output, never the originals (storage policy agrees).
   const showOriginals = role !== 'disbursement';
@@ -144,6 +150,7 @@ export const RequestDetailPage: React.FC = () => {
               <span className="font-mono text-xs font-bold px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
                 {request.request_no || 'UNSUBMITTED DRAFT'}
               </span>
+              <TypeBadge type={rType} />
               {request.approval_no && (
                 <button
                   type="button"
@@ -175,7 +182,7 @@ export const RequestDetailPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <StatusBadge status={request.status} size="lg" showDescription />
+          <StatusBadge status={request.status} requestType={rType} size="lg" showDescription />
         </div>
       </div>
 
@@ -202,7 +209,7 @@ export const RequestDetailPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
               <div>
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Total Requested Amount
+                  {amountLabel}
                 </span>
                 <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-display mt-0.5">
                   {formatINR(request.amount)}
@@ -238,6 +245,15 @@ export const RequestDetailPage: React.FC = () => {
                   Code: {request.department?.code || '—'}
                 </span>
               </div>
+              {request.shop_name && (
+                <div className="col-span-2">
+                  <span className="text-slate-400 font-medium block">Shop</span>
+                  <span className="font-bold text-slate-800 mt-0.5 flex items-center gap-1">
+                    <Store className="w-3.5 h-3.5 text-slate-400" />
+                    {request.shop_name}
+                  </span>
+                </div>
+              )}
               <div>
                 <span className="text-slate-400 font-medium block">Submitted Date</span>
                 <span className="font-semibold text-slate-700 mt-0.5 block">
@@ -264,6 +280,8 @@ export const RequestDetailPage: React.FC = () => {
             )}
           </div>
 
+          <RequestDetailsPanel request={request} />
+
           {/* Voice Notes (if present) */}
           {showOriginals && voiceNotes.map((vn) => <VoiceNoteItem key={vn.id} file={vn} />)}
 
@@ -282,7 +300,7 @@ export const RequestDetailPage: React.FC = () => {
             </div>
           )}
 
-          {editable && !(request.files || []).some((f) => f.kind === 'document') && (
+          {editable && rType === 'general' && !(request.files || []).some((f) => f.kind === 'document') && (
             <div className="p-4 rounded-2xl border border-dashed border-amber-300 bg-amber-50 text-xs text-amber-900">
               No document attached yet. Use <strong>Edit</strong> to attach at least one invoice or bill before submitting.
             </div>
@@ -514,7 +532,7 @@ export const RequestDetailPage: React.FC = () => {
             )}
 
             {/* Disbursement Action */}
-            {role === 'disbursement' && request.status === 'approved' && (
+            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && (
               <button
                 type="button"
                 onClick={() => setModalState('pay')}
@@ -538,7 +556,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onRoute={(rt, rm) => orThrow(routeRequest(request.id, rt, rm), `Routed via Route ${rt}.`)}
+          onRoute={(rt, rm, v) => orThrow(routeRequest(request.id, rt, rm, v), `Routed via Route ${rt}.`)}
         />
       )}
 
@@ -547,8 +565,8 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onApprove={async () => {
-            return await approveRequest(request.id);
+          onApprove={async (v) => {
+            return await approveRequest(request.id, v);
           }}
         />
       )}
@@ -558,7 +576,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onReturn={(rm) => orThrow(returnRequest(request.id, rm), 'Returned to the requester for correction.')}
+          onReturn={(rm, v) => orThrow(returnRequest(request.id, rm, v), 'Returned to the requester for correction.')}
         />
       )}
 
@@ -567,7 +585,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onReject={(rs) => orThrow(rejectRequest(request.id, rs), 'Request rejected.')}
+          onReject={(rs, v) => orThrow(rejectRequest(request.id, rs, v), 'Request rejected.')}
         />
       )}
 
@@ -576,7 +594,7 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onForward={(rm) => orThrow(forwardRequest(request.id, rm), 'Forwarded to Admin.')}
+          onForward={(rm, v) => orThrow(forwardRequest(request.id, rm, v), 'Forwarded to Admin.')}
         />
       )}
 

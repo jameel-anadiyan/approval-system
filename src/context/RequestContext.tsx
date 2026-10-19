@@ -5,6 +5,8 @@ import {
   RequestStatus,
   ApprovalRoute,
   RequestAction,
+  RequestType,
+  RequestDetails,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -12,6 +14,21 @@ import { MOCK_REQUESTS } from '../lib/mockData';
 import { loadThreshold } from '../lib/directory';
 
 type Result = { success: boolean; error?: string };
+
+/** Optional voice note recorded by the Clerk / Head / Admin while acting. */
+export interface ActionVoice {
+  blob: Blob;
+  duration: number;
+}
+
+export interface DraftInput {
+  type?: RequestType;
+  title: string;
+  amount: number;
+  notes?: string;
+  details?: RequestDetails | null;
+  files?: RequestFile[];
+}
 
 interface RequestContextType {
   requests: RequestRecord[];
@@ -21,18 +38,22 @@ interface RequestContextType {
   reloadThreshold: () => Promise<void>;
   refreshRequests: () => Promise<void>;
   getRequestById: (id: string) => RequestRecord | undefined;
-  createDraft: (data: { title: string; amount: number; notes?: string; files?: RequestFile[] }) => Promise<{ success: boolean; id?: string; error?: string }>;
-  updateDraft: (id: string, data: { title: string; amount: number; notes?: string }) => Promise<Result>;
+  createDraft: (data: DraftInput) => Promise<{ success: boolean; id?: string; error?: string }>;
+  updateDraft: (id: string, data: { title: string; amount: number; notes?: string; details?: RequestDetails | null }) => Promise<Result>;
   addFiles: (id: string, files: RequestFile[]) => Promise<Result>;
   removeFile: (requestId: string, fileId: string) => Promise<Result>;
   deleteDraft: (id: string) => Promise<Result>;
   submitRequest: (id: string) => Promise<{ success: boolean; request_no?: string; error?: string }>;
   withdrawRequest: (id: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
-  routeRequest: (id: string, route: ApprovalRoute, remarks?: string) => Promise<{ success: boolean; error?: string }>;
-  forwardRequest: (id: string, remarks?: string) => Promise<{ success: boolean; error?: string }>;
-  returnRequest: (id: string, remarks: string) => Promise<{ success: boolean; error?: string }>;
-  rejectRequest: (id: string, reason: string) => Promise<{ success: boolean; error?: string }>;
-  approveRequest: (id: string) => Promise<{ success: boolean; approval_no?: string; error?: string }>;
+  routeRequest: (id: string, route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
+  forwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
+  returnRequest: (id: string, remarks: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
+  rejectRequest: (id: string, reason: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
+  approveRequest: (
+    id: string,
+    voice?: ActionVoice | null,
+    opts?: { reload?: boolean }
+  ) => Promise<{ success: boolean; approval_no?: string; error?: string }>;
   markAsPaid: (id: string, details: { payment_mode?: string; payment_ref?: string; payment_remarks?: string; payment_date?: string }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -170,21 +191,39 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const createDraft = async (data: {
-    title: string;
-    amount: number;
-    notes?: string;
-    files?: RequestFile[];
-  }): Promise<{ success: boolean; id?: string; error?: string }> => {
+  /** Approver voice note: upload to {request_id}/voice-… then register it on the request. */
+  const uploadActionVoice = async (requestId: string, voice?: ActionVoice | null) => {
+    if (!voice || !isBackendConnected) return;
+    const contentType = (voice.blob.type || 'audio/webm').split(';')[0];
+    const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
+    const path = `${requestId}/voice-${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from('request-files')
+      .upload(path, voice.blob, { contentType, upsert: false });
+    if (upErr) throw new Error(`Voice note upload failed: ${upErr.message}`);
+    const { error } = await supabase.rpc('attach_action_voice', {
+      p_request_id: requestId,
+      p_storage_path: path,
+      p_mime_type: contentType,
+      p_size_bytes: voice.blob.size,
+      p_duration_sec: Math.min(300, Math.max(1, Math.round(voice.duration))),
+    });
+    if (error) throw new Error(`Could not attach voice note: ${error.message}`);
+  };
+
+  const createDraft = async (data: DraftInput): Promise<{ success: boolean; id?: string; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
+    const type: RequestType = data.type ?? 'general';
 
     if (isBackendConnected) {
       let requestId: string | undefined;
       try {
-        const { data: newId, error } = await supabase.rpc('create_draft', {
+        const { data: newId, error } = await supabase.rpc('create_typed_draft', {
+          p_type: type,
           p_title: data.title,
-          p_amount: data.amount,
+          p_amount: type === 'general' ? data.amount : null,
           p_notes: data.notes || null,
+          p_details: type === 'general' ? null : data.details ?? {},
         });
         if (error) throw error;
         requestId = newId as string;
@@ -210,6 +249,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       title: data.title,
       notes: data.notes || null,
       amount: data.amount,
+      request_type: type,
+      details: data.details ?? null,
+      shop_name: user.shop?.name ?? null,
       status: 'draft',
       route: null,
       routed_by: null,
@@ -239,14 +281,18 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true, id: newId };
   };
 
-  const updateDraft = async (id: string, data: { title: string; amount: number; notes?: string }): Promise<Result> => {
+  const updateDraft = async (
+    id: string,
+    data: { title: string; amount: number; notes?: string; details?: RequestDetails | null }
+  ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (isBackendConnected) {
-      const { error } = await supabase.rpc('update_draft', {
+      const { error } = await supabase.rpc('update_typed_draft', {
         p_request_id: id,
         p_title: data.title,
         p_amount: data.amount,
         p_notes: data.notes || null,
+        p_details: data.details ?? null,
       });
       if (error) return { success: false, error: error.message };
       await loadRequests();
@@ -255,7 +301,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     updateLocalRequests((prev) =>
       prev.map((r) =>
         r.id === id
-          ? { ...r, title: data.title, amount: data.amount, notes: data.notes || null, updated_at: new Date().toISOString() }
+          ? { ...r, title: data.title, amount: data.amount, notes: data.notes || null, details: data.details ?? r.details, updated_at: new Date().toISOString() }
           : r
       )
     );
@@ -421,15 +467,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const routeRequest = async (
     id: string,
     route: ApprovalRoute,
-    remarks?: string
+    remarks?: string,
+    voice?: ActionVoice | null
   ): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
     const current = getRequestById(id);
     if (!current) return { success: false, error: 'Request not found' };
 
-    // High-value rule: Route B is not allowed above the configured threshold
-    if (route === 'B' && current.amount > threshold) {
+    // High-value rule: Route B is not allowed above the configured threshold (Discount is always B)
+    if (route === 'B' && current.request_type !== 'discount' && current.amount > threshold) {
       return {
         success: false,
         error: `Requests above ₹${threshold.toLocaleString('en-IN')} must take Route A (Admin approval required).`,
@@ -442,6 +489,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (isBackendConnected) {
       try {
+        await uploadActionVoice(id, voice);
         const { error } = await supabase.rpc('route_request', {
           p_request_id: id,
           p_route: route,
@@ -495,11 +543,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  const forwardRequest = async (id: string, remarks?: string): Promise<{ success: boolean; error?: string }> => {
+  const forwardRequest = async (id: string, remarks?: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
     if (isBackendConnected) {
       try {
+        await uploadActionVoice(id, voice);
         const { error } = await supabase.rpc('forward_request', {
           p_request_id: id,
           p_remarks: remarks || null,
@@ -545,12 +594,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  const returnRequest = async (id: string, remarks: string): Promise<{ success: boolean; error?: string }> => {
+  const returnRequest = async (id: string, remarks: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (!remarks.trim()) return { success: false, error: 'A remark is required when returning a request.' };
 
     if (isBackendConnected) {
       try {
+        await uploadActionVoice(id, voice);
         const { error } = await supabase.rpc('return_request', {
           p_request_id: id,
           p_remarks: remarks,
@@ -596,12 +646,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  const rejectRequest = async (id: string, reason: string): Promise<{ success: boolean; error?: string }> => {
+  const rejectRequest = async (id: string, reason: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (!reason.trim()) return { success: false, error: 'A reason is required when rejecting a request.' };
 
     if (isBackendConnected) {
       try {
+        await uploadActionVoice(id, voice);
         const { error } = await supabase.rpc('reject_request', {
           p_request_id: id,
           p_remarks: reason,
@@ -650,18 +701,23 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  const approveRequest = async (id: string): Promise<{ success: boolean; approval_no?: string; error?: string }> => {
+  const approveRequest = async (
+    id: string,
+    voice?: ActionVoice | null,
+    opts: { reload?: boolean } = {}
+  ): Promise<{ success: boolean; approval_no?: string; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
     if (isBackendConnected) {
       try {
+        await uploadActionVoice(id, voice);
         const { data, error } = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
           request_id: id,
           // Used for the QR / verify link stamped on every page.
           app_url: window.location.origin,
         });
         if (error) throw error;
-        await loadRequests();
+        if (opts.reload !== false) await loadRequests();
         return { success: true, approval_no: data?.approval_no };
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

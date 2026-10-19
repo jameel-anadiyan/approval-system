@@ -9,6 +9,7 @@ import { Navigation } from './components/common/Navigation';
 import { LoginPage } from './pages/auth/LoginPage';
 import { ForcePasswordChangePage } from './pages/auth/ForcePasswordChangePage';
 import type { AppRole } from './types/database';
+import { canViewDiscountReport } from './lib/discountReport';
 
 // Route pages are code-split so phones only download what each role opens.
 const page = <K extends string>(loader: () => Promise<Record<K, React.ComponentType>>, name: K) =>
@@ -28,6 +29,7 @@ const AdminDashboardPage = page(() => import('./pages/admin/AdminDashboardPage')
 const AdminApprovePage = page(() => import('./pages/admin/AdminApprovePage'), 'AdminApprovePage');
 const AdminAllRequestsPage = page(() => import('./pages/admin/AdminAllRequestsPage'), 'AdminAllRequestsPage');
 const AdminDepartmentsPage = page(() => import('./pages/admin/AdminDepartmentsPage'), 'AdminDepartmentsPage');
+const AdminShopsPage = page(() => import('./pages/admin/AdminShopsPage'), 'AdminShopsPage');
 const AdminHeadsPage = page(() => import('./pages/admin/AdminHeadsPage'), 'AdminHeadsPage');
 const AdminDisbursementPage = page(() => import('./pages/admin/AdminDisbursementPage'), 'AdminDisbursementPage');
 const AdminCredentialsPage = page(() => import('./pages/admin/AdminCredentialsPage'), 'AdminCredentialsPage');
@@ -35,6 +37,7 @@ const AdminSettingsPage = page(() => import('./pages/admin/AdminSettingsPage'), 
 const AdminAuditLogPage = page(() => import('./pages/admin/AdminAuditLogPage'), 'AdminAuditLogPage');
 const DisbursementPage = page(() => import('./pages/disbursement/DisbursementPage'), 'DisbursementPage');
 const DisbursementVerifyPage = page(() => import('./pages/disbursement/DisbursementVerifyPage'), 'DisbursementVerifyPage');
+const DiscountReportPage = page(() => import('./pages/reports/DiscountReportPage'), 'DiscountReportPage');
 
 const PageSpinner: React.FC = () => (
   <div className="min-h-[50vh] flex items-center justify-center">
@@ -46,6 +49,13 @@ const PageSpinner: React.FC = () => (
 const RequireRole: React.FC<{ roles: AppRole[] }> = ({ roles }) => {
   const { role } = useAuth();
   if (!role || !roles.includes(role)) return <RoleRedirect />;
+  return <Outlet />;
+};
+
+/** Admin, or a Head that Admin granted Discount Report access. */
+const RequireDiscountReport: React.FC = () => {
+  const { user } = useAuth();
+  if (!canViewDiscountReport(user)) return <RoleRedirect />;
   return <Outlet />;
 };
 
@@ -129,6 +139,11 @@ export const App: React.FC = () => {
                 <Route path="requests/:id" element={<RequestDetailPage />} />
                 <Route path="profile" element={<ProfilePage />} />
 
+                {/* Discount report (Admin + Heads with access) */}
+                <Route element={<RequireDiscountReport />}>
+                  <Route path="reports/discounts" element={<DiscountReportPage />} />
+                </Route>
+
                 {/* Roles that can raise requests */}
                 <Route element={<RequireRole roles={['employee', 'clerk', 'head']} />}>
                   <Route path="my" element={<MyRequestsPage />} />
@@ -155,6 +170,7 @@ export const App: React.FC = () => {
                   <Route path="admin/approve" element={<AdminApprovePage />} />
                   <Route path="admin/requests" element={<AdminAllRequestsPage />} />
                   <Route path="admin/departments" element={<AdminDepartmentsPage />} />
+                  <Route path="admin/shops" element={<AdminShopsPage />} />
                   <Route path="admin/heads" element={<AdminHeadsPage />} />
                   <Route path="admin/disbursement" element={<AdminDisbursementPage />} />
                   <Route path="admin/credentials" element={<AdminCredentialsPage />} />

@@ -18,9 +18,12 @@ import {
   UserCheck,
   History,
   FileSpreadsheet,
+  Store,
+  Percent,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
+import { canViewDiscountReport } from '../../lib/discountReport';
 
 interface NavItem {
   label: string;
@@ -55,7 +58,7 @@ export const Navigation: React.FC = () => {
   ).length;
 
   const disbAwaitingCount = requests.filter(
-    (r) => r.status === 'approved'
+    (r) => r.status === 'approved' && r.request_type !== 'discount'
   ).length;
 
   let mainNavItems: NavItem[] = [];
@@ -89,6 +92,7 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
+        ...(canViewDiscountReport(user) ? [{ label: 'Discount Report', path: '/reports/discounts', icon: Percent }] : []),
         { label: 'Staff Users', path: '/head/users', icon: Users },
         { label: 'Dept Requests', path: '/head/department', icon: Building2 },
         { label: 'My Requests', path: '/my', icon: FileText },
@@ -103,7 +107,9 @@ export const Navigation: React.FC = () => {
         { label: 'All Requests', path: '/admin/requests', icon: FileSpreadsheet },
       ];
       moreNavItems = [
+        { label: 'Discount Report', path: '/reports/discounts', icon: Percent },
         { label: 'Departments', path: '/admin/departments', icon: Building2 },
+        { label: 'Shops', path: '/admin/shops', icon: Store },
         { label: 'Dept Heads', path: '/admin/heads', icon: UserCheck },
         { label: 'Disbursement Users', path: '/admin/disbursement', icon: Wallet },
         { label: 'Seal & Signature', path: '/admin/credentials', icon: FileCheck2 },

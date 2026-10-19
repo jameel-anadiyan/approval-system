@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { AppRole, Department, Profile } from '../../types/database';
+import { AppRole, Department, RequestType, Shop } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
 import { UserPlus, ShieldAlert } from 'lucide-react';
+import { AccessFields, rolesWithTypes, validateAccess } from './AccessFields';
 
 interface UserModalProps {
   isOpen: boolean;
   onClose: () => void;
   departments: Department[];
+  shops?: Shop[];
   allowedRoles?: AppRole[];
   onCreateUser: (data: {
     username: string;
@@ -16,6 +18,8 @@ interface UserModalProps {
     role: AppRole;
     department_id?: string | null;
     password?: string;
+    shop_id?: string | null;
+    allowed_types?: RequestType[];
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -23,6 +27,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   isOpen,
   onClose,
   departments,
+  shops = [],
   allowedRoles = ['head', 'clerk', 'employee', 'disbursement'],
   onCreateUser,
 }) => {
@@ -34,6 +39,8 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [departmentId, setDepartmentId] = useState<string>(
     user?.department_id || departments[0]?.id || ''
   );
+  const [shopId, setShopId] = useState('');
+  const [types, setTypes] = useState<RequestType[]>(['general']);
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +62,13 @@ export const UserModal: React.FC<UserModalProps> = ({
       return;
     }
 
+    const accessErr = validateAccess(role, shopId, types);
+    if (accessErr) {
+      setError(accessErr);
+      return;
+    }
+    const withTypes = rolesWithTypes.includes(role);
+
     setIsSubmitting(true);
     try {
       const res = await onCreateUser({
@@ -64,12 +78,16 @@ export const UserModal: React.FC<UserModalProps> = ({
         role,
         department_id: isDepartmentRequired ? departmentId : null,
         password,
+        shop_id: withTypes ? shopId || null : null,
+        allowed_types: withTypes ? types : undefined,
       });
 
       if (res.success) {
         setUsername('');
         setFullName('');
         setDesignation('');
+        setShopId('');
+        setTypes(['general']);
         onClose();
       } else {
         setError(res.error || 'Failed to create user account.');
@@ -184,6 +202,15 @@ export const UserModal: React.FC<UserModalProps> = ({
             </select>
           </div>
         )}
+
+        <AccessFields
+          role={role}
+          shops={shops}
+          shopId={shopId}
+          onShopChange={setShopId}
+          types={types}
+          onTypesChange={setTypes}
+        />
 
         <div>
           <label className="text-xs font-bold text-slate-700 block mb-1">

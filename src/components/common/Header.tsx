@@ -49,20 +49,20 @@ export const Header: React.FC = () => {
         {/* Brand / Logo */}
         <div className="flex items-center gap-3">
           <Link to="/" className="flex items-center gap-2.5 group">
-            <div className="w-10 h-10 rounded-xl bg-linear-to-br from-indigo-600 via-indigo-700 to-purple-800 flex items-center justify-center text-white shadow-md shadow-indigo-200 group-hover:scale-105 transition-transform">
-              <span className="font-display font-extrabold text-lg tracking-wider">₹</span>
+            <div className="w-11 h-11 rounded-xl bg-white border border-brand-100 overflow-hidden flex items-center justify-center shadow-sm shadow-brand-100 group-hover:scale-105 transition-transform">
+              <img src="/swa-logo.jpg" alt="SWA Diamonds" className="w-full h-full object-contain scale-125" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-display font-bold text-base sm:text-lg text-slate-900 leading-tight">
-                  Approval App
+                <span className="font-display font-bold text-base sm:text-lg text-brand-800 leading-tight tracking-wide">
+                  SWA Diamonds
                 </span>
-                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  Workflow
+                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-gold-50 text-gold-600 border border-gold-200">
+                  Approvals
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block">
-                Secure digital sign & disbursement
+                Secure digital sign &amp; disbursement
               </p>
             </div>
           </Link>

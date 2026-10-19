@@ -1,39 +1,40 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
-import { StatusBadge } from '../../components/common/StatusBadge';
-import { formatINR, formatISTDate } from '../../lib/formatters';
+import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
+import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
+import { formatINR, typeOf, TYPE_LABELS } from '../../lib/formatters';
 import { useDirectory } from '../../lib/directory';
-import { Search, Download, Filter, FileSpreadsheet, Eye } from 'lucide-react';
+import { Download, FileSpreadsheet, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import type { RequestStatus } from '../../types/database';
+
+const ALL_STATUSES: RequestStatus[] = [
+  'submitted',
+  'pending_head_review',
+  'pending_head_approval',
+  'pending_admin_approval',
+  'approved',
+  'paid',
+  'returned',
+  'rejected',
+  'withdrawn',
+];
 
 export const AdminAllRequestsPage: React.FC = () => {
   const { requests } = useRequests();
   const { departments } = useDirectory();
   const navigate = useNavigate();
 
-  const [search, setSearch] = useState('');
-  const [deptFilter, setDeptFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-
-  const filtered = requests.filter((r) => {
-    const matchesSearch =
-      r.title.toLowerCase().includes(search.toLowerCase()) ||
-      r.requester_name.toLowerCase().includes(search.toLowerCase()) ||
-      (r.request_no && r.request_no.toLowerCase().includes(search.toLowerCase())) ||
-      (r.approval_no && r.approval_no.toLowerCase().includes(search.toLowerCase()));
-
-    const matchesDept = deptFilter === 'all' || r.department_id === deptFilter;
-    const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
-
-    return matchesSearch && matchesDept && matchesStatus;
-  });
+  const { filters, setFilters, result: filtered } = useRequestFilters(requests);
 
   const exportCSV = () => {
     const headers = [
       'Request No',
+      'Type',
       'Title',
       'Requester',
+      'Shop',
       'Department',
       'Amount (INR)',
       'Status',
@@ -43,17 +44,20 @@ export const AdminAllRequestsPage: React.FC = () => {
       'Approved Date',
     ];
 
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const rows = filtered.map((r) => [
-      `"${r.request_no || 'DRAFT'}"`,
-      `"${r.title.replace(/"/g, '""')}"`,
-      `"${r.requester_name}"`,
-      `"${r.department?.code || ''}"`,
+      q(r.request_no || 'DRAFT'),
+      q(TYPE_LABELS[typeOf(r)]),
+      q(r.title),
+      q(r.requester_name),
+      q(r.shop_name || ''),
+      q(r.department?.code || ''),
       r.amount.toFixed(2),
-      `"${r.status}"`,
-      `"${r.route || ''}"`,
-      `"${r.approval_no || ''}"`,
-      `"${r.submitted_at || r.created_at}"`,
-      `"${r.decided_at || ''}"`,
+      q(r.status),
+      q(r.route || ''),
+      q(r.approval_no || ''),
+      q(r.submitted_at || r.created_at),
+      q(r.decided_at || ''),
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
@@ -90,48 +94,15 @@ export const AdminAllRequestsPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="relative">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by title, requester, or number…"
-            className="w-full text-xs sm:text-sm pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-          />
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-        </div>
-
-        <select
-          value={deptFilter}
-          onChange={(e) => setDeptFilter(e.target.value)}
-          className="px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-        >
-          <option value="all">All Departments</option>
-          {departments.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name} ({d.code})
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-        >
-          <option value="all">All Statuses</option>
-          <option value="submitted">Submitted</option>
-          <option value="pending_head_review">Pending Head Review (Route A)</option>
-          <option value="pending_head_approval">Pending Head Approval (Route B)</option>
-          <option value="pending_admin_approval">Pending Admin Approval</option>
-          <option value="approved">Approved</option>
-          <option value="paid">Paid</option>
-          <option value="returned">Returned</option>
-          <option value="rejected">Rejected</option>
-        </select>
-      </div>
+      <RequestFilters
+        value={filters}
+        onChange={setFilters}
+        source={requests}
+        showStatus
+        statusOptions={ALL_STATUSES}
+        departments={departments}
+        resultCount={filtered.length}
+      />
 
       {/* Responsive View: Cards on mobile (< 768px), Table on desktop (>= 768px) */}
       <div className="md:hidden space-y-4">
@@ -160,10 +131,16 @@ export const AdminAllRequestsPage: React.FC = () => {
                 <tr key={req.id} className="hover:bg-slate-50/70 transition-colors">
                   <td className="p-3.5 font-mono font-bold text-slate-900">
                     {req.request_no || 'DRAFT'}
+                    <div className="mt-1">
+                      <TypeBadge type={typeOf(req)} />
+                    </div>
                   </td>
                   <td className="p-3.5 max-w-xs">
                     <div className="font-bold text-slate-900 truncate">{req.title}</div>
-                    <div className="text-[11px] text-slate-400">{req.requester_name}</div>
+                    <div className="text-[11px] text-slate-400">
+                      {req.requester_name}
+                      {req.shop_name ? ` · ${req.shop_name}` : ''}
+                    </div>
                   </td>
                   <td className="p-3.5 font-bold text-slate-700">
                     {req.department?.code || '—'}
@@ -179,7 +156,7 @@ export const AdminAllRequestsPage: React.FC = () => {
                     )}
                   </td>
                   <td className="p-3.5">
-                    <StatusBadge status={req.status} size="sm" />
+                    <StatusBadge status={req.status} requestType={typeOf(req)} size="sm" />
                   </td>
                   <td className="p-3.5 font-mono text-[11px] font-bold text-emerald-800">
                     {req.approval_no || '—'}

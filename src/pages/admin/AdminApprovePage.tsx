@@ -1,7 +1,6 @@
 import React from 'react';
 import { useRequests } from '../../context/RequestContext';
-import { RequestCard } from '../../components/requests/RequestCard';
-import { EmptyState } from '../../components/common/EmptyState';
+import { RequestQueue } from '../../components/requests/RequestQueue';
 import { CheckCircle2, ShieldCheck } from 'lucide-react';
 
 export const AdminApprovePage: React.FC = () => {
@@ -27,19 +26,14 @@ export const AdminApprovePage: React.FC = () => {
         </p>
       </div>
 
-      {toApproveQueue.length === 0 ? (
-        <EmptyState
-          icon={CheckCircle2}
-          title="No Requests Pending Approval"
-          description="All A-route requests forwarded by department heads have been approved or processed."
-        />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {toApproveQueue.map((req) => (
-            <RequestCard key={req.id} request={req} />
-          ))}
-        </div>
-      )}
+      <RequestQueue
+        items={toApproveQueue}
+        bulkApprove
+        initialFilters={{ sort: 'oldest' }}
+        emptyIcon={CheckCircle2}
+        emptyTitle="No Requests Pending Approval"
+        emptyDescription="All A-route requests forwarded by department heads have been approved or processed."
+      />
     </div>
   );
 };

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useRequests } from '../../context/RequestContext';
-import { RequestCard } from '../../components/requests/RequestCard';
 import { EmptyState } from '../../components/common/EmptyState';
+import { TypeBadge } from '../../components/common/StatusBadge';
+import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { RequestRecord } from '../../types/database';
-import { formatINR, formatISTDate } from '../../lib/formatters';
-import { Search, Banknote, Clock, CheckCircle, ShieldCheck, Download, ExternalLink } from 'lucide-react';
+import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
+import { Banknote, Clock, CheckCircle, ShieldCheck, Download } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { downloadSignedPacket } from '../../lib/files';
@@ -16,7 +17,6 @@ export const DisbursementPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'awaiting' | 'paid'>(
     location.pathname.endsWith('/paid') ? 'paid' : 'awaiting'
   );
@@ -33,22 +33,20 @@ export const DisbursementPage: React.FC = () => {
     if (!res.success) setNotice(res.error || 'Download failed');
   };
 
+  // Discount approvals have no payment step, so they never reach Disbursement.
+  const payable = requests.filter((r) => typeOf(r) !== 'discount');
+
   // Awaiting payment: status === 'approved'
-  const awaitingQueue = requests.filter((r) => r.status === 'approved');
+  const awaitingQueue = payable.filter((r) => r.status === 'approved');
 
   // Paid history: status === 'paid'
-  const paidQueue = requests.filter((r) => r.status === 'paid');
+  const paidQueue = payable.filter((r) => r.status === 'paid');
 
   const currentList = activeTab === 'awaiting' ? awaitingQueue : paidQueue;
-
-  const filtered = currentList.filter((r) => {
-    return (
-      r.title.toLowerCase().includes(search.toLowerCase()) ||
-      r.requester_name.toLowerCase().includes(search.toLowerCase()) ||
-      (r.request_no && r.request_no.toLowerCase().includes(search.toLowerCase())) ||
-      (r.approval_no && r.approval_no.toLowerCase().includes(search.toLowerCase()))
-    );
+  const { filters, setFilters, result: filtered } = useRequestFilters(currentList, {
+    sort: activeTab === 'awaiting' ? 'oldest' : 'newest',
   });
+  const search = filters.q;
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -123,17 +121,7 @@ export const DisbursementPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Search Input */}
-      <div className="relative">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by Approval No (APR-…), Request No, or Requester…"
-          className="w-full text-xs sm:text-sm pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-teal-500 focus:ring-1 focus:ring-teal-500 font-mono"
-        />
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-      </div>
+      <RequestFilters value={filters} onChange={setFilters} source={currentList} resultCount={filtered.length} />
 
       {/* Results */}
       {filtered.length === 0 ? (
@@ -163,14 +151,20 @@ export const DisbursementPage: React.FC = () => {
                   <span className="font-mono text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-md">
                     {req.approval_no || req.request_no}
                   </span>
+                  <TypeBadge type={typeOf(req)} />
                   <span className="text-xs text-slate-500">
                     Dept: <strong>{req.department?.code}</strong>
                   </span>
+                  {req.shop_name && (
+                    <span className="text-xs text-slate-500">
+                      Shop: <strong>{req.shop_name}</strong>
+                    </span>
+                  )}
                 </div>
                 <h3 className="font-bold text-slate-900 text-sm sm:text-base hover:text-teal-600 transition-colors">
                   {req.title}
                 </h3>
-                <div className="text-xs text-slate-500 mt-1 flex items-center gap-3">
+                <div className="text-xs text-slate-500 mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap">
                   <span>Beneficiary: <strong>{req.requester_name}</strong></span>
                   <span>Approved: {formatISTDate(req.decided_at, false)}</span>
                   {req.payment_mode && (

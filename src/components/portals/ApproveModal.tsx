@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
-import { useRequests } from '../../context/RequestContext';
-import { formatINR, formatISTDate } from '../../lib/formatters';
+import { useRequests, type ActionVoice } from '../../context/RequestContext';
+import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
+import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { invokeEdgeFunction } from '../../lib/supabase';
 import { downloadStoredFile } from '../../lib/files';
 import {
@@ -20,7 +21,7 @@ interface ApproveModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onApprove: () => Promise<{ success: boolean; approval_no?: string; error?: string }>;
+  onApprove: (voice?: ActionVoice | null) => Promise<{ success: boolean; approval_no?: string; error?: string }>;
 }
 
 export const ApproveModal: React.FC<ApproveModalProps> = ({
@@ -50,7 +51,11 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
 
   const missingCreds = isBackendConnected && !credsLoading && !!creds && (!creds.seal_url || !creds.signature_url);
 
-  const documentPagesCount = request.files?.filter((f) => f.kind === 'document').reduce((acc, f) => acc + (f.page_count || 1), 0) || 1;
+  const [voice, setVoice] = useState<ActionVoice | null>(null);
+  const rType = typeOf(request);
+  const hasForm = rType !== 'general';
+  const uploadedPages = request.files?.filter((f) => f.kind === 'document').reduce((acc, f) => acc + (f.page_count || 1), 0) || 0;
+  const documentPagesCount = hasForm ? uploadedPages : uploadedPages || 1;
 
   const handleStartApproval = async () => {
     setStep('signing');
@@ -77,7 +82,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
     }, 400);
 
     try {
-      const res = await onApprove();
+      const res = await onApprove(voice);
       clearInterval(progressTimer);
 
       if (res.success) {
@@ -123,6 +128,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
     setSigningProgress(0);
     setGeneratedApprovalNo(null);
     setErrorMessage(null);
+    setVoice(null);
     onClose();
   };
 
@@ -161,7 +167,8 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500">Pages to Stamp</span>
               <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                {documentPagesCount} page{documentPagesCount > 1 ? 's' : ''} + Cover Sheet
+                {hasForm ? 'Request form + ' : ''}
+                {documentPagesCount > 0 ? `${documentPagesCount} page${documentPagesCount > 1 ? 's' : ''} + ` : ''}Cover Sheet
               </span>
             </div>
           </div>
@@ -229,6 +236,8 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
               </div>
             )}
           </div>
+
+          <ActionVoiceField onChange={setVoice} label="Add a voice message (optional)" />
 
           {/* Stamping Info note */}
           <div className="text-[11px] text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed">
@@ -301,7 +310,9 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
               Request Approved!
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              All documents stamped and ready for disbursement.
+              {rType === 'discount'
+                ? 'Discount approved. No disbursement is needed for this request.'
+                : 'All documents stamped and ready for disbursement.'}
             </p>
           </div>
 

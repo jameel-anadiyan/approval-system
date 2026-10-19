@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
+import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { EmptyState } from '../../components/common/EmptyState';
 import { RouteModal } from '../../components/portals/RouteModal';
 import { ReturnModal } from '../../components/portals/ReturnModal';
@@ -17,14 +18,11 @@ export const ClerkInboxPage: React.FC = () => {
   const [activeRequest, setActiveRequest] = useState<RequestRecord | null>(null);
   const [modalType, setModalType] = useState<'route' | 'return' | null>(null);
 
-  // Clerk inbox: requests in 'submitted' status in own department, sorted oldest first
-  const pendingRouting = requests
-    .filter(
-      (r) =>
-        r.status === 'submitted' &&
-        (!user?.department_id || r.department_id === user.department_id)
-    )
-    .sort((a, b) => new Date(a.submitted_at || a.created_at).getTime() - new Date(b.submitted_at || b.created_at).getTime());
+  // Clerk inbox: requests in 'submitted' status in own department (oldest first by default)
+  const pendingRouting = requests.filter(
+    (r) => r.status === 'submitted' && (!user?.department_id || r.department_id === user.department_id)
+  );
+  const { filters, setFilters, result: visible } = useRequestFilters(pendingRouting, { sort: 'oldest' });
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -50,11 +48,17 @@ export const ClerkInboxPage: React.FC = () => {
         <div>
           <span className="font-bold">Workflow Routing Rule:</span>
           <p className="mt-0.5 text-indigo-800 leading-relaxed">
-            Requests <strong>above {limit}</strong> can only be routed to Route A (Admin). Requests{' '}
-            <strong>{limit} or less</strong> can be sent to either Route A or Route B (Department Head).
+            General requests <strong>above {limit}</strong> can only be routed to Route A (Admin). Requests{' '}
+            <strong>{limit} or less</strong> can be sent to either Route A or Route B (Department Head).{' '}
+            <strong>Discount</strong> approvals go to Route B (Head) and <strong>Exhibition</strong> requests go to
+            Route A (Admin).
           </p>
         </div>
       </div>
+
+      {pendingRouting.length > 0 && (
+        <RequestFilters value={filters} onChange={setFilters} source={pendingRouting} resultCount={visible.length} />
+      )}
 
       {/* Queue Content */}
       {pendingRouting.length === 0 ? (
@@ -63,9 +67,11 @@ export const ClerkInboxPage: React.FC = () => {
           title="All Caught Up!"
           description="There are currently no new department requests waiting for routing."
         />
+      ) : visible.length === 0 ? (
+        <EmptyState icon={Inbox} title="No matching requests" description="Try clearing the filters." />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {pendingRouting.map((req) => (
+          {visible.map((req) => (
             <RequestCard key={req.id} request={req} />
           ))}
         </div>
@@ -80,8 +86,8 @@ export const ClerkInboxPage: React.FC = () => {
             setActiveRequest(null);
           }}
           request={activeRequest}
-          onRoute={async (rt, rm) => {
-            const res = await routeRequest(activeRequest.id, rt, rm);
+          onRoute={async (rt, rm, v) => {
+            const res = await routeRequest(activeRequest.id, rt, rm, v);
             if (!res.success) throw new Error(res.error || 'Routing failed');
           }}
         />
@@ -95,8 +101,8 @@ export const ClerkInboxPage: React.FC = () => {
             setActiveRequest(null);
           }}
           request={activeRequest}
-          onReturn={async (rm) => {
-            const res = await returnRequest(activeRequest.id, rm);
+          onReturn={async (rm, v) => {
+            const res = await returnRequest(activeRequest.id, rm, v);
             if (!res.success) throw new Error(res.error || 'Return failed');
           }}
         />

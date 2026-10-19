@@ -3,8 +3,12 @@ import { Modal } from '../common/Modal';
 import { FileUploader } from './FileUploader';
 import { RequestFile, RequestRecord } from '../../types/database';
 import { useRequests } from '../../context/RequestContext';
-import { formatFileSize, formatINRWhole } from '../../lib/formatters';
+import { formatFileSize, formatINRWhole, typeOf } from '../../lib/formatters';
 import { FileText, Mic, Trash2, Save, Loader2 } from 'lucide-react';
+import {
+  DiscountFields, ExhibitionFields, discountFromDetails, exhibitionFromDetails, discountCalc, exhibitionCalc,
+  validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
+} from './TypedRequestFields';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -15,15 +19,19 @@ interface EditDraftModalProps {
 /** Requester edits a draft / returned request: details, add documents, remove attachments. */
 export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose, request }) => {
   const { updateDraft, addFiles, removeFile, threshold } = useRequests();
+  const type = typeOf(request);
   const [title, setTitle] = useState(request.title);
   const [amountStr, setAmountStr] = useState(String(request.amount));
   const [notes, setNotes] = useState(request.notes || '');
+  const [discount, setDiscount] = useState(() => discountFromDetails(request.details));
+  const [exhibition, setExhibition] = useState(() => exhibitionFromDetails(request.details));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const amount = parseFloat(amountStr) || 0;
+  const amount =
+    type === 'discount' ? discountCalc(discount).value : type === 'exhibition' ? exhibitionCalc(exhibition).total : parseFloat(amountStr) || 0;
   const existing = request.files || [];
 
   const handleRemoveExisting = async (fileId: string) => {
@@ -38,10 +46,17 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     e.preventDefault();
     setError(null);
     if (!title.trim()) return setError('Please enter a title.');
-    if (amount <= 0) return setError('Amount must be more than zero.');
+    if (amount <= 0 && type === 'general') return setError('Amount must be more than zero.');
+    const v = type === 'discount' ? validateDiscount(discount) : type === 'exhibition' ? validateExhibition(exhibition) : null;
+    if (v) return setError(v);
     setBusy(true);
     try {
-      const upd = await updateDraft(request.id, { title: title.trim(), amount, notes: notes.trim() || undefined });
+      const upd = await updateDraft(request.id, {
+        title: title.trim(),
+        amount,
+        notes: notes.trim() || undefined,
+        details: type === 'discount' ? toDiscountDetails(discount) : type === 'exhibition' ? toExhibitionDetails(exhibition) : null,
+      });
       if (!upd.success) throw new Error(upd.error);
       if (newFiles.length) {
         const add = await addFiles(request.id, newFiles);
@@ -63,15 +78,19 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
             className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
-        <div>
-          <label htmlFor="edit-amount" className="text-xs font-bold text-slate-700 block mb-1">Amount (₹)</label>
-          <input id="edit-amount" type="number" min="1" step="0.01" inputMode="decimal" value={amountStr}
-            onChange={(e) => setAmountStr(e.target.value)}
-            className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-bold" />
-          {amount > threshold && (
-            <p className="text-[11px] text-amber-700 mt-1">Above {formatINRWhole(threshold)}: this will need Admin approval (Route A).</p>
-          )}
-        </div>
+        {type === 'general' && (
+          <div>
+            <label htmlFor="edit-amount" className="text-xs font-bold text-slate-700 block mb-1">Amount (₹)</label>
+            <input id="edit-amount" type="number" min="1" step="0.01" inputMode="decimal" value={amountStr}
+              onChange={(e) => setAmountStr(e.target.value)}
+              className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-bold" />
+            {amount > threshold && (
+              <p className="text-[11px] text-amber-700 mt-1">Above {formatINRWhole(threshold)}: this will need Admin approval (Route A).</p>
+            )}
+          </div>
+        )}
+        {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
+        {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} />}
         <div>
           <label htmlFor="edit-notes" className="text-xs font-bold text-slate-700 block mb-1">Purpose / Notes</label>
           <textarea id="edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
@@ -87,10 +106,12 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
                   {f.kind === 'voice_note' ? <Mic className="w-4 h-4 text-violet-500" /> : <FileText className="w-4 h-4 text-indigo-500" />}
                   <span className="flex-1 truncate font-medium text-slate-700">{f.original_name}</span>
                   <span className="text-[10px] text-slate-400">{formatFileSize(f.size_bytes)}</span>
-                  <button type="button" onClick={() => handleRemoveExisting(f.id)} disabled={removingId === f.id}
-                    className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 disabled:opacity-50" aria-label={`Remove ${f.original_name}`}>
-                    {removingId === f.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  </button>
+                  {!f.added_by && (
+                    <button type="button" onClick={() => handleRemoveExisting(f.id)} disabled={removingId === f.id}
+                      className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 disabled:opacity-50" aria-label={`Remove ${f.original_name}`}>
+                      {removingId === f.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

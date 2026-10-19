@@ -17,6 +17,63 @@ export type ApprovalRoute = 'A' | 'B';
 
 export type FileKind = 'document' | 'voice_note';
 
+export type RequestType = 'general' | 'discount' | 'exhibition';
+
+export interface Shop {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DiscountDetails {
+  before_amount: number;
+  after_amount: number;
+  discount_amount?: number;
+  discount_pct?: number;
+  customer_name?: string | null;
+  reference?: string | null;
+}
+
+export type ExhibitionProvide =
+  | 'stall_space' | 'table_chairs' | 'electricity_lights' | 'logo_stage_banners'
+  | 'stage_announcements' | 'social_media' | 'other';
+
+export interface ExhibitionDetails {
+  event_name: string;
+  organiser_contact?: string | null;
+  venue: string;
+  event_dates: string;
+  /** datetime-local values, e.g. "2026-11-12T10:00" */
+  event_start?: string | null;
+  event_end?: string | null;
+  expected_footfall?: string | null;
+  stall_size_location?: string | null;
+  amount_excl_gst: number;
+  gst_pct: number;
+  gst_amount?: number;
+  total_incl_gst?: number;
+  payment_mode_due?: string | null;
+  organiser_gstin?: string | null;
+  gst_invoice?: boolean;
+  provides?: ExhibitionProvide[];
+  provides_other?: string | null;
+  voucher_1000_qty?: number | null;
+  voucher_500_qty?: number | null;
+  voucher_1000_min?: number | null;
+  voucher_500_min?: number | null;
+  voucher_validity?: string | null;
+  lucky_draw?: string | null;
+  winners_draw?: string | null;
+  other_costs?: number | null;
+  total_budget?: number | null;
+  purpose?: string | null;
+}
+
+export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails>;
+
 export interface Department {
   id: string;
   name: string;
@@ -39,6 +96,11 @@ export interface Profile {
   created_at: string;
   updated_at: string;
   department?: Department;
+  shop_id?: string | null;
+  allowed_types?: RequestType[];
+  shop?: Shop | null;
+  /** Head only — granted by Admin to open the Discount Report */
+  can_view_discount_report?: boolean;
 }
 
 export interface ApproverCredential {
@@ -84,6 +146,10 @@ export interface RequestRecord {
   created_at: string;
   updated_at: string;
   department?: Department;
+  request_type?: RequestType;
+  shop_id?: string | null;
+  shop_name?: string | null;
+  details?: RequestDetails | null;
   files?: RequestFile[];
   signed_files?: SignedFile[];
   actions?: RequestAction[];
@@ -102,6 +168,10 @@ export interface RequestFile {
   sha256: string | null;
   created_at: string;
   public_url?: string;
+  /** Set when a Clerk / Head / Admin added this voice note while acting on the request */
+  added_by?: string | null;
+  added_by_name?: string | null;
+  added_by_role?: AppRole | null;
   /** Client-only: the picked/recorded file awaiting upload to Storage */
   blob?: Blob;
 }

@@ -1,4 +1,4 @@
-import { RequestStatus, AppRole, ApprovalRoute } from '../types/database';
+import { RequestStatus, AppRole, ApprovalRoute, RequestType } from '../types/database';
 
 export function formatINR(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -203,4 +203,42 @@ export const ACTION_LABELS: Record<string, string> = {
   withdrawn: 'Withdrawn',
   approved: 'Approved & Signed',
   paid: 'Payment Disbursed',
+};
+
+export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition'];
+
+export const TYPE_LABELS: Record<RequestType, string> = {
+  general: 'General',
+  discount: 'Discount Approval',
+  exhibition: 'Exhibition / Event',
+};
+
+export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
+  general: 'Money request with invoices or bills. Clerk routes to Head (B) or Admin (A).',
+  discount: 'Customer discount. Head approval (B-level). No payment step.',
+  exhibition: 'Event sponsorship & promotion. Admin approval (A-level), then paid.',
+};
+
+export const TYPE_BADGES: Record<RequestType, string> = {
+  general: 'bg-slate-100 text-slate-700 border-slate-200',
+  discount: 'bg-amber-50 text-amber-800 border-amber-200',
+  exhibition: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+};
+
+export const typeOf = (r: { request_type?: RequestType | null }): RequestType => r.request_type ?? 'general';
+
+/** Status label that knows Discount approvals have no payment step. */
+export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null }): string {
+  if (r.status === 'approved' && typeOf(r) === 'discount') return 'Approved';
+  return STATUS_META[r.status]?.label ?? r.status;
+}
+
+export const PROVIDE_LABELS: Record<string, string> = {
+  stall_space: 'Stall space',
+  table_chairs: 'Table & chairs',
+  electricity_lights: 'Electricity & lights',
+  logo_stage_banners: 'Logo on stage / banners',
+  stage_announcements: 'Stage announcements',
+  social_media: 'Social media mentions',
+  other: 'Other',
 };

@@ -108,11 +108,14 @@ export const SignedDocuments: React.FC<{ request: RequestRecord }> = ({ request 
 export const VoiceNoteItem: React.FC<{ file: RequestFile }> = ({ file }) => {
   const { isBackendConnected } = useAuth();
   const signed = useSignedUrl('request-files', file.storage_path, isBackendConnected);
+  const title = file.added_by_name
+    ? `Voice message from ${file.added_by_name}${file.added_by_role ? ` (${file.added_by_role})` : ''}`
+    : file.original_name;
   return (
     <VoicePlayer
       url={isBackendConnected ? signed.url || undefined : file.public_url}
       duration={file.duration_sec}
-      title={file.original_name}
+      title={title}
     />
   );
 };

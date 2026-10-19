@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord } from '../../types/database';
 import { RotateCcw } from 'lucide-react';
+import type { ActionVoice } from '../../context/RequestContext';
+import { ActionVoiceField } from '../requests/ActionVoiceField';
 
 interface ReturnModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onReturn: (remarks: string) => Promise<void>;
+  onReturn: (remarks: string, voice?: ActionVoice | null) => Promise<void>;
 }
 
 export const ReturnModal: React.FC<ReturnModalProps> = ({
@@ -17,6 +19,7 @@ export const ReturnModal: React.FC<ReturnModalProps> = ({
   onReturn,
 }) => {
   const [remarks, setRemarks] = useState('');
+  const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +33,7 @@ export const ReturnModal: React.FC<ReturnModalProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      await onReturn(remarks.trim());
+      await onReturn(remarks.trim(), voice);
       setRemarks('');
       onClose();
     } catch (err: unknown) {
@@ -73,6 +76,8 @@ export const ReturnModal: React.FC<ReturnModalProps> = ({
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden"
           />
         </div>
+
+        <ActionVoiceField onChange={setVoice} label="Voice message for the requester (optional)" />
 
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
           <button

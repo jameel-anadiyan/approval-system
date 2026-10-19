@@ -1,9 +1,8 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { RequestCard } from '../../components/requests/RequestCard';
-import { EmptyState } from '../../components/common/EmptyState';
-import { Clock, CheckCircle2, CornerDownRight } from 'lucide-react';
+import { RequestQueue } from '../../components/requests/RequestQueue';
+import { CheckCircle2, CornerDownRight } from 'lucide-react';
 
 export const HeadReviewPage: React.FC = () => {
   const { user } = useAuth();
@@ -45,19 +44,13 @@ export const HeadReviewPage: React.FC = () => {
         </div>
       </div>
 
-      {toReviewQueue.length === 0 ? (
-        <EmptyState
-          icon={CheckCircle2}
-          title="Review Queue Cleared"
-          description="There are currently no Route A requests awaiting your department review."
-        />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {toReviewQueue.map((req) => (
-            <RequestCard key={req.id} request={req} />
-          ))}
-        </div>
-      )}
+      <RequestQueue
+        items={toReviewQueue}
+        initialFilters={{ sort: 'oldest' }}
+        emptyIcon={CheckCircle2}
+        emptyTitle="Review Queue Cleared"
+        emptyDescription="There are currently no Route A requests awaiting your department review."
+      />
     </div>
   );
 };

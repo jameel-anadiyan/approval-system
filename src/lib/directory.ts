@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase, invokeEdgeFunction } from './supabase';
 import { useAuth } from '../context/AuthContext';
 import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS } from './mockData';
-import type { AppRole, AuditLogEntry, Department, Profile } from '../types/database';
+import type { AppRole, AuditLogEntry, Department, Profile, RequestType, Shop } from '../types/database';
 
 type Result = { success: boolean; error?: string };
 
@@ -16,22 +16,30 @@ export interface NewUserInput {
   role: AppRole;
   department_id?: string | null;
   password?: string;
+  shop_id?: string | null;
+  allowed_types?: RequestType[];
 }
 
 export function useDirectory() {
   const { isBackendConnected, user } = useAuth();
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [shops, setShops] = useState<Shop[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
     if (isBackendConnected && user) {
-      const [d, p] = await Promise.all([
+      const [d, s, p] = await Promise.all([
         supabase.from('departments').select('*').order('name'),
-        supabase.from('profiles').select('*, department:departments(*)').order('created_at', { ascending: false }),
+        supabase.from('shops').select('*').order('name'),
+        supabase
+          .from('profiles')
+          .select('*, department:departments(*), shop:shops(*)')
+          .order('created_at', { ascending: false }),
       ]);
       setDepartments((d.data as Department[]) ?? []);
+      setShops((s.data as Shop[]) ?? []);
       setUsers((p.data as Profile[]) ?? []);
     } else {
       setDepartments(MOCK_DEPARTMENTS);
@@ -67,6 +75,27 @@ export function useDirectory() {
     return { success: true };
   };
 
+  const saveShop = async (input: { id?: string; name: string; code: string; is_active?: boolean }): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('save_shop', {
+        p_id: input.id ?? null,
+        p_name: input.name,
+        p_code: input.code,
+        p_is_active: input.is_active ?? true,
+      });
+      if (error) return { success: false, error: error.message };
+      await reload();
+      return { success: true };
+    }
+    setShops((prev) =>
+      input.id
+        ? prev.map((s) => (s.id === input.id ? { ...s, ...input, is_active: input.is_active ?? s.is_active } : s))
+        : [{ id: `shop-${Date.now()}`, name: input.name, code: input.code, is_active: true,
+             created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]
+    );
+    return { success: true };
+  };
+
   const createUser = async (input: NewUserInput): Promise<Result> => {
     if (live) {
       const { error } = await invokeEdgeFunction('admin-users', { action: 'create', ...input });
@@ -75,12 +104,42 @@ export function useDirectory() {
       return { success: true };
     }
     const dept = departments.find((d) => d.id === input.department_id);
+    const shop = shops.find((s) => s.id === input.shop_id) ?? null;
     setUsers((prev) => [{
       id: `user-${Date.now()}`, username: input.username, full_name: input.full_name,
       designation: input.designation ?? null, role: input.role, department_id: input.department_id ?? null,
       is_active: true, must_change_password: true, created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(), department: dept,
+      shop_id: input.shop_id ?? null, shop, allowed_types: input.allowed_types ?? ['general'],
     }, ...prev]);
+    return { success: true };
+  };
+
+  /** Admin / Head changes a user's shop and which request types they may raise. */
+  const updateAccess = async (
+    userId: string,
+    access: { shop_id: string | null; allowed_types: RequestType[] }
+  ): Promise<Result> => {
+    if (live) {
+      const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
+      if (error) return { success: false, error: error.message };
+      await reload();
+      return { success: true };
+    }
+    const shop = shops.find((s) => s.id === access.shop_id) ?? null;
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...access, shop } : u)));
+    return { success: true };
+  };
+
+  /** Admin grants / revokes a Head's access to the Discount Report. */
+  const setDiscountReportAccess = async (userId: string, allowed: boolean): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('set_discount_report_access', { p_user_id: userId, p_allowed: allowed });
+      if (error) return { success: false, error: error.message };
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, can_view_discount_report: allowed } : u)));
     return { success: true };
   };
 
@@ -122,7 +181,10 @@ export function useDirectory() {
     return { success: true };
   };
 
-  return { departments, users, loading, live, reload, saveDepartment, createUser, resetPassword, setActive, uploadCredential };
+  return {
+    departments, shops, users, loading, live, reload, saveDepartment, saveShop, createUser, updateAccess,
+    setDiscountReportAccess, resetPassword, setActive, uploadCredential,
+  };
 }
 
 export async function loadAuditLog(live: boolean): Promise<AuditLogEntry[]> {

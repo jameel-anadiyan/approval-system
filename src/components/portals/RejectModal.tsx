@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord } from '../../types/database';
 import { XCircle } from 'lucide-react';
+import type { ActionVoice } from '../../context/RequestContext';
+import { ActionVoiceField } from '../requests/ActionVoiceField';
 
 interface RejectModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onReject: (reason: string) => Promise<void>;
+  onReject: (reason: string, voice?: ActionVoice | null) => Promise<void>;
 }
 
 export const RejectModal: React.FC<RejectModalProps> = ({
@@ -17,6 +19,7 @@ export const RejectModal: React.FC<RejectModalProps> = ({
   onReject,
 }) => {
   const [reason, setReason] = useState('');
+  const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +33,7 @@ export const RejectModal: React.FC<RejectModalProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      await onReject(reason.trim());
+      await onReject(reason.trim(), voice);
       setReason('');
       onClose();
     } catch (err: unknown) {
@@ -72,6 +75,8 @@ export const RejectModal: React.FC<RejectModalProps> = ({
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-hidden"
           />
         </div>
+
+        <ActionVoiceField onChange={setVoice} label="Voice message (optional)" />
 
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
           <button

@@ -2,8 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { RequestCard } from '../../components/requests/RequestCard';
-import { formatINR, formatINRWhole } from '../../lib/formatters';
+import { RequestQueue } from '../../components/requests/RequestQueue';
+import { formatINR, formatINRWhole, typeOf } from '../../lib/formatters';
 import { useDirectory } from '../../lib/directory';
 import {
   ShieldCheck,
@@ -25,13 +25,13 @@ export const AdminDashboardPage: React.FC = () => {
   // Admin To-Approve: status === 'pending_admin_approval'
   const pendingApprovals = requests.filter((r) => r.status === 'pending_admin_approval');
 
-  // Total Disbursed / Approved
+  // Total Disbursed / Approved (discount values are not payouts)
   const totalApproved = requests
-    .filter((r) => r.status === 'approved' || r.status === 'paid')
+    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount')
     .reduce((sum, r) => sum + r.amount, 0);
 
-  // High Value requests
-  const highValueCount = requests.filter((r) => r.amount > threshold).length;
+  // High Value requests (threshold applies to General requests)
+  const highValueCount = requests.filter((r) => typeOf(r) === 'general' && r.amount > threshold).length;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -131,17 +131,14 @@ export const AdminDashboardPage: React.FC = () => {
           </button>
         </div>
 
-        {pendingApprovals.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-8 text-center text-slate-400 text-xs sm:text-sm">
-            No requests currently pending Admin approval. All A-route items are up to date!
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {pendingApprovals.map((req) => (
-              <RequestCard key={req.id} request={req} />
-            ))}
-          </div>
-        )}
+        <RequestQueue
+          items={pendingApprovals}
+          bulkApprove
+          initialFilters={{ sort: 'oldest' }}
+          emptyIcon={ShieldCheck}
+          emptyTitle="Nothing pending"
+          emptyDescription="No requests currently pending Admin approval. All A-route items are up to date!"
+        />
       </div>
 
       {/* Quick Navigation Cards */}

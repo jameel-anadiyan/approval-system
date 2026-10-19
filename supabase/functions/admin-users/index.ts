@@ -8,6 +8,24 @@ import {
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
 
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
+const REQUEST_TYPES = ["general", "discount", "exhibition"] as const;
+
+/** Request types the user may raise (only for roles that raise requests). */
+function parseTypes(v: unknown, role: Role): string[] {
+  if (!(role === "employee" || role === "clerk" || role === "head")) return ["general"];
+  const list = Array.isArray(v) ? v.filter((t) => (REQUEST_TYPES as readonly string[]).includes(t)) : [];
+  const uniq = [...new Set(list as string[])];
+  if (!uniq.length) throw new HttpError(400, "bad_request", "Select at least one request type.");
+  return uniq;
+}
+
+async function parseShop(admin: SupabaseClient, v: unknown): Promise<string | null> {
+  if (v === null || v === undefined || v === "") return null;
+  const id = requireUuid(v, "Shop");
+  const { data } = await admin.from("shops").select("id,is_active").eq("id", id).maybeSingle();
+  if (!data || !data.is_active) throw new HttpError(400, "bad_request", "Shop not found or inactive.");
+  return id;
+}
 
 function canManage(me: Profile, target: { role: Role; department_id: string | null }): boolean {
   if (me.role === "admin") return target.role === "head" || target.role === "disbursement";
@@ -40,6 +58,9 @@ Deno.serve(handle(async (req) => {
         ? body.designation.trim().slice(0, 100) : null;
       const role = body.role as Role;
       const password = validatePassword(body.password);
+      const allowed_types = parseTypes(body.allowed_types, role);
+      const shop_id = await parseShop(admin, body.shop_id);
+      if (role === "employee" && !shop_id) throw new HttpError(400, "bad_request", "Select the employee's shop.");
       let department_id: string | null = null;
       if (me.role === "head") {
         department_id = me.department_id;
@@ -68,14 +89,14 @@ Deno.serve(handle(async (req) => {
       if (error || !created.user) throw new HttpError(400, "auth_error", error?.message ?? "Could not create the login.");
 
       const { error: pErr } = await admin.from("profiles").insert({
-        id: created.user.id, username, full_name, designation, role, department_id,
+        id: created.user.id, username, full_name, designation, role, department_id, shop_id, allowed_types,
         must_change_password: true, created_by: me.id,
       });
       if (pErr) {
         await admin.auth.admin.deleteUser(created.user.id);
         throw new HttpError(400, "profile_error", pErr.message);
       }
-      await audit(admin, me, "user_created", "user", created.user.id, { username, role, department_id });
+      await audit(admin, me, "user_created", "user", created.user.id, { username, role, department_id, shop_id, allowed_types });
       return json({ id: created.user.id, username });
     }
 
@@ -118,6 +139,19 @@ Deno.serve(handle(async (req) => {
         ? body.designation.trim().slice(0, 100) : null;
       await admin.from("profiles").update({ full_name, designation, updated_at: new Date().toISOString() }).eq("id", userId);
       await audit(admin, me, "user_updated", "user", userId, { username: target.username, full_name, designation });
+      return json({ ok: true });
+    }
+
+    case "update_access": {
+      const userId = requireUuid(body.user_id, "User");
+      const target = await loadTarget(admin, me, userId);
+      const allowed_types = parseTypes(body.allowed_types, target.role);
+      const shop_id = await parseShop(admin, body.shop_id);
+      if (target.role === "employee" && !shop_id) throw new HttpError(400, "bad_request", "Select the employee's shop.");
+      const { error } = await admin.from("profiles")
+        .update({ shop_id, allowed_types, updated_at: new Date().toISOString() }).eq("id", userId);
+      if (error) throw new HttpError(400, "profile_error", error.message);
+      await audit(admin, me, "user_access_updated", "user", userId, { username: target.username, shop_id, allowed_types });
       return json({ ok: true });
     }
 

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, LucideIcon } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
-import { ROLE_BADGES, ROLE_LABELS } from '../../lib/formatters';
+import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
 import type { AppRole, Profile } from '../../types/database';
 import { UserModal } from './UserModal';
+import { AccessModal, rolesWithTypes } from './AccessFields';
 import { CredentialsModal } from './CredentialsModal';
 import { Modal } from '../common/Modal';
 import { LoadingSpinner } from '../common/LoadingSpinner';
@@ -28,6 +29,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const [createOpen, setCreateOpen] = useState(false);
   const [credTarget, setCredTarget] = useState<Profile | null>(null);
   const [resetTarget, setResetTarget] = useState<Profile | null>(null);
+  const [accessTarget, setAccessTarget] = useState<Profile | null>(null);
   const [resetPw, setResetPw] = useState('');
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -46,6 +48,18 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
     const res = await dir.setActive(u.id, !u.is_active);
     setBusyId(null);
     show(res.success ? `@${u.username} ${u.is_active ? 'deactivated' : 'activated'}.` : res.error!, res.success);
+  };
+
+  const toggleReport = async (u: Profile) => {
+    setBusyId(u.id);
+    const res = await dir.setDiscountReportAccess(u.id, !u.can_view_discount_report);
+    setBusyId(null);
+    show(
+      res.success
+        ? `Discount Report ${u.can_view_discount_report ? 'access removed for' : 'opened to'} ${u.full_name}.`
+        : res.error!,
+      res.success
+    );
   };
 
   const submitReset = async (e: React.FormEvent) => {
@@ -131,6 +145,46 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                 </div>
               )}
 
+              {rolesWithTypes.includes(u.role) && (
+                <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-600 min-w-0">
+                    <Store className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{u.shop ? `${u.shop.name} (${u.shop.code})` : 'No shop'}</span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {(u.allowed_types?.length ? u.allowed_types : ['general' as const]).map((t) => (
+                      <span key={t} className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-brand-200 bg-brand-50 text-brand-700">
+                        {TYPE_LABELS[t]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {me?.role === 'admin' && u.role === 'head' && (
+                <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 cursor-pointer">
+                  <span className="flex items-center gap-2 text-xs text-slate-700">
+                    <Percent className="w-3.5 h-3.5 text-brand-600" />
+                    <span><strong>Discount Report</strong> access</span>
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    id={`report-access-${u.id}`}
+                    aria-checked={!!u.can_view_discount_report}
+                    disabled={busyId === u.id}
+                    onClick={() => toggleReport(u)}
+                    className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
+                      u.can_view_discount_report ? 'bg-brand-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                      u.can_view_discount_report ? 'translate-x-4' : ''
+                    }`} />
+                  </button>
+                </label>
+              )}
+
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
                 {showCredentials && (u.role === 'head' || u.role === 'admin') ? (
                   <button type="button" onClick={() => setCredTarget(u)}
@@ -138,7 +192,13 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     <Stamp className="w-3.5 h-3.5" /><span>Seal & Signature</span>
                   </button>
                 ) : <span />}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {rolesWithTypes.includes(u.role) && (
+                    <button type="button" id={`access-${u.id}`} onClick={() => setAccessTarget(u)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs">
+                      <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" /><span>Access</span>
+                    </button>
+                  )}
                   <button type="button" onClick={() => setResetTarget(u)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs">
                     <KeyRound className="w-3.5 h-3.5 text-slate-400" /><span>Reset password</span>
@@ -163,10 +223,24 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
           isOpen
           onClose={() => setCreateOpen(false)}
           departments={dir.departments.filter((d) => d.is_active)}
+          shops={dir.shops}
           allowedRoles={roles}
           onCreateUser={async (input) => {
             const res = await dir.createUser(input);
             if (res.success) show(`@${input.username} created. They must change the temporary password at first login.`);
+            return res;
+          }}
+        />
+      )}
+
+      {accessTarget && (
+        <AccessModal
+          target={accessTarget}
+          shops={dir.shops}
+          onClose={() => setAccessTarget(null)}
+          onSave={async (access) => {
+            const res = await dir.updateAccess(accessTarget.id, access);
+            if (res.success) show(`Access updated for @${accessTarget.username}.`);
             return res;
           }}
         />

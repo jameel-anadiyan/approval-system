@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord, ApprovalRoute } from '../../types/database';
-import { formatINR, formatINRWhole } from '../../lib/formatters';
-import { useRequests } from '../../context/RequestContext';
-import { ShieldAlert, ArrowRight, UserCheck, ShieldCheck } from 'lucide-react';
+import { formatINR, formatINRWhole, TYPE_LABELS, typeOf } from '../../lib/formatters';
+import { useRequests, ActionVoice } from '../../context/RequestContext';
+import { ActionVoiceField } from '../requests/ActionVoiceField';
+import { ShieldAlert, ArrowRight, UserCheck, Lock } from 'lucide-react';
 
 interface RouteModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onRoute: (route: ApprovalRoute, remarks?: string) => Promise<void>;
+  onRoute: (route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<void>;
 }
 
 export const RouteModal: React.FC<RouteModalProps> = ({
@@ -18,23 +19,26 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   request,
   onRoute,
 }) => {
-  const [selectedRoute, setSelectedRoute] = useState<ApprovalRoute>('A');
+  const type = typeOf(request);
+  const [selectedRoute, setSelectedRoute] = useState<ApprovalRoute>(type === 'discount' ? 'B' : 'A');
   const [remarks, setRemarks] = useState('');
+  const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { threshold } = useRequests();
-  const isHighValue = request.amount > threshold;
+  const isHighValue = type === 'general' && request.amount > threshold;
   const limit = formatINRWhole(threshold);
   const isRequesterHead = request.requester_role === 'head';
 
-  const isRouteBDisabled = isHighValue || isRequesterHead;
+  // Request type decides the level: Discount = B (Head), Exhibition = A (Admin).
+  const typeLock: ApprovalRoute | null = type === 'exhibition' ? 'A' : type === 'discount' && !isRequesterHead ? 'B' : null;
+  const isRouteBDisabled = isHighValue || isRequesterHead || typeLock === 'A';
+  const isRouteADisabled = typeLock === 'B';
 
-  // Auto-select Route A if B is disabled
   React.useEffect(() => {
-    if (isRouteBDisabled) {
-      setSelectedRoute('A');
-    }
-  }, [isRouteBDisabled]);
+    if (typeLock) setSelectedRoute(typeLock);
+    else if (isRouteBDisabled) setSelectedRoute('A');
+  }, [isRouteBDisabled, typeLock]);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +47,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      await onRoute(selectedRoute, remarks);
+      await onRoute(selectedRoute, remarks, voice);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -73,9 +77,22 @@ export const RouteModal: React.FC<RouteModalProps> = ({
             {request.title}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">
-            Requester: {request.requester_name} ({request.requester_role})
+            {TYPE_LABELS[type]} · Requester: {request.requester_name} ({request.requester_role})
+            {request.shop_name ? ` · ${request.shop_name}` : ''}
           </div>
         </div>
+
+        {typeLock && (
+          <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl flex items-start gap-2.5 text-xs text-indigo-900">
+            <Lock className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">{TYPE_LABELS[type]}:</span>{' '}
+              {typeLock === 'B'
+                ? 'needs B-level approval — the Department Head approves directly. No payment step.'
+                : 'needs A-level approval — Head reviews, then Admin approves.'}
+            </div>
+          </div>
+        )}
 
         {/* High-value threshold notice */}
         {isHighValue && (
@@ -109,16 +126,19 @@ export const RouteModal: React.FC<RouteModalProps> = ({
 
           {/* Route A Option */}
           <label
-            className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
-              selectedRoute === 'A'
-                ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-100'
-                : 'border-slate-200 hover:border-slate-300 bg-white'
+            className={`flex items-start gap-3 p-3.5 rounded-xl border-2 transition-all ${
+              isRouteADisabled
+                ? 'opacity-50 cursor-not-allowed bg-slate-100/70 border-slate-200'
+                : selectedRoute === 'A'
+                ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-100 cursor-pointer'
+                : 'border-slate-200 hover:border-slate-300 bg-white cursor-pointer'
             }`}
           >
             <input
               type="radio"
               name="route"
               value="A"
+              disabled={isRouteADisabled}
               checked={selectedRoute === 'A'}
               onChange={() => setSelectedRoute('A')}
               className="mt-1 text-indigo-600 focus:ring-indigo-500"
@@ -127,7 +147,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-900 text-sm">Route A — Admin Sign-off</span>
                 <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700">
-                  {isHighValue ? 'Mandatory' : 'Standard'}
+                  {isRouteADisabled ? 'Not for this type' : isHighValue || typeLock === 'A' ? 'Mandatory' : 'Standard'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
@@ -160,7 +180,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
                 <span className="font-bold text-slate-900 text-sm">Route B — Head Direct Approval</span>
                 {isRouteBDisabled ? (
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-600">
-                    {isRequesterHead ? 'Not allowed' : `Disabled (> ${limit})`}
+                    {typeLock === 'A' ? 'Not for this type' : isRequesterHead ? 'Not allowed' : `Disabled (> ${limit})`}
                   </span>
                 ) : (
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700">
@@ -169,7 +189,8 @@ export const RouteModal: React.FC<RouteModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Department Head approves directly with their official seal and signature (for requests ≤ {limit}).
+                Department Head approves directly with their official seal and signature
+                {type === 'discount' ? ' (any amount for Discount).' : ` (for requests ≤ ${limit}).`}
               </p>
             </div>
           </label>
@@ -188,6 +209,8 @@ export const RouteModal: React.FC<RouteModalProps> = ({
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
           />
         </div>
+
+        <ActionVoiceField onChange={setVoice} />
 
         {error && (
           <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{error}</div>

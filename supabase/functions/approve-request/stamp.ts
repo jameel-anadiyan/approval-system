@@ -245,3 +245,82 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
   doc.setTitle(`${ctx.approvalNo} packet`);
   return { bytes: await doc.save({ useObjectStreams: true }), pageCount: doc.getPageCount() };
 }
+
+export interface FormSection {
+  title: string;
+  rows?: [string, string][];
+  text?: string | null;
+}
+
+const NAVY = rgb(0.12, 0.16, 0.27);
+const GOLD = rgb(0.72, 0.56, 0.2);
+const CREAM = rgb(0.96, 0.94, 0.9);
+const LINE = rgb(0.82, 0.83, 0.87);
+
+/** The filled request form (Discount / Exhibition) as a clean A4 PDF, ready to be stamped. */
+export async function buildFormPdf(
+  heading: string, subtitle: string, sections: FormSection[], fonts: { regular: Uint8Array; bold: Uint8Array },
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const regular = await doc.embedFont(fonts.regular, { subset: true });
+  const bold = await doc.embedFont(fonts.bold, { subset: true });
+  const M = 40, W = A4.w - 2 * M;
+  let page = doc.addPage([A4.w, A4.h]);
+  let y = A4.h - M;
+
+  const header = () => {
+    page.drawRectangle({ x: 0, y: A4.h - 6, width: A4.w, height: 6, color: NAVY });
+    const hw = bold.widthOfTextAtSize(heading, 20);
+    page.drawText(heading, { x: (A4.w - hw) / 2, y: y - 22, size: 20, font: bold, color: NAVY });
+    const sw = bold.widthOfTextAtSize(subtitle, 9.5);
+    page.drawText(subtitle, { x: (A4.w - sw) / 2, y: y - 40, size: 9.5, font: bold, color: GOLD });
+    page.drawRectangle({ x: M, y: y - 50, width: W, height: 1.2, color: GOLD });
+    y -= 64;
+  };
+  const ensure = (need: number) => {
+    if (y - need < M) { page = doc.addPage([A4.w, A4.h]); y = A4.h - M; header(); }
+  };
+  header();
+
+  for (const s of sections) {
+    ensure(40);
+    page.drawRectangle({ x: M, y: y - 18, width: W, height: 18, color: NAVY });
+    page.drawRectangle({ x: M, y: y - 18, width: 4, height: 18, color: GOLD });
+    page.drawText(s.title.toUpperCase(), { x: M + 12, y: y - 13, size: 9, font: bold, color: rgb(1, 1, 1) });
+    y -= 18;
+    const rows = s.rows ?? [];
+    // two label/value pairs per line
+    for (let i = 0; i < rows.length; i += 2) {
+      const pair = rows.slice(i, i + 2);
+      const colW = W / 2, labW = 105, valW = colW - labW - 10;
+      const lines = pair.map(([, v]) => wrap(v || "—", regular, 9, valW));
+      const h = Math.max(24, Math.max(...lines.map((l) => l.length)) * 12 + 10);
+      ensure(h);
+      pair.forEach(([k], j) => {
+        const x = M + j * colW;
+        page.drawRectangle({ x, y: y - h, width: labW, height: h, color: CREAM, borderColor: LINE, borderWidth: 0.6 });
+        page.drawRectangle({ x: x + labW, y: y - h, width: colW - labW, height: h, borderColor: LINE, borderWidth: 0.6 });
+        wrap(k, bold, 8.5, labW - 10).slice(0, 3).forEach((l, n) =>
+          page.drawText(l, { x: x + 6, y: y - 14 - n * 11, size: 8.5, font: bold, color: NAVY }));
+        lines[j].forEach((l, n) =>
+          page.drawText(l, { x: x + labW + 6, y: y - 14 - n * 12, size: 9, font: regular, color: INK }));
+      });
+      y -= h;
+    }
+    if (s.text !== undefined) {
+      const lines = wrap(s.text || "—", regular, 9.5, W - 16).slice(0, 30);
+      const h = Math.max(36, lines.length * 13 + 12);
+      ensure(h);
+      page.drawRectangle({ x: M, y: y - h, width: W, height: h, borderColor: LINE, borderWidth: 0.6 });
+      lines.forEach((l, n) => page.drawText(l, { x: M + 8, y: y - 16 - n * 13, size: 9.5, font: regular, color: INK }));
+      y -= h;
+    }
+    y -= 12;
+  }
+  ensure(20);
+  const foot = "SWA Diamonds · Internal Approval Form";
+  page.drawText(foot, { x: (A4.w - regular.widthOfTextAtSize(foot, 7.5)) / 2, y: M - 10, size: 7.5, font: regular, color: GREY });
+  doc.setProducer("Approval App");
+  return await doc.save({ useObjectStreams: true });
+}

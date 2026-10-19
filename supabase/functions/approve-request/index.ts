@@ -3,7 +3,7 @@
 // stamp each file → build packet → upload (no overwrite) → finalize_approval.
 // On any error: abort_approval (status goes back, approval number stays reserved).
 import { getCaller, handle, HttpError, json, readJson, requireUuid } from "../_shared/common.ts";
-import { buildPacket, loadFonts, stampDocument, type StampContext } from "./stamp.ts";
+import { buildFormPdf, buildPacket, type FormSection, loadFonts, stampDocument, type StampContext } from "./stamp.ts";
 
 const ACTION_LABEL: Record<string, string> = {
   submitted: "Submitted", resubmitted: "Resubmitted after correction", routed_A: "Routed to A (Admin)",
@@ -42,6 +42,74 @@ function appOrigin(v: unknown): string | null {
     if (u.protocol === "https:" || u.hostname === "localhost" || u.hostname === "127.0.0.1") return u.origin;
   } catch { /* ignore */ }
   return Deno.env.get("APP_URL") ?? null;
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  general: "General", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
+};
+const PROVIDES: Record<string, string> = {
+  stall_space: "Stall space", table_chairs: "Table & chairs", electricity_lights: "Electricity & lights",
+  logo_stage_banners: "Logo on stage / banners", stage_announcements: "Stage announcements",
+  social_media: "Social media mentions", other: "Other",
+};
+
+// deno-lint-ignore no-explicit-any
+function formSections(r: any, submitted: string): { subtitle: string; sections: FormSection[] } | null {
+  const d = r.details ?? {};
+  const money = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : inr(Number(v)));
+  const txt = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
+  if (r.request_type === "discount") {
+    return {
+      subtitle: "DISCOUNT APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)], ["Subject", txt(r.title)],
+          ["Customer", txt(d.customer_name)], ["Bill / Ref No", txt(d.reference)],
+        ] },
+        { title: "Discount", rows: [
+          ["Amount before discount", money(d.before_amount)], ["Amount after discount", money(d.after_amount)],
+          ["Discount amount", money(d.discount_amount)], ["Discount %", `${Number(d.discount_pct ?? 0).toFixed(2)} %`],
+        ] },
+        { title: "Remarks", text: r.notes ?? "" },
+      ],
+    };
+  }
+  if (r.request_type === "exhibition") {
+    const provides = (Array.isArray(d.provides) ? d.provides : []).map((p: string) => PROVIDES[p] ?? p);
+    if (d.provides_other) provides.push(`Other: ${d.provides_other}`);
+    return {
+      subtitle: "EVENT SPONSORSHIP & PROMOTION APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet", txt(r.shop_name)],
+        ] },
+        { title: "1  Event details", rows: [
+          ["Event Name", txt(d.event_name)], ["Organiser & Contact", txt(d.organiser_contact)],
+          ["Venue", txt(d.venue)], ["Event Date(s) & Time", txt(d.event_dates)],
+          ["Expected Footfall", txt(d.expected_footfall)], ["Stall Size & Location", txt(d.stall_size_location)],
+        ] },
+        { title: "2  Sponsorship amount", rows: [
+          ["Amount (excl. GST)", money(d.amount_excl_gst)], [`GST ${Number(d.gst_pct ?? 0)} %`, money(d.gst_amount)],
+          ["Total incl. GST", money(d.total_incl_gst)], ["Payment Mode & Due Date", txt(d.payment_mode_due)],
+          ["Organiser GSTIN", txt(d.organiser_gstin)], ["GST Invoice Provided", d.gst_invoice ? "Yes" : "No"],
+        ] },
+        { title: "3  Event team will provide", text: provides.length ? provides.join("  ·  ") : "—" },
+        { title: "4  Our promotion plan", rows: [
+          ["₹1,000 Vouchers (Qty)", txt(d.voucher_1000_qty)], ["₹500 Vouchers (Qty)", txt(d.voucher_500_qty)],
+          ["₹1,000 Voucher Min. Purchase", money(d.voucher_1000_min)], ["₹500 Voucher Min. Purchase", money(d.voucher_500_min)],
+          ["Voucher Validity", txt(d.voucher_validity)], ["Lucky Draw Prize & Value", txt(d.lucky_draw)],
+          ["No. of Winners & Draw Date", txt(d.winners_draw)], ["Other Costs (printing, branding, staff)", money(d.other_costs)],
+          ["Total Budget", money(d.total_budget)],
+        ] },
+        { title: "5  Purpose / expected result", text: d.purpose ?? "" },
+        ...(r.notes ? [{ title: "Remarks", text: r.notes as string }] : []),
+      ],
+    };
+  }
+  return null;
 }
 
 Deno.serve(handle(async (req) => {
@@ -88,10 +156,30 @@ Deno.serve(handle(async (req) => {
 
     // deno-lint-ignore no-explicit-any
     const files: any[] = b.files;
-    if (!files.length) throw new Error("No documents to sign");
+    const form = formSections(r, r.submitted_at ? ist(r.submitted_at, false) : "—");
+    if (!files.length && !form) throw new Error("No documents to sign");
     const signedBytes: Uint8Array[] = [];
     const records: Record<string, unknown>[] = [];
     const docsInfo: { name: string; pages: number }[] = [];
+
+    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number) => {
+      const fileName = `${b.approval_no}_${String(index).padStart(2, "0")}_${safeName(label)}.pdf`;
+      const path = `${requestId}/${fileName}`;
+      const { error } = await admin.storage.from("signed-documents")
+        .upload(path, bytes, { contentType: "application/pdf", upsert: false });
+      if (error) throw new Error(`Upload failed: ${error.message}`);
+      signedBytes.push(bytes);
+      docsInfo.push({ name: label, pages });
+      records.push({ source_file_id: sourceId, is_packet: false, file_name: fileName, storage_path: path,
+        sha256: await sha256(bytes), page_count: pages });
+    };
+
+    let n = 0;
+    if (form) {
+      const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections, fonts);
+      const out = await stampDocument(formPdf, ctx);
+      await store(out.bytes, ++n, r.request_type === "discount" ? "discount_form" : "exhibition_form", null, out.pageCount);
+    }
 
     // One file at a time to keep memory low.
     for (let i = 0; i < files.length; i++) {
@@ -103,15 +191,7 @@ Deno.serve(handle(async (req) => {
       } catch (e) {
         throw new Error(`Could not stamp "${f.original_name}": ${e instanceof Error ? e.message : e}`);
       }
-      const fileName = `${b.approval_no}_${String(i + 1).padStart(2, "0")}_${safeName(f.original_name)}.pdf`;
-      const path = `${requestId}/${fileName}`;
-      const { error } = await admin.storage.from("signed-documents")
-        .upload(path, out.bytes, { contentType: "application/pdf", upsert: false });
-      if (error) throw new Error(`Upload failed: ${error.message}`);
-      signedBytes.push(out.bytes);
-      docsInfo.push({ name: f.original_name, pages: out.pageCount });
-      records.push({ source_file_id: f.id, is_packet: false, file_name: fileName, storage_path: path,
-        sha256: await sha256(out.bytes), page_count: out.pageCount });
+      await store(out.bytes, ++n, f.original_name, f.id, out.pageCount);
     }
 
     const packet = await buildPacket({
@@ -119,8 +199,10 @@ Deno.serve(handle(async (req) => {
       rows: [
         ["Approval No", b.approval_no],
         ["Request No", r.request_no],
+        ["Type", TYPE_LABEL[r.request_type] ?? "General"],
         ["Amount", inr(Number(r.amount))],
         ["Department", r.department ?? "—"],
+        ["Shop", r.shop_name ?? "—"],
         ["Requested by", r.requester_name],
         ["Submitted", r.submitted_at ? ist(r.submitted_at) : "—"],
         ["Route", r.route === "A" ? "A — Admin approval" : "B — Head approval"],
