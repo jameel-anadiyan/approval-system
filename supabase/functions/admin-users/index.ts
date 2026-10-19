@@ -28,7 +28,7 @@ async function parseShop(admin: SupabaseClient, v: unknown): Promise<string | nu
 }
 
 function canManage(me: Profile, target: { role: Role; department_id: string | null }): boolean {
-  if (me.role === "admin") return target.role === "head" || target.role === "disbursement";
+  if (me.role === "admin") return true;
   if (me.role === "head") {
     return (target.role === "clerk" || target.role === "employee") && target.department_id === me.department_id;
   }
@@ -64,7 +64,7 @@ Deno.serve(handle(async (req) => {
       let department_id: string | null = null;
       if (me.role === "head") {
         department_id = me.department_id;
-      } else if (role === "head") {
+      } else if (role === "head" || role === "clerk" || role === "employee") {
         department_id = requireUuid(body.department_id, "Department");
       }
       if (!canManage(me, { role, department_id })) {
@@ -153,6 +153,38 @@ Deno.serve(handle(async (req) => {
       if (error) throw new HttpError(400, "profile_error", error.message);
       await audit(admin, me, "user_access_updated", "user", userId, { username: target.username, shop_id, allowed_types });
       return json({ ok: true });
+    }
+
+    case "set_photo":
+    case "remove_photo": {
+      const userId = requireUuid(body.user_id, "User");
+      let target: Profile;
+      if (userId === me.id) {
+        target = me;
+      } else {
+        target = await loadTarget(admin, me, userId);
+      }
+      const { data: cur } = await admin.from("profiles").select("photo_path").eq("id", userId).maybeSingle();
+      let photo_path: string | null = null;
+      if (body.action === "set_photo") {
+        const dataUrl = typeof body.image === "string" ? body.image : "";
+        const m = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+        if (!m) throw new HttpError(400, "bad_request", "Photo must be a JPEG, PNG or WebP image.");
+        const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+        if (bytes.byteLength > 2 * 1024 * 1024) throw new HttpError(400, "bad_request", "Photo must be under 2 MB.");
+        const ext = m[1] === "image/png" ? "png" : m[1] === "image/webp" ? "webp" : "jpg";
+        photo_path = `${userId}/${Date.now()}.${ext}`;
+        const { error: upErr } = await admin.storage.from("profile-photos")
+          .upload(photo_path, bytes, { contentType: m[1], upsert: false });
+        if (upErr) throw new HttpError(400, "storage_error", upErr.message);
+      }
+      const { error } = await admin.from("profiles")
+        .update({ photo_path, updated_at: new Date().toISOString() }).eq("id", userId);
+      if (error) throw new HttpError(400, "profile_error", error.message);
+      if (cur?.photo_path) await admin.storage.from("profile-photos").remove([cur.photo_path]);
+      await audit(admin, me, body.action === "set_photo" ? "user_photo_updated" : "user_photo_removed", "user", userId,
+        { username: target.username });
+      return json({ ok: true, photo_path });
     }
 
     default:

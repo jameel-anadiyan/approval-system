@@ -18,6 +18,7 @@ export interface NewUserInput {
   password?: string;
   shop_id?: string | null;
   allowed_types?: RequestType[];
+  photo?: string;
 }
 
 export function useDirectory() {
@@ -98,8 +99,18 @@ export function useDirectory() {
 
   const createUser = async (input: NewUserInput): Promise<Result> => {
     if (live) {
-      const { error } = await invokeEdgeFunction('admin-users', { action: 'create', ...input });
+      const { data, error } = await invokeEdgeFunction<{ id: string; username: string }>('admin-users', {
+        action: 'create',
+        ...input,
+      });
       if (error) return { success: false, error: error.message };
+      if (input.photo && data?.id) {
+        await invokeEdgeFunction('admin-users', {
+          action: 'set_photo',
+          user_id: data.id,
+          image: input.photo,
+        });
+      }
       await reload();
       return { success: true };
     }
@@ -111,6 +122,7 @@ export function useDirectory() {
       is_active: true, must_change_password: true, created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(), department: dept,
       shop_id: input.shop_id ?? null, shop, allowed_types: input.allowed_types ?? ['general'],
+      photo_path: input.photo || null,
     }, ...prev]);
     return { success: true };
   };
@@ -181,9 +193,40 @@ export function useDirectory() {
     return { success: true };
   };
 
+  /** Sets or updates an employee / staff profile photo. */
+  const setPhoto = async (userId: string, dataUrl: string): Promise<Result> => {
+    if (live) {
+      const { error } = await invokeEdgeFunction('admin-users', {
+        action: 'set_photo',
+        user_id: userId,
+        image: dataUrl,
+      });
+      if (error) return { success: false, error: error.message };
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, photo_path: dataUrl } : u)));
+    return { success: true };
+  };
+
+  /** Removes an employee profile photo. */
+  const removePhoto = async (userId: string): Promise<Result> => {
+    if (live) {
+      const { error } = await invokeEdgeFunction('admin-users', {
+        action: 'remove_photo',
+        user_id: userId,
+      });
+      if (error) return { success: false, error: error.message };
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, photo_path: null } : u)));
+    return { success: true };
+  };
+
   return {
     departments, shops, users, loading, live, reload, saveDepartment, saveShop, createUser, updateAccess,
-    setDiscountReportAccess, resetPassword, setActive, uploadCredential,
+    setDiscountReportAccess, resetPassword, setActive, uploadCredential, setPhoto, removePhoto,
   };
 }
 

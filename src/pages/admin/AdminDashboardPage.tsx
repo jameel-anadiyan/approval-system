@@ -145,12 +145,22 @@ export const AdminDashboardPage: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4">
         <button
           type="button"
-          onClick={() => navigate('/admin/heads')}
+          onClick={() => navigate('/admin/staff')}
           className="p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-left transition-all group"
         >
           <Users className="w-5 h-5 text-indigo-600 mb-2 group-hover:scale-105 transition-transform" />
+          <div className="font-bold text-xs sm:text-sm text-slate-900">All Staff &amp; Photos</div>
+          <p className="text-[11px] text-slate-400 mt-0.5">Manage employees &amp; photos</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/admin/heads')}
+          className="p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-left transition-all group"
+        >
+          <Building2 className="w-5 h-5 text-teal-600 mb-2 group-hover:scale-105 transition-transform" />
           <div className="font-bold text-xs sm:text-sm text-slate-900">Dept Heads</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">Manage Head logins & seals</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Manage Head logins &amp; seals</p>
         </button>
 
         <button

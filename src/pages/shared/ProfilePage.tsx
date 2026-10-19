@@ -1,13 +1,18 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_LABELS, ROLE_BADGES, formatISTDate } from '../../lib/formatters';
-import { User, KeyRound, Building2, ShieldCheck, Check, LogOut, ShieldAlert } from 'lucide-react';
+import { User, KeyRound, Building2, ShieldCheck, Check, LogOut, ShieldAlert, Camera } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { UserAvatar } from '../../components/common/UserAvatar';
+import { PhotoUploadModal } from '../../components/admin/PhotoUploadModal';
+import { useDirectory } from '../../lib/directory';
 
 export const ProfilePage: React.FC = () => {
-  const { user, role, updatePassword, logout } = useAuth();
+  const { user, role, updatePassword, logout, refreshProfile } = useAuth();
+  const dir = useDirectory();
   const navigate = useNavigate();
 
+  const [photoModalOpen, setPhotoModalOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -63,11 +68,34 @@ export const ProfilePage: React.FC = () => {
       {/* User Info Card */}
       <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs">
         <div className="flex items-center gap-4 border-b border-slate-100 pb-5">
-          <div className="w-16 h-16 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-bold font-display text-2xl shadow-sm">
-            {user?.full_name?.charAt(0) || 'U'}
+          <div className="relative group shrink-0">
+            <UserAvatar
+              photoPath={user?.photo_path}
+              name={user?.full_name || 'User'}
+              size="xl"
+              previewable
+              className="shadow-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setPhotoModalOpen(true)}
+              className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center shadow-md border-2 border-white transition-transform active:scale-95"
+              title="Change profile photo"
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
           </div>
           <div>
-            <h2 className="text-lg font-bold text-slate-900 font-display">{user?.full_name}</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-lg font-bold text-slate-900 font-display">{user?.full_name}</h2>
+              <button
+                type="button"
+                onClick={() => setPhotoModalOpen(true)}
+                className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold underline ml-1"
+              >
+                Change photo
+              </button>
+            </div>
             <p className="text-xs text-slate-500 font-mono">@{user?.username}</p>
             <div className="flex items-center gap-2 mt-2">
               {role && (
@@ -191,6 +219,33 @@ export const ProfilePage: React.FC = () => {
           <span>Sign Out</span>
         </button>
       </div>
+
+      {photoModalOpen && user && (
+        <PhotoUploadModal
+          isOpen
+          onClose={() => setPhotoModalOpen(false)}
+          userId={user.id}
+          userName={user.full_name}
+          userRole={role ? ROLE_LABELS[role] : undefined}
+          currentPhotoPath={user.photo_path}
+          onSavePhoto={async (dataUrl) => {
+            const res = await dir.setPhoto(user.id, dataUrl);
+            if (res.success) {
+              await refreshProfile();
+              setMessage({ text: 'Profile photo updated successfully!', type: 'success' });
+            }
+            return res;
+          }}
+          onRemovePhoto={async () => {
+            const res = await dir.removePhoto(user.id);
+            if (res.success) {
+              await refreshProfile();
+              setMessage({ text: 'Profile photo removed.', type: 'success' });
+            }
+            return res;
+          }}
+        />
+      )}
     </div>
   );
 };

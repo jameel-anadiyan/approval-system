@@ -78,6 +78,7 @@ const normalize = (rows: RequestRecord[]) =>
     ...r,
     amount: Number(r.amount),
     paid_amount: Number(r.paid_amount ?? 0),
+    requester_photo_path: r.requester?.photo_path || r.requester_photo_path || null,
     payments: [...(r.payments || [])]
       .map((p) => ({ ...p, amount: Number(p.amount) }))
       .sort((a, b) => a.payment_date.localeCompare(b.payment_date) || a.created_at.localeCompare(b.created_at)),
@@ -105,7 +106,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       const { data, error } = await supabase
         .from('requests')
-        .select('*, department:departments(*), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)')
+        .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)')
         .order('created_at', { ascending: false });
       // RLS decides what each role sees; never substitute demo data in live mode.
       setRequests(!error && data ? normalize(data as RequestRecord[]) : []);

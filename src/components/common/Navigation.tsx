@@ -110,6 +110,7 @@ export const Navigation: React.FC = () => {
         { label: 'Discount Report', path: '/reports/discounts', icon: Percent },
         { label: 'Departments', path: '/admin/departments', icon: Building2 },
         { label: 'Shops', path: '/admin/shops', icon: Store },
+        { label: 'Staff & Employees', path: '/admin/staff', icon: Users },
         { label: 'Dept Heads', path: '/admin/heads', icon: UserCheck },
         { label: 'Disbursement Users', path: '/admin/disbursement', icon: Wallet },
         { label: 'Seal & Signature', path: '/admin/credentials', icon: FileCheck2 },

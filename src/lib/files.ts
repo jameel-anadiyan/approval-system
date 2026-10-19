@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 
-export type Bucket = 'request-files' | 'signed-documents';
+export type Bucket = 'request-files' | 'signed-documents' | 'profile-photos';
 
 const URL_TTL_SEC = 60 * 10;
 
@@ -11,6 +11,9 @@ export async function getSignedUrl(
   path: string,
   downloadAs?: string
 ): Promise<{ url: string | null; error?: string }> {
+  if (path.startsWith('data:') || path.startsWith('http://') || path.startsWith('https://')) {
+    return { url: path };
+  }
   const { data, error } = await supabase.storage
     .from(bucket)
     .createSignedUrl(path, URL_TTL_SEC, downloadAs ? { download: downloadAs } : undefined);
@@ -56,7 +59,16 @@ export function useSignedUrl(bucket: Bucket, path: string | undefined | null, li
 
   useEffect(() => {
     let cancelled = false;
-    if (!live || !path) {
+    if (!path) {
+      setState({ url: null, loading: false });
+      return;
+    }
+    // Direct data or web URL (e.g. mock or newly uploaded preview)
+    if (path.startsWith('data:') || path.startsWith('http://') || path.startsWith('https://')) {
+      setState({ url: path, loading: false });
+      return;
+    }
+    if (!live) {
       setState({ url: null, loading: false });
       return;
     }
@@ -71,3 +83,4 @@ export function useSignedUrl(bucket: Bucket, path: string | undefined | null, li
 
   return state;
 }
+

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
@@ -7,6 +7,8 @@ import type { AppRole, Profile } from '../../types/database';
 import { UserModal } from './UserModal';
 import { AccessModal, rolesWithTypes } from './AccessFields';
 import { CredentialsModal } from './CredentialsModal';
+import { PhotoUploadModal } from './PhotoUploadModal';
+import { UserAvatar } from '../common/UserAvatar';
 import { Modal } from '../common/Modal';
 import { LoadingSpinner } from '../common/LoadingSpinner';
 
@@ -28,6 +30,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const dir = useDirectory();
   const [createOpen, setCreateOpen] = useState(false);
   const [credTarget, setCredTarget] = useState<Profile | null>(null);
+  const [photoTarget, setPhotoTarget] = useState<Profile | null>(null);
   const [resetTarget, setResetTarget] = useState<Profile | null>(null);
   const [accessTarget, setAccessTarget] = useState<Profile | null>(null);
   const [resetPw, setResetPw] = useState('');
@@ -116,9 +119,23 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
             <div key={u.id} className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col gap-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 font-bold flex items-center justify-center font-display shrink-0">
-                    {u.full_name.charAt(0)}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPhotoTarget(u)}
+                    className="relative group shrink-0 rounded-2xl overflow-hidden focus:outline-hidden"
+                    title="Click to view or change photo"
+                  >
+                    <UserAvatar
+                      photoPath={u.photo_path}
+                      name={u.full_name}
+                      size="md"
+                      previewable={false}
+                      className="group-hover:opacity-90 transition-opacity"
+                    />
+                    <div className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                      <Camera className="w-3.5 h-3.5" />
+                    </div>
+                  </button>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-slate-900 text-sm truncate">{u.full_name}</span>
@@ -193,6 +210,14 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                   </button>
                 ) : <span />}
                 <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setPhotoTarget(u)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Photo</span>
+                  </button>
                   {rolesWithTypes.includes(u.role) && (
                     <button type="button" id={`access-${u.id}`} onClick={() => setAccessTarget(u)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs">
@@ -262,6 +287,27 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
               }
             }
             show(`Seal & signature saved for ${credTarget.full_name}.`);
+          }}
+        />
+      )}
+
+      {photoTarget && (
+        <PhotoUploadModal
+          isOpen
+          onClose={() => setPhotoTarget(null)}
+          userId={photoTarget.id}
+          userName={photoTarget.full_name}
+          userRole={ROLE_LABELS[photoTarget.role]}
+          currentPhotoPath={photoTarget.photo_path}
+          onSavePhoto={async (dataUrl) => {
+            const res = await dir.setPhoto(photoTarget.id, dataUrl);
+            if (res.success) show(`Photo updated for ${photoTarget.full_name}.`);
+            return res;
+          }}
+          onRemovePhoto={async () => {
+            const res = await dir.removePhoto(photoTarget.id);
+            if (res.success) show(`Photo removed for ${photoTarget.full_name}.`);
+            return res;
           }}
         />
       )}

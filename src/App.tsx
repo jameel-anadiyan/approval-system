@@ -31,6 +31,7 @@ const AdminAllRequestsPage = page(() => import('./pages/admin/AdminAllRequestsPa
 const AdminDepartmentsPage = page(() => import('./pages/admin/AdminDepartmentsPage'), 'AdminDepartmentsPage');
 const AdminShopsPage = page(() => import('./pages/admin/AdminShopsPage'), 'AdminShopsPage');
 const AdminHeadsPage = page(() => import('./pages/admin/AdminHeadsPage'), 'AdminHeadsPage');
+const AdminStaffPage = page(() => import('./pages/admin/AdminStaffPage'), 'AdminStaffPage');
 const AdminDisbursementPage = page(() => import('./pages/admin/AdminDisbursementPage'), 'AdminDisbursementPage');
 const AdminCredentialsPage = page(() => import('./pages/admin/AdminCredentialsPage'), 'AdminCredentialsPage');
 const AdminSettingsPage = page(() => import('./pages/admin/AdminSettingsPage'), 'AdminSettingsPage');
@@ -171,6 +172,7 @@ export const App: React.FC = () => {
                   <Route path="admin/requests" element={<AdminAllRequestsPage />} />
                   <Route path="admin/departments" element={<AdminDepartmentsPage />} />
                   <Route path="admin/shops" element={<AdminShopsPage />} />
+                  <Route path="admin/staff" element={<AdminStaffPage />} />
                   <Route path="admin/heads" element={<AdminHeadsPage />} />
                   <Route path="admin/disbursement" element={<AdminDisbursementPage />} />
                   <Route path="admin/credentials" element={<AdminCredentialsPage />} />

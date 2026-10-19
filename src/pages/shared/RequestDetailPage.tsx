@@ -14,6 +14,8 @@ import { ReturnModal } from '../../components/portals/ReturnModal';
 import { RejectModal } from '../../components/portals/RejectModal';
 import { ForwardModal } from '../../components/portals/ForwardModal';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
+import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
+import { UserAvatar } from '../../components/common/UserAvatar';
 import {
   formatINR,
   formatINRWhole,
@@ -229,14 +231,23 @@ export const RequestDetailPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-xs">
-              <div>
-                <span className="text-slate-400 font-medium block">Requester</span>
-                <span className="font-bold text-slate-800 mt-0.5 block">
-                  {request.requester_name}
-                </span>
-                <span className="text-[11px] text-slate-500 capitalize">
-                  {ROLE_LABELS[request.requester_role] || request.requester_role}
-                </span>
+              <div className="flex items-center gap-2.5">
+                <UserAvatar
+                  photoPath={request.requester?.photo_path ?? request.requester_photo_path ?? null}
+                  name={request.requester_name}
+                  size="sm"
+                  previewable
+                  className="shadow-xs shrink-0"
+                />
+                <div className="min-w-0">
+                  <span className="text-slate-400 font-medium block">Requester</span>
+                  <span className="font-bold text-slate-800 mt-0.5 block truncate">
+                    {request.requester_name}
+                  </span>
+                  <span className="text-[11px] text-slate-500 capitalize truncate block">
+                    {ROLE_LABELS[request.requester_role] || request.requester_role}
+                  </span>
+                </div>
               </div>
               <div>
                 <span className="text-slate-400 font-medium block">Department</span>
@@ -379,6 +390,9 @@ export const RequestDetailPage: React.FC = () => {
 
         {/* Right Column (Timeline & Actions) - 5 cols on lg */}
         <div className="lg:col-span-5 space-y-6">
+          {/* Requested Person Profile Card (Side panel on desktop, stacked on mobile) */}
+          <RequesterProfileCard request={request} />
+
           {/* Workflow Timeline Card */}
           <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs">
             <h3 className="text-sm font-bold text-slate-900 font-display mb-4 pb-2 border-b border-slate-100 flex items-center justify-between">

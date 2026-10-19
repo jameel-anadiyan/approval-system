@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { AppRole, Department, RequestType, Shop } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
-import { UserPlus, ShieldAlert } from 'lucide-react';
+import { UserPlus, ShieldAlert, Camera, Trash2 } from 'lucide-react';
 import { AccessFields, rolesWithTypes, validateAccess } from './AccessFields';
+import { compressAvatar } from '../../lib/imageUtils';
 
 interface UserModalProps {
   isOpen: boolean;
@@ -20,6 +21,7 @@ interface UserModalProps {
     password?: string;
     shop_id?: string | null;
     allowed_types?: RequestType[];
+    photo?: string;
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -42,8 +44,23 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [shopId, setShopId] = useState('');
   const [types, setTypes] = useState<RequestType[]>(['general']);
   const [password, setPassword] = useState('');
+  const [photo, setPhoto] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressAvatar(file, 400, 0.85);
+      setPhoto(dataUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid image file');
+    } finally {
+      e.target.value = '';
+    }
+  };
 
   const isDepartmentRequired = role === 'head' || role === 'clerk' || role === 'employee';
 
@@ -80,6 +97,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         password,
         shop_id: withTypes ? shopId || null : null,
         allowed_types: withTypes ? types : undefined,
+        photo: photo || undefined,
       });
 
       if (res.success) {
@@ -88,6 +106,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         setDesignation('');
         setShopId('');
         setTypes(['general']);
+        setPhoto(null);
         onClose();
       } else {
         setError(res.error || 'Failed to create user account.');
@@ -112,6 +131,52 @@ export const UserModal: React.FC<UserModalProps> = ({
             <span>{error}</span>
           </div>
         )}
+
+        {/* Employee Profile Photo Selector */}
+        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
+          <div className="relative shrink-0">
+            <div className="w-14 h-14 rounded-2xl overflow-hidden bg-slate-200 border-2 border-white shadow-xs flex items-center justify-center font-bold text-slate-500 font-display text-lg">
+              {photo ? (
+                <img src={photo} alt="Avatar Preview" className="w-full h-full object-cover" />
+              ) : (
+                fullName.trim() ? fullName.trim().charAt(0).toUpperCase() : <Camera className="w-5 h-5 text-slate-400" />
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center shadow-xs transition-transform active:scale-95"
+              title="Upload photo"
+            >
+              <Camera className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-800">Employee Photo</span>
+              {photo && (
+                <button
+                  type="button"
+                  onClick={() => setPhoto(null)}
+                  className="text-[11px] text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Remove</span>
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Portrait photo for requests &amp; approval sheets.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handlePhotoSelect}
+            />
+          </div>
+        </div>
 
         <div>
           <label className="text-xs font-bold text-slate-700 block mb-1">

@@ -101,6 +101,7 @@ export interface Profile {
   shop?: Shop | null;
   /** Head only — granted by Admin to open the Discount Report */
   can_view_discount_report?: boolean;
+  photo_path?: string | null;
 }
 
 export interface ApproverCredential {
@@ -156,6 +157,8 @@ export interface RequestRecord {
   /** Total disbursed so far (partial payments add up until it equals amount) */
   paid_amount?: number;
   payments?: RequestPayment[];
+  requester?: Pick<Profile, 'id' | 'full_name' | 'designation' | 'photo_path'> | null;
+  requester_photo_path?: string | null;
 }
 
 export interface RequestPayment {
