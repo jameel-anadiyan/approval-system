@@ -1,0 +1,4 @@
+# Private internal system. Every page sends "noindex" (meta tag + X-Robots-Tag header).
+# Crawling is allowed only so search engines can see that noindex rule and drop the pages.
+User-agent: *
+Allow: /
