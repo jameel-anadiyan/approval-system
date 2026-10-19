@@ -43,9 +43,15 @@ async function loadTarget(admin: SupabaseClient, me: Profile, userId: string): P
 
 Deno.serve(handle(async (req) => {
   const { admin, me } = await getCaller(req);
-  if (me.role !== "admin" && me.role !== "head") throw new HttpError(403, "forbidden", "Only Admin or a Head can manage users.");
   // deno-lint-ignore no-explicit-any
   const body = await readJson<any>(req);
+
+  const isOwnPhoto = (body.action === "set_photo" || body.action === "remove_photo") &&
+    (!body.user_id || body.user_id === me.id);
+
+  if (!isOwnPhoto && me.role !== "admin" && me.role !== "head") {
+    throw new HttpError(403, "forbidden", "Only Admin or a Head can manage users.");
+  }
 
   switch (body.action) {
     case "create": {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -108,7 +108,13 @@ export const RequestDetailPage: React.FC = () => {
   const isHighValue = rType === 'general' && request.amount > threshold;
   const amountLabel =
     rType === 'discount' ? 'Discount Value' : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)' : 'Total Requested Amount';
-  const voiceNotes = (request.files || []).filter((f) => f.kind === 'voice_note');
+  const voiceNotes = (request.files || []).filter((f) => {
+    if (f.kind !== 'voice_note') return false;
+    // Clerks, heads, and admins can view all voice notes
+    if (role === 'admin' || role === 'head' || role === 'clerk') return true;
+    // Requester only sees their own audio notes
+    return !f.added_by || f.added_by === user?.id || f.added_by === request.requester_id;
+  });
   // Disbursement only ever sees the stamped output, never the originals (storage policy agrees).
   const showOriginals = role !== 'disbursement';
   const editable = isOwner && (request.status === 'draft' || request.status === 'returned');
@@ -128,13 +134,20 @@ export const RequestDetailPage: React.FC = () => {
     if (okText) setBanner({ ok: true, text: okText });
   };
 
+  const actionLockRef = useRef(false);
   const runInline = async (fn: () => Promise<{ success: boolean; error?: string }>, okText: string) => {
+    if (actionLockRef.current) return false;
+    actionLockRef.current = true;
     setBusy(true);
     setBanner(null);
-    const res = await fn();
-    setBusy(false);
-    setBanner(res.success ? { ok: true, text: okText } : { ok: false, text: res.error || 'Action failed' });
-    return res.success;
+    try {
+      const res = await fn();
+      setBanner(res.success ? { ok: true, text: okText } : { ok: false, text: res.error || 'Action failed' });
+      return res.success;
+    } finally {
+      setBusy(false);
+      actionLockRef.current = false;
+    }
   };
 
   return (
@@ -509,6 +522,15 @@ export const RequestDetailPage: React.FC = () => {
             {/* Head Actions (Route A review vs Route B approval) */}
             {role === 'head' && request.status === 'pending_head_review' && (
               <>
+                <button
+                  type="button"
+                  onClick={() => setModalState('reject')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 font-semibold text-xs hover:bg-rose-100"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>Reject</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setModalState('return')}

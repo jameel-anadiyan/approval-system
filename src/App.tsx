@@ -11,32 +11,33 @@ import { ForcePasswordChangePage } from './pages/auth/ForcePasswordChangePage';
 import type { AppRole } from './types/database';
 import { canViewDiscountReport } from './lib/discountReport';
 
-// Route pages are code-split so phones only download what each role opens.
+import { NewRequestPage } from './pages/shared/NewRequestPage';
+import { RequestDetailPage } from './pages/shared/RequestDetailPage';
+import { ProfilePage } from './pages/shared/ProfilePage';
+import { MyRequestsPage } from './pages/employee/MyRequestsPage';
+import { ClerkInboxPage } from './pages/clerk/ClerkInboxPage';
+import { ClerkDeptRequestsPage } from './pages/clerk/ClerkDeptRequestsPage';
+import { HeadDashboardPage } from './pages/head/HeadDashboardPage';
+import { HeadReviewPage } from './pages/head/HeadReviewPage';
+import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
+import { AdminApprovePage } from './pages/admin/AdminApprovePage';
+import { AdminAllRequestsPage } from './pages/admin/AdminAllRequestsPage';
+import { AdminCredentialsPage } from './pages/admin/AdminCredentialsPage';
+import { DisbursementPage } from './pages/disbursement/DisbursementPage';
+
+// Secondary pages are code-split
 const page = <K extends string>(loader: () => Promise<Record<K, React.ComponentType>>, name: K) =>
   lazy(() => loader().then((m) => ({ default: m[name] })));
 
-const NewRequestPage = page(() => import('./pages/shared/NewRequestPage'), 'NewRequestPage');
-const RequestDetailPage = page(() => import('./pages/shared/RequestDetailPage'), 'RequestDetailPage');
-const ProfilePage = page(() => import('./pages/shared/ProfilePage'), 'ProfilePage');
 const VerifyPage = page(() => import('./pages/shared/VerifyPage'), 'VerifyPage');
-const MyRequestsPage = page(() => import('./pages/employee/MyRequestsPage'), 'MyRequestsPage');
-const ClerkInboxPage = page(() => import('./pages/clerk/ClerkInboxPage'), 'ClerkInboxPage');
-const ClerkDeptRequestsPage = page(() => import('./pages/clerk/ClerkDeptRequestsPage'), 'ClerkDeptRequestsPage');
-const HeadDashboardPage = page(() => import('./pages/head/HeadDashboardPage'), 'HeadDashboardPage');
-const HeadReviewPage = page(() => import('./pages/head/HeadReviewPage'), 'HeadReviewPage');
 const HeadUsersPage = page(() => import('./pages/head/HeadUsersPage'), 'HeadUsersPage');
-const AdminDashboardPage = page(() => import('./pages/admin/AdminDashboardPage'), 'AdminDashboardPage');
-const AdminApprovePage = page(() => import('./pages/admin/AdminApprovePage'), 'AdminApprovePage');
-const AdminAllRequestsPage = page(() => import('./pages/admin/AdminAllRequestsPage'), 'AdminAllRequestsPage');
 const AdminDepartmentsPage = page(() => import('./pages/admin/AdminDepartmentsPage'), 'AdminDepartmentsPage');
 const AdminShopsPage = page(() => import('./pages/admin/AdminShopsPage'), 'AdminShopsPage');
 const AdminHeadsPage = page(() => import('./pages/admin/AdminHeadsPage'), 'AdminHeadsPage');
 const AdminStaffPage = page(() => import('./pages/admin/AdminStaffPage'), 'AdminStaffPage');
 const AdminDisbursementPage = page(() => import('./pages/admin/AdminDisbursementPage'), 'AdminDisbursementPage');
-const AdminCredentialsPage = page(() => import('./pages/admin/AdminCredentialsPage'), 'AdminCredentialsPage');
 const AdminSettingsPage = page(() => import('./pages/admin/AdminSettingsPage'), 'AdminSettingsPage');
 const AdminAuditLogPage = page(() => import('./pages/admin/AdminAuditLogPage'), 'AdminAuditLogPage');
-const DisbursementPage = page(() => import('./pages/disbursement/DisbursementPage'), 'DisbursementPage');
 const DisbursementVerifyPage = page(() => import('./pages/disbursement/DisbursementVerifyPage'), 'DisbursementVerifyPage');
 const DiscountReportPage = page(() => import('./pages/reports/DiscountReportPage'), 'DiscountReportPage');
 
@@ -163,6 +164,7 @@ export const App: React.FC = () => {
                   <Route path="head/review" element={<HeadReviewPage />} />
                   <Route path="head/users" element={<HeadUsersPage />} />
                   <Route path="head/department" element={<ClerkDeptRequestsPage />} />
+                  <Route path="head/credentials" element={<AdminCredentialsPage />} />
                 </Route>
 
                 {/* Admin routes */}

@@ -96,8 +96,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [threshold, setThreshold] = useState<number>(10000);
 
-  const loadRequests = useCallback(async () => {
-    setIsLoading(true);
+  const loadRequests = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
     if (isBackendConnected) {
       if (!user) {
         setRequests([]);
@@ -152,11 +152,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        () => loadRequests()
+        () => loadRequests(true)
       )
       .subscribe();
     const onVisible = () => {
-      if (document.visibilityState === 'visible') loadRequests();
+      if (document.visibilityState === 'visible') loadRequests(true);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -237,7 +237,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_title: data.title,
           p_amount: type === 'general' ? data.amount : null,
           p_notes: data.notes || null,
-          p_details: type === 'general' ? null : data.details ?? {},
+          p_details: data.details ?? {},
         });
         if (error) throw error;
         requestId = newId as string;

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -31,6 +31,7 @@ export const NewRequestPage: React.FC = () => {
   const [type, setType] = useState<RequestType>(allowed[0] ?? 'general');
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
+  const [hasGst, setHasGst] = useState<boolean>(false);
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
   const [exhibition, setExhibition] = useState<ExhibitionForm>(emptyExhibition);
@@ -39,10 +40,15 @@ export const NewRequestPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef<boolean>(false);
 
-  const generalAmount = parseFloat(amountStr) || 0;
+  const baseAmount = parseFloat(amountStr) || 0;
+  const gstRate = 18;
+  const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
+  const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
+
   const amount =
-    type === 'discount' ? discountCalc(discount).value : type === 'exhibition' ? exhibitionCalc(exhibition).total : generalAmount;
+    type === 'discount' ? discountCalc(discount).value : type === 'exhibition' ? exhibitionCalc(exhibition).total : generalTotal;
   const isHighValue = type === 'general' && amount > threshold;
   const docsRequired = type === 'general' || type === 'discount';
   const hasPdf = files.some((f) => f.mime_type === 'application/pdf');
@@ -71,13 +77,22 @@ export const NewRequestPage: React.FC = () => {
   const effectiveTitle = () =>
     title.trim() || (type === 'exhibition' && exhibition.event_name.trim() ? `Exhibition: ${exhibition.event_name.trim()}` : '');
 
-  const details = (): RequestDetails | null =>
-    type === 'discount' ? toDiscountDetails(discount) : type === 'exhibition' ? toExhibitionDetails(exhibition) : null;
+  const details = (): RequestDetails | null => {
+    if (type === 'discount') return toDiscountDetails(discount);
+    if (type === 'exhibition') return toExhibitionDetails(exhibition);
+    return {
+      base_amount: baseAmount,
+      has_gst: hasGst,
+      gst_rate: hasGst ? gstRate : 0,
+      gst_amount: gstAmount,
+      total_amount: generalTotal,
+    };
+  };
 
   const validate = (forDraft: boolean): string | null => {
     if (!effectiveTitle()) return type === 'exhibition' ? 'Enter the event name.' : 'Please enter a request title.';
     if (type === 'general') {
-      if (!forDraft && generalAmount <= 0) return 'Please enter a valid amount greater than zero.';
+      if (!forDraft && baseAmount <= 0) return 'Please enter a valid amount greater than zero.';
       if (!forDraft && files.length === 0) return 'At least one document (invoice, bill, or receipt) must be attached to submit.';
       return null;
     }
@@ -91,18 +106,20 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const save = async (andSubmit: boolean) => {
+    if (submittingRef.current) return;
     setError(null);
     const v = validate(!andSubmit);
     if (v) {
       setError(v);
       return;
     }
+    submittingRef.current = true;
     andSubmit ? setIsSubmitting(true) : setIsSavingDraft(true);
     try {
       const draftRes = await createDraft({
         type,
         title: effectiveTitle(),
-        amount: type === 'general' ? generalAmount || 1 : amount,
+        amount: type === 'general' ? generalTotal || 1 : amount,
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
@@ -128,6 +145,7 @@ export const NewRequestPage: React.FC = () => {
     } finally {
       setIsSubmitting(false);
       setIsSavingDraft(false);
+      submittingRef.current = false;
     }
   };
 
@@ -216,25 +234,80 @@ export const NewRequestPage: React.FC = () => {
           </div>
 
           {type === 'general' && (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Amount in Indian Rupees (₹) <span className="text-rose-500">*</span>
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-3.5 font-bold text-slate-400 text-base">₹</span>
-                <input
-                  id="request-amount"
-                  type="number"
-                  step="0.01"
-                  min="1"
-                  inputMode="decimal"
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full text-base sm:text-sm pl-8 pr-4 py-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-display font-semibold transition-colors"
-                />
+            <div className="space-y-3.5 bg-slate-50/80 p-4 rounded-xl border border-slate-200/80">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Amount (Excluding GST) in Rupees (₹) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-3.5 font-bold text-slate-400 text-base">₹</span>
+                  <input
+                    id="request-amount"
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    inputMode="decimal"
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full text-base sm:text-sm pl-8 pr-4 py-3 rounded-xl border border-slate-200 bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-display font-semibold transition-colors"
+                  />
+                </div>
+                {baseAmount > 0 && <span className="text-xs font-medium text-slate-600 mt-1 block">Base amount: {formatINR(baseAmount)}</span>}
               </div>
-              {generalAmount > 0 && <span className="text-xs font-bold text-indigo-700 mt-1 block">{formatINR(generalAmount)}</span>}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Is GST applicable? <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHasGst(false)}
+                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                      !hasGst
+                        ? 'bg-white border-indigo-600 text-indigo-700 shadow-xs ring-1 ring-indigo-600'
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    No GST (0%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHasGst(true)}
+                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                      hasGst
+                        ? 'bg-indigo-50 border-indigo-600 text-indigo-700 shadow-xs ring-1 ring-indigo-600'
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    Yes, Add 18% GST
+                  </button>
+                </div>
+              </div>
+
+              {hasGst && baseAmount > 0 && (
+                <div className="pt-2 border-t border-slate-200/80 space-y-1.5 text-xs text-slate-600">
+                  <div className="flex justify-between items-center">
+                    <span>Base Amount (Excl. GST):</span>
+                    <span className="font-mono font-medium">{formatINR(baseAmount)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-indigo-700 font-medium">
+                    <span>GST @ 18%:</span>
+                    <span className="font-mono">+{formatINR(gstAmount)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-dashed border-slate-200 text-sm font-bold text-slate-900">
+                    <span>Total (Incl. GST):</span>
+                    <span className="font-mono text-indigo-600">{formatINR(generalTotal)}</span>
+                  </div>
+                </div>
+              )}
+              {!hasGst && baseAmount > 0 && (
+                <div className="pt-2 border-t border-slate-200/80 flex justify-between items-center text-sm font-bold text-slate-900">
+                  <span className="text-xs">Total Amount:</span>
+                  <span className="font-mono text-indigo-600">{formatINR(generalTotal)}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -310,7 +383,7 @@ export const NewRequestPage: React.FC = () => {
                 type="button"
                 id="save-draft"
                 onClick={() => save(false)}
-                disabled={isSavingDraft || isSubmitting}
+                disabled={isSavingDraft || isSubmitting || submittingRef.current}
                 className="shrink-0 inline-flex items-center gap-1.5 px-3 sm:px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs sm:text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
@@ -319,7 +392,7 @@ export const NewRequestPage: React.FC = () => {
               <button
                 type="submit"
                 id="submit-request"
-                disabled={isSubmitting || isSavingDraft}
+                disabled={isSubmitting || isSavingDraft || submittingRef.current}
                 className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 sm:px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md shadow-indigo-200 transition-all active:scale-98 disabled:opacity-50 whitespace-nowrap"
               >
                 <Send className="w-4 h-4" />

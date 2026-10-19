@@ -18,7 +18,9 @@ export const AdminCredentialsPage: React.FC = () => {
           <span>My Seal & Signature</span>
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          Stamped on every page of A-route requests you approve. PNG only, under 2 MB; stored in a private bucket.
+          {user?.role === 'head'
+            ? 'Stamped on requests you approve (Route B). PNG only, under 2 MB; stored in a private bucket.'
+            : 'Stamped on every page of A-route requests you approve. PNG only, under 2 MB; stored in a private bucket.'}
         </p>
       </div>
 
@@ -47,7 +49,7 @@ export const AdminCredentialsPage: React.FC = () => {
           isOpen
           onClose={() => setOpen(false)}
           userName={user.full_name}
-          userRole="Administrator"
+          userRole={user.role === 'head' ? 'Department Head' : 'Administrator'}
           onSaveCredentials={async ({ sealFile, signatureFile }) => {
             for (const [kind, file] of [['seal', sealFile], ['signature', signatureFile]] as const) {
               if (!file) continue;

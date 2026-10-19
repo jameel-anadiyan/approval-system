@@ -29,8 +29,10 @@ Deno.serve(handle(async (req) => {
     });
   }
 
-  if (me.role !== "admin") throw new HttpError(403, "forbidden", "Only Admin can upload seals and signatures.");
-  const userId = requireUuid(body.user_id, "User");
+  const userId = body.user_id ? requireUuid(body.user_id, "User") : me.id;
+  if (me.role !== "admin" && !(me.role === "head" && userId === me.id)) {
+    throw new HttpError(403, "forbidden", "Only Admin or the Head themselves can upload their seal and signature.");
+  }
   const kind = body.kind;
   if (kind !== "seal" && kind !== "signature") throw new HttpError(400, "bad_request", "Kind must be seal or signature.");
   const { data: target } = await admin.from("profiles").select("id,role,username").eq("id", userId).maybeSingle();

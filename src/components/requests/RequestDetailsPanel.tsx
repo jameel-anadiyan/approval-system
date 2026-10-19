@@ -24,7 +24,30 @@ const money = (n?: number | null) => (n === undefined || n === null ? undefined 
 export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ request }) => {
   const t = typeOf(request);
   const d = request.details || {};
-  if (t === 'general') return null;
+  if (t === 'general') {
+    if (!d.has_gst && !d.base_amount) return null;
+    return (
+      <div className="bg-white rounded-2xl border border-indigo-100 p-5 sm:p-6 shadow-xs">
+        <h3 className="text-sm font-bold text-slate-900 font-display mb-3 flex items-center gap-2">
+          <span>Amount & GST Breakdown</span>
+        </h3>
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center">
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-2 sm:p-3 min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">Base (Excl. GST)</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-800 break-words">{money(d.base_amount) ?? money(request.amount)}</span>
+          </div>
+          <div className="rounded-xl bg-indigo-50/50 border border-indigo-200/60 p-2 sm:p-3 min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold block">GST ({d.has_gst ? `${d.gst_rate || 18}%` : '0%'})</span>
+            <span className="text-xs sm:text-sm font-bold text-indigo-800 break-words">{d.has_gst ? (money(d.gst_amount) ?? '—') : '₹0.00'}</span>
+          </div>
+          <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-2 sm:p-3 min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-indigo-800 font-semibold block">Total Payable</span>
+            <span className="text-xs sm:text-sm font-bold text-indigo-900 break-words">{money(request.amount)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (t === 'discount') {
     return (

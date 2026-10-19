@@ -92,6 +92,7 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
+        { label: 'My Seal & Sign', path: '/head/credentials', icon: ShieldCheck },
         ...(canViewDiscountReport(user) ? [{ label: 'Discount Report', path: '/reports/discounts', icon: Percent }] : []),
         { label: 'Staff Users', path: '/head/users', icon: Users },
         { label: 'Dept Requests', path: '/head/department', icon: Building2 },

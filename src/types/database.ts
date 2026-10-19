@@ -72,7 +72,15 @@ export interface ExhibitionDetails {
   purpose?: string | null;
 }
 
-export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails>;
+export interface GeneralDetails {
+  base_amount?: number | null;
+  has_gst?: boolean | null;
+  gst_rate?: number | null;
+  gst_amount?: number | null;
+  total_amount?: number | null;
+}
+
+export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>;
 
 export interface Department {
   id: string;
