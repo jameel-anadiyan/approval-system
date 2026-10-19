@@ -15,6 +15,7 @@ import { RejectModal } from '../../components/portals/RejectModal';
 import { ForwardModal } from '../../components/portals/ForwardModal';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { ConsultHeadsModal } from '../../components/portals/ConsultHeadsModal';
+import { RespondConsultationModal } from '../../components/portals/RespondConsultationModal';
 import { HeadConsultationsSection } from '../../components/requests/HeadConsultationsSection';
 import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
 import { UserAvatar } from '../../components/common/UserAvatar';
@@ -46,6 +47,9 @@ import {
   Store,
   Users,
   AlertCircle,
+  ThumbsUp,
+  ThumbsDown,
+  Clock,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -69,8 +73,9 @@ export const RequestDetailPage: React.FC = () => {
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | null
   >(null);
+  const [consultInitialStatus, setConsultInitialStatus] = useState<'agreed' | 'disagreed' | null>(null);
   const [copiedNo, setCopiedNo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(
@@ -108,12 +113,24 @@ export const RequestDetailPage: React.FC = () => {
   }
 
   const isOwner = user?.id === request.requester_id;
-  const isOwningHead = role === 'head' && !!user?.department_id && user.department_id === request.department_id;
-  const isConsultedHead = role === 'head' && !isOwningHead;
 
-  // Inter-department consultations status & blocking rules:
-  // If any consultation is pending or disagreed, forwarding to Admin and Approval are blocked!
+  // Inter-department consultations & strict role isolation:
   const consultations = request.consultations || [];
+  const myConsultation = consultations.find((c) => c.head_id === user?.id);
+
+  // A consulted head is ANY head assigned in consultations OR from another department
+  const isConsultedHead = role === 'head' && (Boolean(myConsultation) || user?.department_id !== request.department_id);
+
+  // Strict Owning Head:
+  // Must be role === 'head', NOT the requester, NOT a consulted head, and MUST belong to the request's department!
+  const isOwningHead =
+    role === 'head' &&
+    !isOwner &&
+    !myConsultation &&
+    !!user?.department_id &&
+    user.department_id === request.department_id;
+
+  // If any consultation is pending or disagreed, forwarding to Admin and Approval are blocked!
   const pendingConsultations = consultations.filter((c) => c.status === 'pending');
   const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
   const hasPendingConsultations = pendingConsultations.length > 0;
@@ -532,12 +549,91 @@ export const RequestDetailPage: React.FC = () => {
               </div>
             )}
 
-            {/* Informative notice for consulted inter-head */}
-            {isConsultedHead && (
-              <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 text-xs font-semibold">
-                <Users className="w-4 h-4 text-purple-600 shrink-0" />
+            {/* Consulted Head Actions: Agree, Disagree, and Revise Decision directly in bottom bar */}
+            {isConsultedHead && myConsultation && (
+              myConsultation.status === 'pending' ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-purple-950 bg-purple-50 border border-purple-200 px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-2xs">
+                    <Clock className="w-3.5 h-3.5 text-purple-600 animate-pulse" />
+                    <span>Your Review Decision:</span>
+                  </span>
+
+                  <button
+                    type="button"
+                    id="bar-consult-disagree-btn"
+                    onClick={() => {
+                      setConsultInitialStatus('disagreed');
+                      setModalState('consult_respond');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-rose-300 text-rose-700 bg-white hover:bg-rose-50 font-bold text-xs shadow-xs transition-all cursor-pointer"
+                  >
+                    <ThumbsDown className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Disagree</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="bar-consult-agree-btn"
+                    onClick={() => {
+                      setConsultInitialStatus('agreed');
+                      setModalState('consult_respond');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-200 transition-all cursor-pointer"
+                  >
+                    <ThumbsUp className="w-3.5 h-3.5" />
+                    <span>Agree</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border shadow-2xs ${
+                      myConsultation.status === 'agreed'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                        : 'bg-rose-50 text-rose-800 border-rose-300'
+                    }`}
+                  >
+                    {myConsultation.status === 'agreed' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>You {myConsultation.status.toUpperCase()}</span>
+                    {myConsultation.response_remarks && (
+                      <span className="text-[11px] font-normal text-slate-600 max-w-[140px] truncate">
+                        — "{myConsultation.response_remarks}"
+                      </span>
+                    )}
+                  </div>
+
+                  {!isFinalized && (
+                    <button
+                      type="button"
+                      id="bar-revise-consult-btn"
+                      onClick={() => {
+                        setConsultInitialStatus(
+                          myConsultation.status === 'agreed' ? 'disagreed' : 'agreed'
+                        );
+                        setModalState('consult_respond');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-200 transition-all cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>
+                        Revise Decision (Switch to {myConsultation.status === 'agreed' ? 'Disagree' : 'Agree'})
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )
+            )}
+
+            {/* Read-only notice if head from another department is viewing without being consulted */}
+            {isConsultedHead && !myConsultation && (
+              <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs font-semibold">
+                <Users className="w-4 h-4 text-slate-500 shrink-0" />
                 <span>
-                  Inter-Department Reviewer · Please submit your Agree / Disagree response in the review section above
+                  Reviewer Mode · Request belongs to {request.department?.name || 'other department'}
                 </span>
               </div>
             )}
@@ -769,6 +865,20 @@ export const RequestDetailPage: React.FC = () => {
           onClose={() => setModalState(null)}
           request={request}
           onSuccess={() => setBanner({ ok: true, text: 'Consultation request sent to department heads.' })}
+        />
+      )}
+
+      {modalState === 'consult_respond' && myConsultation && (
+        <RespondConsultationModal
+          isOpen={true}
+          onClose={() => {
+            setModalState(null);
+            setConsultInitialStatus(null);
+          }}
+          request={request}
+          consultation={myConsultation}
+          initialStatus={consultInitialStatus}
+          onSuccess={() => setBanner({ ok: true, text: 'Your consultation decision has been saved.' })}
         />
       )}
 

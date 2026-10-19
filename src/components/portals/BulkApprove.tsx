@@ -69,6 +69,18 @@ export const BulkApproveBar: React.FC<BulkApproveBarProps> = ({ items, selection
     setBatch(chosen);
     const out: ItemResult[] = [];
     for (const r of chosen) {
+      const hasBlockedConsultation = (r.consultations || []).some(
+        (c) => c.status === 'pending' || c.status === 'disagreed'
+      );
+      if (hasBlockedConsultation) {
+        out.push({
+          id: r.id,
+          ok: false,
+          text: 'Blocked: Inter-department consultation pending or disagreed',
+        });
+        setResults([...out]);
+        continue;
+      }
       const res = await approveRequest(r.id, null, { reload: false });
       out.push({
         id: r.id,
