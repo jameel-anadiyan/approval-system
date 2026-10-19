@@ -116,8 +116,8 @@ begin
     raise exception 'You can only request consultations for your department requests';
   end if;
 
-  if r.status not in ('pending_head_approval', 'pending_head_review', 'pending_admin_approval') then
-    raise exception 'Consultations can only be requested while under review or approval';
+  if r.status in ('draft', 'withdrawn') then
+    raise exception 'Consultations cannot be requested on draft or withdrawn requests';
   end if;
 
   foreach target_id in array p_head_ids loop

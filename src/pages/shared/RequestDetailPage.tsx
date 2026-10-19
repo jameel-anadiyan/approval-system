@@ -202,7 +202,18 @@ export const RequestDetailPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {(role === 'head' || role === 'admin') && request.status !== 'draft' && request.status !== 'withdrawn' && (
+            <button
+              type="button"
+              id="request-other-head-header-btn"
+              onClick={() => setModalState('consult')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-200 transition-all shrink-0 cursor-pointer"
+            >
+              <Users className="w-4 h-4" />
+              <span>Request Other Head</span>
+            </button>
+          )}
           <StatusBadge status={request.status} requestType={rType} size="lg" showDescription />
         </div>
       </div>
@@ -313,11 +324,39 @@ export const RequestDetailPage: React.FC = () => {
           <RequestDetailsPanel request={request} />
 
           {/* Inter-Department Head Consultations Section */}
-          {request.consultations && request.consultations.length > 0 && (
+          {request.consultations && request.consultations.length > 0 ? (
             <HeadConsultationsSection
               consultations={request.consultations}
               requestId={request.id}
+              onRequestMore={() => setModalState('consult')}
             />
+          ) : (
+            (role === 'head' || role === 'admin') && request.status !== 'draft' && request.status !== 'withdrawn' && (
+              <div className="bg-white rounded-2xl border border-purple-200/90 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 border border-purple-200 flex items-center justify-center shrink-0">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 font-display">
+                      Need Other Department Head's Approval / Review?
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Send a request to other department heads to review this document and indicate Agree or Disagree.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="request-other-head-card-btn"
+                  onClick={() => setModalState('consult')}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-200 transition-all self-start sm:self-auto shrink-0 cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Request Other Head</span>
+                </button>
+              </div>
+            )
           )}
 
           {/* Voice Notes (if present) */}
@@ -439,6 +478,19 @@ export const RequestDetailPage: React.FC = () => {
           </div>
 
           <div className="action-bar-buttons flex items-center gap-2 flex-wrap w-full sm:w-auto justify-end">
+            {/* Universal Request Other Head button for Heads & Admin */}
+            {(role === 'head' || role === 'admin') && request.status !== 'draft' && request.status !== 'withdrawn' && (
+              <button
+                type="button"
+                id="request-other-head-bar-btn"
+                onClick={() => setModalState('consult')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 font-bold text-xs transition-colors cursor-pointer"
+              >
+                <Users className="w-3.5 h-3.5 text-purple-600" />
+                <span>Request Other Head</span>
+              </button>
+            )}
+
             {/* Requester Actions on Draft or Returned */}
             {editable && (
               <button

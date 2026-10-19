@@ -19,11 +19,13 @@ import {
 interface HeadConsultationsSectionProps {
   consultations: HeadConsultation[];
   requestId: string;
+  onRequestMore?: () => void;
 }
 
 export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> = ({
   consultations,
   requestId,
+  onRequestMore,
 }) => {
   const { user, role } = useAuth();
   const { respondHeadConsultation } = useRequests();
@@ -105,6 +107,17 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
               <Clock className="w-3.5 h-3.5 text-amber-600" />
               <span>{pendingCount} Pending</span>
             </span>
+          )}
+
+          {onRequestMore && (role === 'head' || role === 'admin') && (
+            <button
+              type="button"
+              onClick={onRequestMore}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Request Other Head</span>
+            </button>
           )}
         </div>
       </div>
