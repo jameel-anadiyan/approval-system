@@ -16,7 +16,8 @@ import {
 import { RespondClarificationModal } from '../portals/RespondClarificationModal';
 import { DisbursementClarificationModal } from '../portals/DisbursementClarificationModal';
 import { DocumentViewer } from './DocumentViewer';
-import { Paperclip } from 'lucide-react';
+import { Paperclip, FileCheck, Loader2 } from 'lucide-react';
+import { useRequests } from '../../context/RequestContext';
 
 interface DisbursementClarificationSectionProps {
   request: RequestRecord;
@@ -28,6 +29,9 @@ export const DisbursementClarificationSection: React.FC<DisbursementClarificatio
   isOwningHead,
 }) => {
   const { user } = useAuth();
+  const { signClarificationFiles } = useRequests();
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
   const [respondingTo, setRespondingTo] = useState<DisbursementClarification | null>(null);
   const [isAskingAgain, setIsAskingAgain] = useState(false);
 
@@ -39,6 +43,17 @@ export const DisbursementClarificationSection: React.FC<DisbursementClarificatio
   const isDisbursement = user?.role === 'disbursement';
   const canRespond = isOwningHead && isPending && request.status === 'approved';
   const clarificationFiles = (request.files || []).filter((f) => f.kind === 'document' && f.clarification_id);
+  const signedSources = new Set((request.signed_files || []).map((s) => s.source_file_id).filter(Boolean));
+  const unsignedCount = clarificationFiles.filter((f) => !signedSources.has(f.id)).length;
+  const canSign = isOwningHead && unsignedCount > 0 && (request.status === 'approved' || request.status === 'paid');
+
+  const retrySign = async () => {
+    setSigning(true);
+    setSignError(null);
+    const res = await signClarificationFiles(request.id);
+    setSigning(false);
+    if (!res.success) setSignError(res.error || 'Could not add files to signed documents');
+  };
 
   return (
     <div className="space-y-3">
@@ -190,6 +205,29 @@ export const DisbursementClarificationSection: React.FC<DisbursementClarificatio
             </h3>
             <span className="text-xs text-slate-400">{clarificationFiles.length} file(s)</span>
           </div>
+          {unsignedCount === 0 ? (
+            <p className="text-[11px] text-emerald-700 flex items-center gap-1">
+              <FileCheck className="w-3.5 h-3.5" />
+              Stamped as Addendum and included in the Signed Documents &amp; packet.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-amber-800">
+              <span>{unsignedCount} file(s) not yet added to Signed Documents.</span>
+              {canSign && (
+                <button
+                  type="button"
+                  id="sign-clarification-files-btn"
+                  onClick={retrySign}
+                  disabled={signing}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-60 cursor-pointer"
+                >
+                  {signing ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileCheck className="w-3 h-3" />}
+                  <span>Add to Signed Documents</span>
+                </button>
+              )}
+            </div>
+          )}
+          {signError && <p className="text-[11px] text-rose-700">{signError}</p>}
           <DocumentViewer
             key={clarificationFiles.map((f) => f.id).join(',')}
             files={clarificationFiles}

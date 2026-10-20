@@ -16,7 +16,7 @@ interface RespondClarificationModalProps {
   onClose: () => void;
   request: RequestRecord;
   clarification: DisbursementClarification;
-  onSuccess?: () => void;
+  onSuccess?: (warning?: string) => void;
 }
 
 export const RespondClarificationModal: React.FC<RespondClarificationModalProps> = ({
@@ -72,7 +72,7 @@ export const RespondClarificationModal: React.FC<RespondClarificationModalProps>
       setResponseNote('');
       setVoice(null);
       setFiles([]);
-      if (onSuccess) onSuccess();
+      if (onSuccess) onSuccess(res.warning);
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -204,7 +204,7 @@ export const RespondClarificationModal: React.FC<RespondClarificationModalProps>
             </ul>
           )}
           <p className="text-[11px] text-slate-500">
-            Files are added to this approved request and shared with Disbursement. The signed approval documents are not changed.
+            Files are stamped as an <strong>Addendum</strong> with your seal &amp; signature and added to the signed documents and packet for Disbursement.
           </p>
         </div>
 

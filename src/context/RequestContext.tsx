@@ -15,7 +15,7 @@ import { useAuth } from './AuthContext';
 import { MOCK_REQUESTS, MOCK_USERS } from '../lib/mockData';
 import { loadThreshold } from '../lib/directory';
 
-type Result = { success: boolean; error?: string };
+type Result = { success: boolean; error?: string; warning?: string };
 
 /** Optional voice note recorded by the Clerk / Head / Admin while acting. */
 export interface ActionVoice {
@@ -95,6 +95,8 @@ interface RequestContextType {
   ) => Promise<Result>;
   /** Owner Head cancels an approved request before it is fully paid. */
   cancelApprovedRequest: (id: string, reason: string, voice?: ActionVoice | null) => Promise<Result>;
+  /** Stamps clarification attachments (ADDENDUM) and adds them to Signed Documents + packet. */
+  signClarificationFiles: (requestId: string) => Promise<Result>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -1312,6 +1314,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         return { success: false, error: error.message };
       }
+      if (uploaded.length && requestId) {
+        const signed = await signClarificationFiles(requestId);
+        if (!signed.success) {
+          return {
+            success: true,
+            warning: `Reply sent, but the files could not be added to Signed Documents yet: ${signed.error}`,
+          };
+        }
+        return { success: true };
+      }
       await loadRequests(true);
       return { success: true };
     }
@@ -1361,6 +1373,22 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       })
     );
     return { success: true };
+  };
+
+  const signClarificationFiles = async (requestId: string): Promise<Result> => {
+    if (!isBackendConnected) return { success: true };
+    try {
+      const { error } = await invokeEdgeFunction<{ signed: number }>('sign-clarification-files', {
+        request_id: requestId,
+        app_url: window.location.origin,
+      });
+      if (error) throw error;
+      return { success: true };
+    } catch (err: unknown) {
+      return { success: false, error: errMsg(err) };
+    } finally {
+      await loadRequests(true);
+    }
   };
 
   const cancelApprovedRequest = async (id: string, reason: string, voice?: ActionVoice | null): Promise<Result> => {
@@ -1442,6 +1470,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         requestDisbursementClarification,
         respondDisbursementClarification,
         cancelApprovedRequest,
+        signClarificationFiles,
       }}
     >
       {children}

@@ -1031,7 +1031,13 @@ export const RequestDetailPage: React.FC = () => {
           onClose={() => setModalState(null)}
           request={request}
           clarification={latestClarification}
-          onSuccess={() => setBanner({ ok: true, text: 'Clarification response sent back to Disbursement.' })}
+          onSuccess={(warning) =>
+            setBanner(
+              warning
+                ? { ok: false, text: warning }
+                : { ok: true, text: 'Clarification response sent back to Disbursement.' }
+            )
+          }
         />
       )}
 

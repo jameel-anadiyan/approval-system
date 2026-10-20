@@ -218,6 +218,7 @@ export const ACTION_LABELS: Record<string, string> = {
   disbursement_clarification_requested: 'Disbursement: Clarification requested from Head',
   disbursement_clarification_provided: 'Head: Clarification provided to Disbursement',
   cancelled: 'Approval cancelled by Head',
+  clarification_files_signed: 'Clarification files stamped as Addendum',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition'];

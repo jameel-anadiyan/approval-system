@@ -31,6 +31,10 @@ export interface StampContext {
   fonts?: { regular?: Uint8Array; bold?: Uint8Array } | null;
   seal: Uint8Array;
   signature: Uint8Array;
+  /** Overrides the first band line, e.g. "ADDENDUM · Approval No: X" */
+  headline?: string;
+  /** Label before approverLine; default "Approved by" */
+  byLabel?: string;
 }
 
 const GREEN = rgb(0.05, 0.42, 0.29);
@@ -96,8 +100,8 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
     const safe = toSafePdfText(text);
     page.drawText(fit(safe, font, size * s, maxW), { x: x0, y: ly, size: size * s, font, color });
   };
-  line(`APPROVED · Approval No: ${ctx.approvalNo}`, bandH - 22 * s, 11, a.bold, GREEN);
-  line(`Approved by: ${ctx.approverLine}`, bandH - 39 * s, 8.5, a.regular);
+  line(ctx.headline ?? `APPROVED · Approval No: ${ctx.approvalNo}`, bandH - 22 * s, 11, a.bold, GREEN);
+  line(`${ctx.byLabel ?? "Approved by"}: ${ctx.approverLine}`, bandH - 39 * s, 8.5, a.regular);
   line(`Date & time: ${ctx.dateTime}`, bandH - 53 * s, 8.5, a.regular);
   line(`Request ${ctx.requestNo} · Amount ${ctx.amount} · ${pageLabel}`, bandH - 67 * s, 8.5, a.regular);
   if (ctx.reviewedLine) line(ctx.reviewedLine, bandH - 81 * s, 7.5, a.regular, GREY);

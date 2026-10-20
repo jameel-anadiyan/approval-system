@@ -12,6 +12,9 @@ export const SignedDocuments: React.FC<{ request: RequestRecord }> = ({ request 
   const [error, setError] = useState<string | null>(null);
 
   const signed = [...(request.signed_files || [])].sort((a, b) => Number(!!b.is_packet) - Number(!!a.is_packet));
+  const clarifFiles = new Map(
+    (request.files || []).filter((f) => f.clarification_id).map((f) => [f.id, f])
+  );
 
   const download = async (path: string, name: string, key: string) => {
     setError(null);
@@ -71,11 +74,21 @@ export const SignedDocuments: React.FC<{ request: RequestRecord }> = ({ request 
         <ul className="divide-y divide-emerald-100 bg-white/70 rounded-xl border border-emerald-100">
           {signed.map((s) => {
             const name = s.file_name || s.storage_path.split('/').pop() || 'document.pdf';
+            const addendumOf = s.source_file_id ? clarifFiles.get(s.source_file_id) : undefined;
             return (
               <li key={s.id} className="flex items-center gap-2 px-3 py-2 text-xs">
-                <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <FileCheck className={`w-4 h-4 shrink-0 ${addendumOf ? 'text-teal-600' : 'text-emerald-600'}`} />
                 <span className="flex-1 truncate font-medium text-slate-700">
-                  {s.is_packet ? 'Complete packet (cover + all pages)' : name}
+                  {addendumOf && (
+                    <span className="mr-1.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">
+                      Addendum
+                    </span>
+                  )}
+                  {s.is_packet
+                    ? 'Complete packet (cover + all pages)'
+                    : addendumOf
+                    ? `${addendumOf.original_name}${addendumOf.added_by_name ? ` · by ${addendumOf.added_by_name}` : ''}`
+                    : name}
                 </span>
                 <span className="text-[10px] text-slate-400 shrink-0">{s.page_count} pg</span>
                 <span className="hidden sm:inline font-mono text-[10px] text-slate-400" title={s.sha256}>
