@@ -1134,12 +1134,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const rawType = (voice.blob.type || '').split(';')[0];
           const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
           const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
-          voicePath = `${requestId}/disb-voice-${crypto.randomUUID()}.${ext}`;
+          // Must start with "voice-" to satisfy storage policy: split_part(name, '/', 2) like 'voice-%'
+          voicePath = `${requestId}/voice-disb-${crypto.randomUUID()}.${ext}`;
           voiceDuration = Math.min(300, Math.max(1, Math.round(voice.duration)));
           const { error: upErr } = await supabase.storage
             .from('request-files')
             .upload(voicePath, voice.blob, { contentType, upsert: false });
-          if (upErr) throw new Error(`Audio upload failed: ${upErr.message}`);
+          if (upErr) {
+            if (upErr.message.includes('row-level security') || upErr.message.includes('policy')) {
+              throw new Error(
+                'Supabase Storage policy blocked upload: Please execute migration 0018_disbursement_clarifications.sql in Supabase SQL Editor to allow voice notes for disbursement.'
+              );
+            }
+            throw new Error(`Audio upload failed: ${upErr.message}`);
+          }
         } catch (uploadErr: unknown) {
           return {
             success: false,
@@ -1154,7 +1162,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_voice_path: voicePath,
         p_voice_duration: voiceDuration,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) {
+        if (
+          error.message.includes('function') ||
+          error.message.includes('schema cache') ||
+          error.message.includes('does not exist')
+        ) {
+          return {
+            success: false,
+            error:
+              'Database migration required: Please run migration 0018_disbursement_clarifications.sql in Supabase SQL Editor to enable clarifications.',
+          };
+        }
+        return { success: false, error: error.message };
+      }
       await loadRequests(true);
       return { success: true };
     }
@@ -1223,12 +1244,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const rawType = (voice.blob.type || '').split(';')[0];
           const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
           const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
-          voicePath = `${requestId}/head-clarif-voice-${crypto.randomUUID()}.${ext}`;
+          // Must start with "voice-" to satisfy storage policy: split_part(name, '/', 2) like 'voice-%'
+          voicePath = `${requestId}/voice-head-${crypto.randomUUID()}.${ext}`;
           voiceDuration = Math.min(300, Math.max(1, Math.round(voice.duration)));
           const { error: upErr } = await supabase.storage
             .from('request-files')
             .upload(voicePath, voice.blob, { contentType, upsert: false });
-          if (upErr) throw new Error(`Audio upload failed: ${upErr.message}`);
+          if (upErr) {
+            if (upErr.message.includes('row-level security') || upErr.message.includes('policy')) {
+              throw new Error(
+                'Supabase Storage policy blocked upload: Please execute migration 0018_disbursement_clarifications.sql in Supabase SQL Editor to allow voice notes for heads.'
+              );
+            }
+            throw new Error(`Audio upload failed: ${upErr.message}`);
+          }
         } catch (uploadErr: unknown) {
           return {
             success: false,
@@ -1243,7 +1272,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_voice_path: voicePath,
         p_voice_duration: voiceDuration,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) {
+        if (
+          error.message.includes('function') ||
+          error.message.includes('schema cache') ||
+          error.message.includes('does not exist')
+        ) {
+          return {
+            success: false,
+            error:
+              'Database migration required: Please run migration 0018_disbursement_clarifications.sql in Supabase SQL Editor to enable clarifications.',
+          };
+        }
+        return { success: false, error: error.message };
+      }
       await loadRequests(true);
       return { success: true };
     }

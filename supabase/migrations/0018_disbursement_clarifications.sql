@@ -29,6 +29,7 @@ create index if not exists disb_clarif_head_idx on public.disbursement_clarifica
 -- RLS on disbursement_clarifications
 alter table public.disbursement_clarifications enable row level security;
 
+drop policy if exists disb_clarif_select on public.disbursement_clarifications;
 create policy disb_clarif_select on public.disbursement_clarifications for select to authenticated
   using (
     (select public.my_role()) in ('admin', 'disbursement')
@@ -44,6 +45,21 @@ create policy disb_clarif_select on public.disbursement_clarifications for selec
     )
   );
 
+drop policy if exists disb_clarif_insert on public.disbursement_clarifications;
+create policy disb_clarif_insert on public.disbursement_clarifications for insert to authenticated
+  with check (
+    (select public.my_role()) in ('admin', 'disbursement')
+  );
+
+drop policy if exists disb_clarif_update on public.disbursement_clarifications;
+create policy disb_clarif_update on public.disbursement_clarifications for update to authenticated
+  using (
+    (select public.my_role()) = 'admin'
+    or head_id = (select auth.uid())
+  );
+
+grant select, insert, update on public.disbursement_clarifications to authenticated;
+
 -- Update can_add_action_voice to allow disbursement and head clarification audio uploads
 create or replace function public.can_add_action_voice(p_request_id uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
@@ -52,19 +68,31 @@ returns boolean language sql stable security definer set search_path = '' as $$
     join public.profiles me on me.id = auth.uid() and me.is_active
     where r.id = p_request_id and (
       (me.role = 'clerk' and r.department_id = me.department_id and r.status in ('submitted', 'approving'))
-      or (me.role = 'head' and r.department_id = me.department_id
+      or (me.role = 'head' and (r.department_id = me.department_id or r.owner_head_id = me.id)
           and r.status in ('pending_head_approval','pending_head_review','approving', 'approved') and r.requester_id <> me.id)
-      or (me.role = 'admin' and r.status in ('pending_admin_approval','approving'))
+      or (me.role = 'admin' and r.status in ('pending_admin_approval','approving', 'approved'))
       or (me.role = 'head' and exists (
             select 1 from public.head_consultations hc
             where hc.request_id = r.id and hc.head_id = me.id
           ))
-      or (me.role = 'disbursement' and r.status = 'approved')
+      or (me.role = 'disbursement' and r.status in ('approved', 'paid'))
     )
   )
 $$;
 
--- Allow disbursement to read voice notes for approved requests
+revoke execute on function public.can_add_action_voice(uuid) from public, anon;
+grant execute on function public.can_add_action_voice(uuid) to authenticated;
+
+-- Ensure storage insert policy allows voice audio notes matching voice-%
+drop policy if exists "request-files action voice insert" on storage.objects;
+create policy "request-files action voice insert" on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'request-files'
+    and split_part(name, '/', 2) like 'voice-%'
+    and public.can_add_action_voice(public.storage_request_id(name))
+  );
+
+-- Allow disbursement to read voice notes for approved/paid requests
 drop policy if exists "request-files read" on storage.objects;
 create policy "request-files read" on storage.objects for select to authenticated
   using (
@@ -126,9 +154,10 @@ begin
 
   -- Timeline action
   insert into public.request_actions (
-    request_id, actor_id, actor_name, actor_role, action, remarks, visible_to_requester
+    request_id, actor_id, actor_name, actor_role, action, from_status, to_status, remarks, visible_to_requester
   ) values (
     r.id, me.id, me.full_name, me.role, 'disbursement_clarification_requested',
+    r.status, r.status,
     coalesce(nullif(btrim(p_note), ''), 'Disbursement sent request to Head for clarification'),
     false
   );
@@ -144,6 +173,9 @@ begin
   return jsonb_build_object('success', true, 'clarification_id', v_clarif_id);
 end;
 $$;
+
+revoke execute on function public.request_disbursement_clarification(uuid, text, text, numeric) from public, anon;
+grant execute on function public.request_disbursement_clarification(uuid, text, text, numeric) to authenticated;
 
 -- RPC: Respond to clarification and send back to Disbursement
 create or replace function public.respond_disbursement_clarification(
@@ -181,9 +213,10 @@ begin
 
   -- Timeline action
   insert into public.request_actions (
-    request_id, actor_id, actor_name, actor_role, action, remarks, visible_to_requester
+    request_id, actor_id, actor_name, actor_role, action, from_status, to_status, remarks, visible_to_requester
   ) values (
     c.request_id, me.id, me.full_name, me.role, 'disbursement_clarification_provided',
+    r.status, r.status,
     coalesce(nullif(btrim(p_response_note), ''), 'Head provided clarification and sent back to Disbursement'),
     false
   );
@@ -199,3 +232,6 @@ begin
   return jsonb_build_object('success', true);
 end;
 $$;
+
+revoke execute on function public.respond_disbursement_clarification(uuid, text, text, numeric) from public, anon;
+grant execute on function public.respond_disbursement_clarification(uuid, text, text, numeric) to authenticated;
