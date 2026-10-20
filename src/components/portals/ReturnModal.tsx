@@ -48,7 +48,7 @@ export const ReturnModal: React.FC<ReturnModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Return Request for Correction"
-      description={`Send request ${request.request_no || ''} back to ${request.requester_name}`}
+      description={`Send request ${request.request_no || ''} back to ${request.requester_name}${request.owner_head_name ? ` · Head: ${request.owner_head_name}` : ''}`}
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">

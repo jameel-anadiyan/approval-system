@@ -11,7 +11,7 @@ import {
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
-import { MOCK_REQUESTS } from '../lib/mockData';
+import { MOCK_REQUESTS, MOCK_USERS } from '../lib/mockData';
 import { loadThreshold } from '../lib/directory';
 
 type Result = { success: boolean; error?: string };
@@ -88,24 +88,52 @@ const LOCAL_STORAGE_REQ_KEY = 'approval_app_requests_store';
 
 const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Newest action first, files in upload order. */
-const normalize = (rows: RequestRecord[]) =>
-  rows.map((r) => ({
-    ...r,
-    amount: Number(r.amount),
-    paid_amount: Number(r.paid_amount ?? 0),
-    requester_photo_path: r.requester?.photo_path || r.requester_photo_path || null,
-    payments: [...(r.payments || [])]
-      .map((p) => ({ ...p, amount: Number(p.amount) }))
-      .sort((a, b) => a.payment_date.localeCompare(b.payment_date) || a.created_at.localeCompare(b.created_at)),
-    actions: [...(r.actions || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    consultations: [...(r.consultations || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)),
-    files: [...(r.files || [])].sort(
-      (a, b) =>
-        ((a as RequestFile & { sort_order?: number }).sort_order ?? 0) -
-          ((b as RequestFile & { sort_order?: number }).sort_order ?? 0) || a.created_at.localeCompare(b.created_at)
-    ),
-  }));
+/** Newest action first, files in upload order, resolve owner head. */
+const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Profile>> = {}) =>
+  rows.map((r) => {
+    const deptHead =
+      headsByDept[r.department_id] ||
+      MOCK_USERS.find((u) => u.role === 'head' && u.department_id === r.department_id);
+
+    const ownerHeadName =
+      r.owner_head_name ||
+      (r.requester_role === 'head' ? r.requester_name : null) ||
+      deptHead?.full_name ||
+      (r.consultations && r.consultations[0]?.requested_by_name) ||
+      (r.department?.name ? `${r.department.name} Head` : null);
+
+    const ownerHead =
+      r.owner_head ||
+      (deptHead
+        ? {
+            id: deptHead.id!,
+            full_name: deptHead.full_name!,
+            designation: deptHead.designation ?? null,
+            photo_path: deptHead.photo_path ?? null,
+          }
+        : null) ||
+      (r.requester_role === 'head' && r.requester ? r.requester : null);
+
+    return {
+      ...r,
+      amount: Number(r.amount),
+      paid_amount: Number(r.paid_amount ?? 0),
+      requester_photo_path: r.requester?.photo_path || r.requester_photo_path || null,
+      owner_head_id: r.owner_head_id || deptHead?.id || (r.requester_role === 'head' ? r.requester_id : null),
+      owner_head_name: ownerHeadName,
+      owner_head: ownerHead,
+      payments: [...(r.payments || [])]
+        .map((p) => ({ ...p, amount: Number(p.amount) }))
+        .sort((a, b) => a.payment_date.localeCompare(b.payment_date) || a.created_at.localeCompare(b.created_at)),
+      actions: [...(r.actions || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      consultations: [...(r.consultations || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      files: [...(r.files || [])].sort(
+        (a, b) =>
+          ((a as RequestFile & { sort_order?: number }).sort_order ?? 0) -
+            ((b as RequestFile & { sort_order?: number }).sort_order ?? 0) || a.created_at.localeCompare(b.created_at)
+      ),
+    };
+  });
 
 export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isBackendConnected } = useAuth();
@@ -121,12 +149,28 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setIsLoading(false);
         return;
       }
+
+      // Try to load active heads to map department -> head profile
+      const headsMap: Record<string, Partial<Profile>> = {};
+      try {
+        const { data: headsData } = await supabase
+          .from('profiles')
+          .select('id, full_name, designation, photo_path, department_id, role, is_active')
+          .eq('role', 'head')
+          .eq('is_active', true);
+        (headsData || []).forEach((h) => {
+          if (h.department_id) headsMap[h.department_id] = h;
+        });
+      } catch {
+        // ignore
+      }
+
       const { data, error } = await supabase
         .from('requests')
         .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))')
         .order('created_at', { ascending: false });
       // RLS decides what each role sees; never substitute demo data in live mode.
-      setRequests(!error && data ? normalize(data as RequestRecord[]) : []);
+      setRequests(!error && data ? normalize(data as RequestRecord[], headsMap) : []);
       setIsLoading(false);
       return;
     }
@@ -134,7 +178,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const saved = localStorage.getItem(LOCAL_STORAGE_REQ_KEY);
     if (saved) {
       try {
-        setRequests(JSON.parse(saved));
+        setRequests(normalize(JSON.parse(saved)));
         setIsLoading(false);
         return;
       } catch {
@@ -142,7 +186,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    setRequests(MOCK_REQUESTS);
+    setRequests(normalize(MOCK_REQUESTS));
     localStorage.setItem(LOCAL_STORAGE_REQ_KEY, JSON.stringify(MOCK_REQUESTS));
     setIsLoading(false);
   }, [isBackendConnected, user?.id]);
@@ -271,6 +315,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Mock create draft
     const newId = `req-draft-${Date.now()}`;
+    const mockDeptHead =
+      user.role === 'head'
+        ? user
+        : MOCK_USERS.find((u) => u.role === 'head' && u.department_id === (user.department_id || 'dept-fin-001'));
+
     const newRecord: RequestRecord = {
       id: newId,
       request_no: null,
@@ -278,6 +327,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       requester_name: user.full_name,
       requester_role: user.role,
       department_id: user.department_id || 'dept-fin-001',
+      owner_head_id: mockDeptHead?.id || null,
+      owner_head_name: mockDeptHead?.full_name || null,
+      owner_head: mockDeptHead
+        ? {
+            id: mockDeptHead.id,
+            full_name: mockDeptHead.full_name,
+            designation: mockDeptHead.designation ?? null,
+            photo_path: mockDeptHead.photo_path ?? null,
+          }
+        : null,
       title: data.title,
       notes: data.notes || null,
       amount: data.amount,

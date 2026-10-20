@@ -93,9 +93,9 @@ export const RespondConsultationModal: React.FC<RespondConsultationModalProps> =
               {formatINR(request.amount)}
             </span>
           </div>
-          <div className="text-[11px] text-slate-500 flex items-center justify-between">
+          <div className="text-[11px] text-slate-500 flex items-center justify-between flex-wrap gap-1">
             <span>Requester: <strong>{request.requester_name}</strong></span>
-            <span>Requested by: <strong>{consultation.requested_by_name}</strong></span>
+            <span>Owner Head: <strong className="text-indigo-900 font-bold">{request.owner_head_name || consultation.requested_by_name}</strong></span>
           </div>
 
           {consultation.request_note && (

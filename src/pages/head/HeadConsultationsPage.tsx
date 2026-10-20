@@ -206,6 +206,9 @@ export const HeadConsultationsPage: React.FC = () => {
                         <span className="text-xs text-slate-500">
                           Dept: <strong>{r.department?.name || 'Department'}</strong>
                         </span>
+                        <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 font-semibold">
+                          Owner Head: <strong>{r.owner_head_name || c.requested_by_name}</strong>
+                        </span>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -408,6 +411,9 @@ export const HeadConsultationsPage: React.FC = () => {
                           {r.request_no}
                         </span>
                         <StatusBadge status={r.status} requestType={typeOf(r)} size="sm" />
+                        <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 font-semibold">
+                          Owner Head: <strong>{r.owner_head_name || c.requested_by_name}</strong>
+                        </span>
                       </div>
 
                       <span

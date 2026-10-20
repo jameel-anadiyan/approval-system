@@ -50,6 +50,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Clock,
+  UserCheck,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -122,13 +123,13 @@ export const RequestDetailPage: React.FC = () => {
   const isConsultedHead = role === 'head' && (Boolean(myConsultation) || user?.department_id !== request.department_id);
 
   // Strict Owning Head:
-  // Must be role === 'head', NOT the requester, NOT a consulted head, and MUST belong to the request's department!
+  // Must be role === 'head', NOT the requester, NOT a consulted head, and MUST belong to the request's department or match owner_head_id!
   const isOwningHead =
     role === 'head' &&
     !isOwner &&
     !myConsultation &&
-    !!user?.department_id &&
-    user.department_id === request.department_id;
+    ((Boolean(request.owner_head_id) && user?.id === request.owner_head_id) ||
+      (Boolean(user?.department_id) && user?.department_id === request.department_id));
 
   // If any consultation is pending or disagreed, forwarding to Admin and Approval are blocked!
   const pendingConsultations = consultations.filter((c) => c.status === 'pending');
@@ -240,6 +241,16 @@ export const RequestDetailPage: React.FC = () => {
                   Route {request.route}
                 </span>
               )}
+              {request.owner_head_name && (
+                <span
+                  id="detail-owner-head-badge"
+                  className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs"
+                  title="Request Owner Head"
+                >
+                  <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Head: {request.owner_head_name}</span>
+                </span>
+              )}
             </div>
             <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900 font-display mt-1">
               {request.title}
@@ -302,7 +313,7 @@ export const RequestDetailPage: React.FC = () => {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
               <div className="flex items-center gap-2.5">
                 <UserAvatar
                   photoPath={request.requester?.photo_path ?? request.requester_photo_path ?? null}
@@ -330,6 +341,24 @@ export const RequestDetailPage: React.FC = () => {
                 <span className="text-[11px] text-slate-500">
                   Code: {request.department?.code || '—'}
                 </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <UserAvatar
+                  photoPath={request.owner_head?.photo_path ?? null}
+                  name={request.owner_head_name || 'Department Head'}
+                  size="sm"
+                  previewable
+                  className="shadow-xs shrink-0 ring-1 ring-indigo-200"
+                />
+                <div className="min-w-0">
+                  <span className="text-slate-400 font-medium block">Request Owner Head</span>
+                  <span className="font-bold text-indigo-900 mt-0.5 block truncate">
+                    {request.owner_head_name || 'Unassigned'}
+                  </span>
+                  <span className="text-[11px] text-slate-500 truncate block">
+                    {request.department?.code ? `${request.department.code} Head` : 'Department Head'}
+                  </span>
+                </div>
               </div>
               {request.shop_name && (
                 <div className="col-span-2">
@@ -376,6 +405,7 @@ export const RequestDetailPage: React.FC = () => {
               canRequestMore={canRequestConsultation}
               requestStatus={request.status}
               onRequestMore={() => setModalState('consult')}
+              ownerHeadName={request.owner_head_name ?? undefined}
             />
           ) : (
             canRequestConsultation && (

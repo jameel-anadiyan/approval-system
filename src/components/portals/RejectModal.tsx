@@ -48,7 +48,7 @@ export const RejectModal: React.FC<RejectModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Reject Request"
-      description={`Decline request ${request.request_no || ''}`}
+      description={`Decline request ${request.request_no || ''} · ${request.department?.name || 'Department'}${request.owner_head_name ? ` · Head: ${request.owner_head_name}` : ''}`}
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">

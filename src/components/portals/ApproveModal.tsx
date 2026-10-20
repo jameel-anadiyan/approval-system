@@ -160,6 +160,12 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
               <span className="text-xs font-semibold text-slate-500">Approver</span>
               <span className="text-xs font-bold text-slate-800">{user?.full_name}</span>
             </div>
+            {request.owner_head_name && (
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+                <span className="text-xs font-semibold text-slate-500">Request Owner Head</span>
+                <span className="text-xs font-bold text-indigo-900">{request.owner_head_name}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
               <span className="text-xs font-semibold text-slate-500">Designation</span>
               <span className="text-xs font-medium text-slate-700">{user?.designation || 'Authority'}</span>

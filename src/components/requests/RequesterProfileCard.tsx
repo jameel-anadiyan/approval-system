@@ -72,6 +72,15 @@ export const RequesterProfileCard: React.FC<RequesterProfileCardProps> = ({
               </div>
             )}
 
+            {request.owner_head_name && (
+              <div className="flex items-center gap-1.5 text-indigo-800 bg-indigo-50/90 px-2.5 py-1.5 rounded-xl border border-indigo-100 my-1">
+                <UserCheck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <span className="truncate text-xs">
+                  Owner Head: <strong className="font-bold text-indigo-950">{request.owner_head_name}</strong>
+                </span>
+              </div>
+            )}
+
             {request.shop_name && (
               <div className="flex items-center gap-1.5 text-slate-700">
                 <Store className="w-3.5 h-3.5 text-teal-600 shrink-0" />

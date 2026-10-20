@@ -170,6 +170,9 @@ export interface RequestRecord {
   consultations?: HeadConsultation[];
   requester?: Pick<Profile, 'id' | 'full_name' | 'designation' | 'photo_path'> | null;
   requester_photo_path?: string | null;
+  owner_head_id?: string | null;
+  owner_head_name?: string | null;
+  owner_head?: Pick<Profile, 'id' | 'full_name' | 'designation' | 'photo_path'> | null;
 }
 
 export interface HeadConsultation {

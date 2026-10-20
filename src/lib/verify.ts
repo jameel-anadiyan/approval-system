@@ -14,6 +14,7 @@ export interface VerifyResult {
   paid_at: string | null;
   department: string | null;
   requester_name: string;
+  owner_head_name?: string | null;
   can_open: boolean;
   request_type?: string | null;
   shop_name?: string | null;
@@ -63,6 +64,7 @@ export async function verifyApproval(
         paid_at: r.paid_at,
         department: r.department?.name ?? null,
         requester_name: r.requester_name,
+        owner_head_name: r.owner_head_name ?? null,
         can_open: true,
         request_type: r.request_type ?? null,
         shop_name: r.shop_name ?? null,

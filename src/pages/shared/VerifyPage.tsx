@@ -110,6 +110,7 @@ export const VerifyPage: React.FC = () => {
                     </span>
                   </Row>
                   <Row label="Requester">{result.requester_name}</Row>
+                  {result.owner_head_name && <Row label="Owner Head">{result.owner_head_name}</Row>}
                   <Row label="Approved by">
                     {result.approver_name || '—'}
                     {result.approver_role ? ` (${ROLE_LABELS[result.approver_role] || result.approver_role})` : ''}

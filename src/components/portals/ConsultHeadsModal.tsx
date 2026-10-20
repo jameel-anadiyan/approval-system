@@ -106,7 +106,7 @@ export const ConsultHeadsModal: React.FC<ConsultHeadsModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Consult Other Department Heads"
-      description={`Request review & agreement from other heads on ${request.request_no || 'this request'}`}
+      description={`Request review & agreement from other heads on ${request.request_no || 'this request'}${request.owner_head_name ? ` · Owner Head: ${request.owner_head_name}` : ''}`}
       maxWidth="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">

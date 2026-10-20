@@ -26,6 +26,7 @@ interface HeadConsultationsSectionProps {
   canRequestMore?: boolean;
   requestStatus?: string;
   onRequestMore?: () => void;
+  ownerHeadName?: string;
 }
 
 export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> = ({
@@ -34,6 +35,7 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
   canRequestMore = false,
   requestStatus,
   onRequestMore,
+  ownerHeadName,
 }) => {
   const { user } = useAuth();
   const { respondHeadConsultation } = useRequests();
@@ -107,7 +109,10 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
               </span>
             </h3>
             <p className="text-[11px] text-slate-500">
-              Requested by <strong>{firstConsultation.requested_by_name}</strong>
+              Request Owner Head: <strong className="text-indigo-950 font-bold">{ownerHeadName || firstConsultation.requested_by_name}</strong>
+              {ownerHeadName && firstConsultation.requested_by_name !== ownerHeadName && (
+                <span className="text-slate-400"> (Forwarded by {firstConsultation.requested_by_name})</span>
+              )}
             </p>
           </div>
         </div>

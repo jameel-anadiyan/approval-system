@@ -4,7 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
 import { useRequests } from '../../context/RequestContext';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck } from 'lucide-react';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -106,6 +106,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               <span className="text-slate-400 font-normal"> • {request.department.code}</span>
             )}
           </div>
+          {request.owner_head_name && (
+            <div className="text-[11px] text-indigo-700 font-medium flex items-center justify-end gap-1 mt-0.5">
+              <UserCheck className="w-3 h-3 text-indigo-500 shrink-0" />
+              <span>Head: <strong className="font-semibold text-slate-800">{request.owner_head_name}</strong></span>
+            </div>
+          )}
           {request.shop_name && (
             <div className="text-[11px] text-slate-500 flex items-center justify-end gap-1">
               <Store className="w-3 h-3" />

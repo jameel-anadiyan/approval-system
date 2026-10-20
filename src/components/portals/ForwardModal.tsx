@@ -49,7 +49,7 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Forward to Admin for Approval"
-      description={`Review and submit request ${request.request_no || ''} to Administrator`}
+      description={`Request ${request.request_no || ''} · ${request.department?.name || 'Department'}${request.owner_head_name ? ` · Head: ${request.owner_head_name}` : ''}`}
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
