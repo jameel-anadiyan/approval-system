@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord, Profile } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
-import { useRequests } from '../../context/RequestContext';
+import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { UserAvatar } from '../common/UserAvatar';
+import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { Users, Check, AlertCircle, Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
 
 interface ConsultHeadsModalProps {
@@ -25,6 +26,7 @@ export const ConsultHeadsModal: React.FC<ConsultHeadsModalProps> = ({
   const [heads, setHeads] = useState<Profile[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [note, setNote] = useState('');
+  const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [isLoadingHeads, setIsLoadingHeads] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,12 +78,18 @@ export const ConsultHeadsModal: React.FC<ConsultHeadsModalProps> = ({
     setError(null);
 
     try {
-      const res = await requestHeadConsultations(request.id, selectedIds, note.trim() || undefined);
+      const res = await requestHeadConsultations(
+        request.id,
+        selectedIds,
+        note.trim() || undefined,
+        voice
+      );
       if (!res.success) {
         throw new Error(res.error || 'Failed to send consultation requests');
       }
       setSelectedIds([]);
       setNote('');
+      setVoice(null);
       onClose();
       if (onSuccess) onSuccess();
     } catch (err) {
@@ -218,6 +226,14 @@ export const ConsultHeadsModal: React.FC<ConsultHeadsModalProps> = ({
             onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. Please verify if your department agrees with this event stall sponsorship & budget allocation..."
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
+          />
+        </div>
+
+        {/* Audio Record / Voice Note */}
+        <div>
+          <ActionVoiceField
+            onChange={setVoice}
+            label="Audio Record / Voice Note for Other Heads (Optional)"
           />
         </div>
 

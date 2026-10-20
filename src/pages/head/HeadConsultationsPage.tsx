@@ -5,6 +5,7 @@ import { useRequests } from '../../context/RequestContext';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
 import { UserAvatar } from '../../components/common/UserAvatar';
+import { ConsultationVoicePlayer } from '../../components/requests/ConsultationVoicePlayer';
 import {
   Users,
   CheckCircle2,
@@ -240,22 +241,48 @@ export const HeadConsultationsPage: React.FC = () => {
                       </p>
                     </div>
 
-                    {/* Forwarder's Note */}
-                    {c.request_note && (
-                      <div className="p-3 bg-purple-50/70 border border-purple-100 rounded-xl text-xs text-purple-950 flex items-start gap-2">
-                        <MessageSquare className="w-3.5 h-3.5 text-purple-600 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-bold">Note from {c.requested_by_name}:</span>
-                          <p className="mt-0.5 italic">"{c.request_note}"</p>
-                        </div>
+                    {/* Forwarder's Note & Audio record */}
+                    {(c.request_note || c.request_voice_path) && (
+                      <div className="p-3 bg-purple-50/70 border border-purple-100 rounded-xl text-xs text-purple-950 space-y-2">
+                        {c.request_note && (
+                          <div className="flex items-start gap-2">
+                            <MessageSquare className="w-3.5 h-3.5 text-purple-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold">Note from {c.requested_by_name}:</span>
+                              <p className="mt-0.5 italic">"{c.request_note}"</p>
+                            </div>
+                          </div>
+                        )}
+                        {c.request_voice_path && (
+                          <div onClick={(e) => e.stopPropagation()} className="pt-1">
+                            <ConsultationVoicePlayer
+                              storagePath={c.request_voice_path}
+                              duration={c.request_voice_duration}
+                              title={`Audio note from ${c.requested_by_name}`}
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* Responded remarks */}
-                    {c.response_remarks && (
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
-                        <span className="font-bold">Your Response: </span>
-                        <span>"{c.response_remarks}"</span>
+                    {/* Responded remarks & voice */}
+                    {(c.response_remarks || c.response_voice_path) && (
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 space-y-1.5">
+                        {c.response_remarks && (
+                          <div>
+                            <span className="font-bold">Your Response: </span>
+                            <span>"{c.response_remarks}"</span>
+                          </div>
+                        )}
+                        {c.response_voice_path && (
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <ConsultationVoicePlayer
+                              storagePath={c.response_voice_path}
+                              duration={c.response_voice_duration}
+                              title="Your voice response"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -411,10 +438,33 @@ export const HeadConsultationsPage: React.FC = () => {
                       </p>
                     </div>
 
-                    {c.response_remarks && (
-                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
-                        <span className="font-bold">Remarks from {c.head_name}: </span>
-                        <p className="mt-0.5 italic">"{c.response_remarks}"</p>
+                    {c.request_voice_path && (
+                      <div onClick={(e) => e.stopPropagation()} className="p-2.5 bg-purple-50/60 border border-purple-100 rounded-xl">
+                        <ConsultationVoicePlayer
+                          storagePath={c.request_voice_path}
+                          duration={c.request_voice_duration}
+                          title="Your audio record"
+                        />
+                      </div>
+                    )}
+
+                    {(c.response_remarks || c.response_voice_path) && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 space-y-2">
+                        {c.response_remarks && (
+                          <div>
+                            <span className="font-bold">Remarks from {c.head_name}: </span>
+                            <p className="mt-0.5 italic">"{c.response_remarks}"</p>
+                          </div>
+                        )}
+                        {c.response_voice_path && (
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <ConsultationVoicePlayer
+                              storagePath={c.response_voice_path}
+                              duration={c.response_voice_duration}
+                              title={`Voice response from ${c.head_name}`}
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord, HeadConsultation } from '../../types/database';
-import { useRequests } from '../../context/RequestContext';
+import { useRequests, ActionVoice } from '../../context/RequestContext';
+import { ActionVoiceField } from '../requests/ActionVoiceField';
+import { ConsultationVoicePlayer } from '../requests/ConsultationVoicePlayer';
 import { formatINR, formatISTDate } from '../../lib/formatters';
 import {
   ThumbsUp,
@@ -38,6 +40,7 @@ export const RespondConsultationModal: React.FC<RespondConsultationModalProps> =
     initialStatus || (consultation.status !== 'pending' ? consultation.status : 'agreed')
   );
   const [remarks, setRemarks] = useState(consultation.response_remarks || '');
+  const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,7 +54,9 @@ export const RespondConsultationModal: React.FC<RespondConsultationModalProps> =
       const res = await respondHeadConsultation(
         consultation.id,
         selectedStatus,
-        remarks.trim() || undefined
+        remarks.trim() || undefined,
+        voice,
+        request.id
       );
 
       if (!res.success) {
@@ -100,6 +105,19 @@ export const RespondConsultationModal: React.FC<RespondConsultationModalProps> =
                 <span className="font-bold text-slate-700">Forwarder's Note:</span>
                 <p className="italic text-slate-600">"{consultation.request_note}"</p>
               </div>
+            </div>
+          )}
+
+          {consultation.request_voice_path && (
+            <div className="pt-2 border-t border-slate-200/80">
+              <span className="text-[11px] font-bold text-slate-700 block mb-1">
+                Audio Note from {consultation.requested_by_name}:
+              </span>
+              <ConsultationVoicePlayer
+                storagePath={consultation.request_voice_path}
+                duration={consultation.request_voice_duration}
+                title={`Audio Note from ${consultation.requested_by_name}`}
+              />
             </div>
           )}
         </div>
@@ -193,6 +211,14 @@ export const RespondConsultationModal: React.FC<RespondConsultationModalProps> =
                 : 'Add any supporting remarks or advice for the owning department head...'
             }
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-hidden"
+          />
+        </div>
+
+        {/* Optional Voice Response */}
+        <div>
+          <ActionVoiceField
+            onChange={setVoice}
+            label={`Voice response with your ${selectedStatus} decision (optional)`}
           />
         </div>
 

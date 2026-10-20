@@ -69,12 +69,15 @@ interface RequestContextType {
   requestHeadConsultations: (
     requestId: string,
     headIds: string[],
-    note?: string
+    note?: string,
+    voice?: ActionVoice | null
   ) => Promise<{ success: boolean; count?: number; error?: string }>;
   respondHeadConsultation: (
     consultationId: string,
     status: 'agreed' | 'disagreed',
-    remarks?: string
+    remarks?: string,
+    voice?: ActionVoice | null,
+    requestId?: string
   ) => Promise<Result>;
   loadConsultableHeads: () => Promise<Profile[]>;
 }
@@ -892,14 +895,38 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const requestHeadConsultations = async (
     requestId: string,
     headIds: string[],
-    note?: string
+    note?: string,
+    voice?: ActionVoice | null
   ): Promise<{ success: boolean; count?: number; error?: string }> => {
     if (!headIds.length) return { success: false, error: 'Select at least one department head' };
     if (isBackendConnected) {
+      let voicePath: string | null = null;
+      let voiceDuration: number | null = null;
+      if (voice) {
+        try {
+          const rawType = (voice.blob.type || '').split(';')[0];
+          const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
+          const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
+          voicePath = `${requestId}/voice-consult-${crypto.randomUUID()}.${ext}`;
+          voiceDuration = Math.min(300, Math.max(1, Math.round(voice.duration)));
+          const { error: upErr } = await supabase.storage
+            .from('request-files')
+            .upload(voicePath, voice.blob, { contentType, upsert: false });
+          if (upErr) throw new Error(`Audio record upload failed: ${upErr.message}`);
+        } catch (uploadErr: unknown) {
+          return {
+            success: false,
+            error: uploadErr instanceof Error ? uploadErr.message : 'Voice upload failed',
+          };
+        }
+      }
+
       const { data, error } = await supabase.rpc('request_head_consultations', {
         p_request_id: requestId,
         p_head_ids: headIds,
         p_note: note || null,
+        p_voice_path: voicePath,
+        p_voice_duration: voiceDuration,
       });
       if (error) return { success: false, error: error.message };
       await loadRequests(true);
@@ -911,13 +938,38 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const respondHeadConsultation = async (
     consultationId: string,
     status: 'agreed' | 'disagreed',
-    remarks?: string
+    remarks?: string,
+    voice?: ActionVoice | null,
+    requestId?: string
   ): Promise<Result> => {
     if (isBackendConnected) {
+      let voicePath: string | null = null;
+      let voiceDuration: number | null = null;
+      if (voice && requestId) {
+        try {
+          const rawType = (voice.blob.type || '').split(';')[0];
+          const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
+          const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
+          voicePath = `${requestId}/voice-resp-${crypto.randomUUID()}.${ext}`;
+          voiceDuration = Math.min(300, Math.max(1, Math.round(voice.duration)));
+          const { error: upErr } = await supabase.storage
+            .from('request-files')
+            .upload(voicePath, voice.blob, { contentType, upsert: false });
+          if (upErr) throw new Error(`Audio record upload failed: ${upErr.message}`);
+        } catch (uploadErr: unknown) {
+          return {
+            success: false,
+            error: uploadErr instanceof Error ? uploadErr.message : 'Voice upload failed',
+          };
+        }
+      }
+
       const { error } = await supabase.rpc('respond_head_consultation', {
         p_consultation_id: consultationId,
         p_status: status,
         p_remarks: remarks || null,
+        p_voice_path: voicePath,
+        p_voice_duration: voiceDuration,
       });
       if (error) return { success: false, error: error.message };
       await loadRequests(true);

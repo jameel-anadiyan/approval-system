@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { HeadConsultation } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
-import { useRequests } from '../../context/RequestContext';
+import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { UserAvatar } from '../common/UserAvatar';
+import { ActionVoiceField } from './ActionVoiceField';
+import { ConsultationVoicePlayer } from './ConsultationVoicePlayer';
 import { formatISTDate } from '../../lib/formatters';
 import {
   Users,
@@ -37,6 +39,7 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
   const { respondHeadConsultation } = useRequests();
 
   const [responseRemarks, setResponseRemarks] = useState('');
+  const [responseVoice, setResponseVoice] = useState<ActionVoice | null>(null);
   const [isRevising, setIsRevising] = useState(false);
   const [submittingAction, setSubmittingAction] = useState<'agreed' | 'disagreed' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,12 +68,15 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
       const res = await respondHeadConsultation(
         myConsultation.id,
         status,
-        responseRemarks.trim() || undefined
+        responseRemarks.trim() || undefined,
+        responseVoice,
+        _requestId
       );
       if (!res.success) {
         throw new Error(res.error || 'Failed to submit response');
       }
       setIsRevising(false);
+      setResponseVoice(null);
       setSuccessBanner(
         isPending
           ? `Recorded your response as ${status.toUpperCase()}.`
@@ -156,14 +162,30 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
           </div>
         )}
 
-        {/* Forwarder's note/question */}
-        {firstConsultation.request_note && (
-          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 flex items-start gap-2.5">
-            <MessageSquare className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold text-slate-800">Forwarder's Note / Question:</span>
-              <p className="mt-0.5 text-slate-600 italic">"{firstConsultation.request_note}"</p>
+        {/* Forwarder's note/question and audio record */}
+        {(firstConsultation.request_note || firstConsultation.request_voice_path) && (
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 space-y-2">
+            <div className="flex items-start gap-2.5">
+              <MessageSquare className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-slate-800">Forwarder's Note / Question:</span>
+                {firstConsultation.request_note ? (
+                  <p className="mt-0.5 text-slate-600 italic">"{firstConsultation.request_note}"</p>
+                ) : (
+                  <p className="mt-0.5 text-slate-500 italic">Audio record attached below</p>
+                )}
+              </div>
             </div>
+
+            {firstConsultation.request_voice_path && (
+              <div className="pt-2 border-t border-slate-200/80">
+                <ConsultationVoicePlayer
+                  storagePath={firstConsultation.request_voice_path}
+                  duration={firstConsultation.request_voice_duration}
+                  title={`Audio Record from ${firstConsultation.requested_by_name}`}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -187,6 +209,13 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
               placeholder="Add your remarks or reason for Agree / Disagree (optional)..."
               className="w-full text-xs p-3 rounded-xl border border-indigo-200 bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
             />
+
+            <div>
+              <ActionVoiceField
+                onChange={setResponseVoice}
+                label="Voice response (optional)"
+              />
+            </div>
 
             {error && (
               <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
@@ -325,6 +354,13 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
                   className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-hidden"
                 />
 
+                <div>
+                  <ActionVoiceField
+                    onChange={setResponseVoice}
+                    label="Voice response (optional)"
+                  />
+                </div>
+
                 {error && (
                   <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
                     {error}
@@ -447,11 +483,18 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
                   </span>
                 </div>
 
-                {/* Remarks & timestamp */}
-                {(c.response_remarks || c.responded_at) && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-200/60 text-[11px] space-y-1">
+                {/* Remarks, audio, & timestamp */}
+                {(c.response_remarks || c.response_voice_path || c.responded_at) && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-200/60 text-[11px] space-y-1.5">
                     {c.response_remarks && (
                       <p className="text-slate-700 italic">"{c.response_remarks}"</p>
+                    )}
+                    {c.response_voice_path && (
+                      <ConsultationVoicePlayer
+                        storagePath={c.response_voice_path}
+                        duration={c.response_voice_duration}
+                        title={`Voice note from ${c.head_name}`}
+                      />
                     )}
                     {c.responded_at && (
                       <div className="text-[10px] text-slate-400">

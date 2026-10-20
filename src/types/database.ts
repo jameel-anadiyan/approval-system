@@ -183,7 +183,11 @@ export interface HeadConsultation {
   department_name?: string | null;
   status: HeadConsultationStatus;
   request_note?: string | null;
+  request_voice_path?: string | null;
+  request_voice_duration?: number | null;
   response_remarks?: string | null;
+  response_voice_path?: string | null;
+  response_voice_duration?: number | null;
   responded_at?: string | null;
   created_at: string;
   head_photo_path?: string | null;
