@@ -195,7 +195,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const res = await supabase
         .from('requests')
         .select(
-          '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))'
+          '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))'
         )
         .order('created_at', { ascending: false });
 
@@ -208,7 +208,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const coreRes = await supabase
           .from('requests')
           .select(
-            '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)'
+            '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)'
           )
           .order('created_at', { ascending: false });
         if (!coreRes.error && coreRes.data) {
