@@ -52,7 +52,7 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
   // Check if current logged-in user is one of the consulted heads
   const myConsultation = consultations.find((c) => c.head_id === user?.id);
   const isFinalized = requestStatus
-    ? ['approved', 'rejected', 'paid', 'withdrawn'].includes(requestStatus)
+    ? ['approved', 'rejected', 'paid', 'withdrawn', 'cancelled'].includes(requestStatus)
     : false;
   const isPending = myConsultation?.status === 'pending';
   const canRevise = Boolean(myConsultation && !isPending && !isFinalized);

@@ -19,6 +19,7 @@ const ALL_STATUSES: RequestStatus[] = [
   'returned',
   'rejected',
   'withdrawn',
+  'cancelled',
 ];
 
 export const AdminAllRequestsPage: React.FC = () => {

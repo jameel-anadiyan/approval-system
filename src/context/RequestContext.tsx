@@ -90,8 +90,11 @@ interface RequestContextType {
     clarificationId: string,
     responseNote?: string,
     voice?: ActionVoice | null,
-    requestId?: string
+    requestId?: string,
+    files?: File[]
   ) => Promise<Result>;
+  /** Owner Head cancels an approved request before it is fully paid. */
+  cancelApprovedRequest: (id: string, reason: string, voice?: ActionVoice | null) => Promise<Result>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -1231,7 +1234,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     clarificationId: string,
     responseNote?: string,
     voice?: ActionVoice | null,
-    requestId?: string
+    requestId?: string,
+    files: File[] = []
   ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
@@ -1239,6 +1243,24 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let voiceDuration: number | null = null;
 
     if (isBackendConnected) {
+      const uploaded: { storage_path: string; original_name: string; mime_type: string; size_bytes: number }[] = [];
+      if (files.length > 0) {
+        if (!requestId) return { success: false, error: 'Request id missing for attachments' };
+        for (const file of files) {
+          const contentType = (file.type || '').split(';')[0];
+          const safe = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
+          // Must start with "clarif-" to satisfy the clarification upload storage policy.
+          const path = `${requestId}/clarif-${crypto.randomUUID()}-${safe}`;
+          const { error: upErr } = await supabase.storage
+            .from('request-files')
+            .upload(path, file, { contentType, upsert: false });
+          if (upErr) {
+            if (uploaded.length) await supabase.storage.from('request-files').remove(uploaded.map((u) => u.storage_path));
+            return { success: false, error: `Upload failed for ${file.name}: ${upErr.message}` };
+          }
+          uploaded.push({ storage_path: path, original_name: file.name, mime_type: contentType, size_bytes: file.size });
+        }
+      }
       if (voice && requestId) {
         try {
           const rawType = (voice.blob.type || '').split(';')[0];
@@ -1271,7 +1293,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_response_note: responseNote || null,
         p_voice_path: voicePath,
         p_voice_duration: voiceDuration,
+        p_files: uploaded,
       });
+      if (error && uploaded.length) {
+        await supabase.storage.from('request-files').remove(uploaded.map((u) => u.storage_path));
+      }
       if (error) {
         if (
           error.message.includes('function') ||
@@ -1337,6 +1363,57 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const cancelApprovedRequest = async (id: string, reason: string, voice?: ActionVoice | null): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const r = requests.find((x) => x.id === id);
+    if (!r) return { success: false, error: 'Request not found' };
+    if (isBackendConnected) {
+      try {
+        await uploadActionVoice(id, voice);
+        const { error } = await supabase.rpc('cancel_approved_request', { p_request_id: id, p_reason: reason });
+        if (error) throw error;
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        await loadRequests(true);
+        return { success: false, error: errMsg(err) };
+      }
+    }
+    // Mock mode
+    if (r.status !== 'approved') return { success: false, error: 'Only approved requests can be cancelled' };
+    const now = new Date().toISOString();
+    const action: RequestAction = {
+      id: `act-${Date.now()}`,
+      request_id: id,
+      actor_id: user.id,
+      actor_name: user.full_name,
+      actor_role: user.role,
+      action: 'cancelled',
+      from_status: 'approved',
+      to_status: 'cancelled',
+      remarks: reason,
+      visible_to_requester: true,
+      created_at: now,
+    };
+    updateLocalRequests((prev) =>
+      prev.map((req) =>
+        req.id === id
+          ? {
+              ...req,
+              status: 'cancelled',
+              cancelled_by: user.id,
+              cancelled_by_name: user.full_name,
+              cancelled_at: now,
+              cancel_reason: reason,
+              updated_at: now,
+              actions: [action, ...(req.actions || [])],
+            }
+          : req
+      )
+    );
+    return { success: true };
+  };
+
   return (
     <RequestContext.Provider
       value={{
@@ -1364,6 +1441,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         loadConsultableHeads,
         requestDisbursementClarification,
         respondDisbursementClarification,
+        cancelApprovedRequest,
       }}
     >
       {children}

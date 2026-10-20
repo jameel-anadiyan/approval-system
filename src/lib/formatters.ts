@@ -174,6 +174,14 @@ export const STATUS_META: Record<RequestStatus, StatusMeta> = {
     borderColor: 'border-slate-200',
     description: 'Withdrawn by requester.',
   },
+  cancelled: {
+    label: 'Approval Cancelled',
+    badgeClass: 'bg-rose-50 text-rose-800 border-rose-300 ring-1 ring-rose-200 line-through decoration-rose-300',
+    bgLight: 'bg-rose-50',
+    textColor: 'text-rose-800',
+    borderColor: 'border-rose-200',
+    description: 'Approval cancelled by the owner Head before full payment. Signed documents are void.',
+  },
 };
 
 export const ROLE_LABELS: Record<AppRole, string> = {
@@ -209,6 +217,7 @@ export const ACTION_LABELS: Record<string, string> = {
   consultation_disagreed: 'Head Review: Disagreed',
   disbursement_clarification_requested: 'Disbursement: Clarification requested from Head',
   disbursement_clarification_provided: 'Head: Clarification provided to Disbursement',
+  cancelled: 'Approval cancelled by Head',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition'];

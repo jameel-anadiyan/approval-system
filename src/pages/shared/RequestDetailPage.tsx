@@ -18,6 +18,7 @@ import { ConsultHeadsModal } from '../../components/portals/ConsultHeadsModal';
 import { RespondConsultationModal } from '../../components/portals/RespondConsultationModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
 import { RespondClarificationModal } from '../../components/portals/RespondClarificationModal';
+import { CancelApprovalModal } from '../../components/portals/CancelApprovalModal';
 import { HeadConsultationsSection } from '../../components/requests/HeadConsultationsSection';
 import { DisbursementClarificationSection } from '../../components/requests/DisbursementClarificationSection';
 import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
@@ -54,6 +55,7 @@ import {
   Clock,
   UserCheck,
   HelpCircle,
+  Ban,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -74,10 +76,11 @@ export const RequestDetailPage: React.FC = () => {
     rejectRequest,
     approveRequest,
     markAsPaid,
+    cancelApprovedRequest,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | null
   >(null);
   const [consultInitialStatus, setConsultInitialStatus] = useState<'agreed' | 'disagreed' | null>(null);
   const [copiedNo, setCopiedNo] = useState(false);
@@ -151,7 +154,7 @@ export const RequestDetailPage: React.FC = () => {
     consultationBlockReason = `Approval & Forwarding blocked: One or more consulted department heads (${disagreedConsultations.map((c) => c.head_name).join(', ')}) disagreed with this request.`;
   }
 
-  const isFinalized = ['approved', 'rejected', 'paid', 'withdrawn'].includes(request.status);
+  const isFinalized = ['approved', 'rejected', 'paid', 'withdrawn', 'cancelled'].includes(request.status);
   const canRequestConsultation =
     (isOwningHead || role === 'admin') &&
     request.status !== 'draft' &&
@@ -176,6 +179,12 @@ export const RequestDetailPage: React.FC = () => {
   const clarifications = request.disbursement_clarifications || [];
   const latestClarification = clarifications[0];
   const isPendingDisbursementClarification = latestClarification?.status === 'pending_head';
+  // Owner Head (or current head of the request's department) may cancel any time before full payment.
+  const canCancelApproval =
+    role === 'head' &&
+    request.status === 'approved' &&
+    (request.owner_head_id === user?.id || (Boolean(user?.department_id) && user?.department_id === request.department_id));
+  const originalDocs = (request.files || []).filter((f) => f.kind === 'document' && !f.clarification_id);
 
   const copyApprovalNo = (no: string) => {
     navigator.clipboard.writeText(no);
@@ -291,6 +300,33 @@ export const RequestDetailPage: React.FC = () => {
           <button type="button" onClick={() => setBanner(null)} className="font-bold opacity-60 hover:opacity-100" aria-label="Dismiss">
             ×
           </button>
+        </div>
+      )}
+
+      {request.status === 'cancelled' && (
+        <div
+          id="cancelled-banner"
+          className="mb-4 p-4 rounded-2xl bg-gradient-to-r from-rose-50 to-white border border-rose-200 shadow-xs flex items-start gap-3"
+        >
+          <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <Ban className="w-5 h-5" />
+          </div>
+          <div className="text-xs space-y-1 min-w-0">
+            <p className="text-sm font-extrabold text-rose-950 font-display">Approval cancelled</p>
+            <p className="text-rose-800">
+              Cancelled by <strong>{request.cancelled_by_name || 'Head'}</strong>
+              {request.cancelled_at && <> on {formatISTDate(request.cancelled_at)}</>}. Signed documents for{' '}
+              {request.approval_no || 'this approval'} are void.
+              {rType !== 'discount' && pay.paid > 0 && (
+                <> {formatINR(pay.paid)} was paid before cancellation; the balance {formatINR(pay.balance)} will not be paid.</>
+              )}
+            </p>
+            {request.cancel_reason && (
+              <p className="text-slate-700 bg-white/80 border border-rose-100 rounded-lg px-2.5 py-1.5 break-words">
+                “{request.cancel_reason}”
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -446,17 +482,17 @@ export const RequestDetailPage: React.FC = () => {
           {showOriginals && voiceNotes.map((vn) => <VoiceNoteItem key={vn.id} file={vn} />)}
 
           {/* Document Viewer (PDF or Photos) */}
-          {showOriginals && request.files && request.files.filter((f) => f.kind === 'document').length > 0 && (
+          {showOriginals && originalDocs.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Attached Invoices &amp; Documents
                 </h3>
                 <span className="text-xs text-slate-400">
-                  {request.files.filter((f) => f.kind === 'document').length} file(s)
+                  {originalDocs.length} file(s)
                 </span>
               </div>
-              <DocumentViewer key={request.files.map((f) => f.id).join(',')} files={request.files} />
+              <DocumentViewer key={originalDocs.map((f) => f.id).join(',')} files={originalDocs} />
             </div>
           )}
 
@@ -470,9 +506,18 @@ export const RequestDetailPage: React.FC = () => {
           <DisbursementClarificationSection request={request} isOwningHead={isOwningHead || role === 'admin'} />
 
           {/* Signed Approval Packet Card (when approved or paid) */}
-          {(request.status === 'approved' || request.status === 'paid') && <SignedDocuments request={request} />}
+          {(request.status === 'approved' || request.status === 'paid' || request.status === 'cancelled') && (
+            <div className={request.status === 'cancelled' ? 'relative opacity-60 grayscale pointer-events-auto' : undefined}>
+              {request.status === 'cancelled' && (
+                <span className="absolute top-3 right-3 z-10 text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-md bg-rose-600 text-white rotate-3 shadow">
+                  Void
+                </span>
+              )}
+              <SignedDocuments request={request} />
+            </div>
+          )}
 
-          {rType !== 'discount' && (request.status === 'paid' || (request.status === 'approved' && pay.paid > 0)) && (
+          {rType !== 'discount' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && pay.paid > 0)) && (
             <div className="bg-white rounded-2xl border border-teal-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 font-bold text-teal-800 text-sm">
@@ -895,6 +940,19 @@ export const RequestDetailPage: React.FC = () => {
               </button>
             )}
 
+            {/* Owner Head: cancel an approved request any time before it is fully paid */}
+            {canCancelApproval && (
+              <button
+                type="button"
+                id="cancel-approval-btn"
+                onClick={() => setModalState('cancel')}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100 font-semibold text-xs transition-colors cursor-pointer"
+              >
+                <Ban className="w-3.5 h-3.5" />
+                <span>Cancel Approval</span>
+              </button>
+            )}
+
             {/* Disbursement Action */}
             {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && (
               <>
@@ -974,6 +1032,15 @@ export const RequestDetailPage: React.FC = () => {
           request={request}
           clarification={latestClarification}
           onSuccess={() => setBanner({ ok: true, text: 'Clarification response sent back to Disbursement.' })}
+        />
+      )}
+
+      {modalState === 'cancel' && (
+        <CancelApprovalModal
+          isOpen={true}
+          onClose={() => setModalState(null)}
+          request={request}
+          onCancel={(reason, v) => orThrow(cancelApprovedRequest(request.id, reason, v), 'Approval cancelled.')}
         />
       )}
 

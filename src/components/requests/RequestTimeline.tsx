@@ -57,6 +57,7 @@ export const RequestTimeline: React.FC<RequestTimelineProps> = ({ actions }) => 
         return <RotateCcw className="w-4 h-4 text-amber-600" />;
       case 'rejected':
       case 'withdrawn':
+      case 'cancelled':
         return <XCircle className="w-4 h-4 text-rose-600" />;
       case 'paid':
         return <Banknote className="w-4 h-4 text-teal-600" />;

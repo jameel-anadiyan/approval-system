@@ -327,7 +327,7 @@ export const HeadConsultationsPage: React.FC = () => {
                           </>
                         ) : (
                           <div className="flex items-center gap-2">
-                            {!['approved', 'rejected', 'paid', 'withdrawn'].includes(r.status) && (
+                            {!['approved', 'rejected', 'paid', 'withdrawn', 'cancelled'].includes(r.status) && (
                               isAgreed ? (
                                 <button
                                   type="button"

@@ -16,10 +16,10 @@ type StatusGroup = 'approved' | 'pending' | 'rejected' | 'all';
 const STATUS_GROUPS: Record<Exclude<StatusGroup, 'all'>, RequestStatus[]> = {
   approved: ['approved', 'paid'],
   pending: ['submitted', 'returned', 'pending_head_approval', 'pending_head_review', 'pending_admin_approval', 'approving'],
-  rejected: ['rejected', 'withdrawn'],
+  rejected: ['rejected', 'withdrawn', 'cancelled'],
 };
 const GROUP_LABELS: Record<StatusGroup, string> = {
-  approved: 'Approved', pending: 'Pending', rejected: 'Rejected / Withdrawn', all: 'All submitted',
+  approved: 'Approved', pending: 'Pending', rejected: 'Rejected / Withdrawn / Cancelled', all: 'All submitted',
 };
 
 type Preset = 'this_month' | 'last_month' | 'last_30' | 'last_90' | 'this_fy' | 'all' | 'custom';

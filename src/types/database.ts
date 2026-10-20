@@ -11,7 +11,8 @@ export type RequestStatus =
   | 'approved'
   | 'rejected'
   | 'paid'
-  | 'withdrawn';
+  | 'withdrawn'
+  | 'cancelled';
 
 export type ApprovalRoute = 'A' | 'B';
 
@@ -174,6 +175,11 @@ export interface RequestRecord {
   owner_head_name?: string | null;
   owner_head?: Pick<Profile, 'id' | 'full_name' | 'designation' | 'photo_path'> | null;
   disbursement_clarifications?: DisbursementClarification[];
+  /** Set when the owner Head cancelled the approval before it was fully paid */
+  cancelled_by?: string | null;
+  cancelled_by_name?: string | null;
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
 }
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
@@ -258,6 +264,8 @@ export interface RequestFile {
   added_by?: string | null;
   added_by_name?: string | null;
   added_by_role?: AppRole | null;
+  /** Set when a Head attached this document while answering a Disbursement clarification */
+  clarification_id?: string | null;
   /** Client-only: the picked/recorded file awaiting upload to Storage */
   blob?: Blob;
 }

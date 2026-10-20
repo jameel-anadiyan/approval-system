@@ -22,6 +22,8 @@ export interface VerifyResult {
   balance: number;
   payments: { amount: number; payment_date: string }[];
   files: { file_name: string; sha256: string; page_count: number; is_packet: boolean }[];
+  cancelled_at?: string | null;
+  cancelled_by_name?: string | null;
 }
 
 /** Pulls the token out of a scanned QR (full /verify/<token> URL) or returns the input as-is. */
@@ -49,7 +51,7 @@ export async function verifyApproval(
 
   if (!live) {
     const r = byNumber || visibleRequests.find((x) => x.verify_token === code);
-    if (!r || (r.status !== 'approved' && r.status !== 'paid')) return { result: null };
+    if (!r || !['approved', 'paid', 'cancelled'].includes(r.status)) return { result: null };
     return {
       result: {
         request_id: r.id,
@@ -71,6 +73,8 @@ export async function verifyApproval(
         paid_amount: Number(r.paid_amount ?? (r.status === 'paid' ? r.amount : 0)),
         balance: Math.max(r.amount - Number(r.paid_amount ?? (r.status === 'paid' ? r.amount : 0)), 0),
         payments: (r.payments || []).map((p) => ({ amount: Number(p.amount), payment_date: p.payment_date })),
+        cancelled_at: r.cancelled_at ?? null,
+        cancelled_by_name: r.cancelled_by_name ?? null,
         files: (r.signed_files || []).map((s) => ({
           file_name: s.file_name || 'packet.pdf',
           sha256: s.sha256,

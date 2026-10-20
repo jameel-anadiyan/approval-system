@@ -85,16 +85,40 @@ export const VerifyPage: React.FC = () => {
             </form>
 
             {result ? (
-              <div className="bg-slate-800/90 backdrop-blur-xl rounded-3xl border border-emerald-500/40 p-6 sm:p-8 shadow-2xl space-y-6">
+              <div
+                className={`bg-slate-800/90 backdrop-blur-xl rounded-3xl border p-6 sm:p-8 shadow-2xl space-y-6 ${
+                  result.status === 'cancelled' ? 'border-rose-500/50' : 'border-emerald-500/40'
+                }`}
+              >
                 <div className="flex items-center gap-3 border-b border-slate-700/80 pb-4">
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
-                    <CheckCircle2 className="w-7 h-7" />
-                  </div>
+                  {result.status === 'cancelled' ? (
+                    <div className="w-12 h-12 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
+                      <ShieldX className="w-7 h-7" />
+                    </div>
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                  )}
                   <div>
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 inline-block">
-                      Genuine approval
-                    </span>
-                    <h2 className="text-xl font-bold font-display text-white mt-0.5">{result.approval_no}</h2>
+                    {result.status === 'cancelled' ? (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 inline-block">
+                        Approval cancelled · void
+                      </span>
+                    ) : (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 inline-block">
+                        Genuine approval
+                      </span>
+                    )}
+                    <h2 className={`text-xl font-bold font-display mt-0.5 ${result.status === 'cancelled' ? 'text-rose-200 line-through' : 'text-white'}`}>
+                      {result.approval_no}
+                    </h2>
+                    {result.status === 'cancelled' && (
+                      <p className="text-[11px] text-rose-300 mt-0.5">
+                        Cancelled{result.cancelled_by_name ? ` by ${result.cancelled_by_name}` : ''}
+                        {result.cancelled_at ? ` · ${formatISTDate(result.cancelled_at)}` : ''}. Do not pay against this approval.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -122,14 +146,20 @@ export const VerifyPage: React.FC = () => {
                   <Row label="Payment status">
                     <span
                       className={`font-bold px-2 py-0.5 rounded-md ${
-                        result.status === 'paid' || (result.balance <= 0 && result.paid_amount > 0)
+                        result.status === 'cancelled'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : result.status === 'paid' || (result.balance <= 0 && result.paid_amount > 0)
                           ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
                           : result.paid_amount > 0
                           ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
                           : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                       }`}
                     >
-                      {result.status === 'paid' || (result.balance <= 0 && result.paid_amount > 0)
+                      {result.status === 'cancelled'
+                        ? result.paid_amount > 0
+                          ? `Cancelled after partial payment of ${formatINR(result.paid_amount)}`
+                          : 'Cancelled · not payable'
+                        : result.status === 'paid' || (result.balance <= 0 && result.paid_amount > 0)
                         ? `Paid in full${result.paid_at ? ` · ${formatISTDate(result.paid_at, false)}` : ''}`
                         : result.paid_amount > 0
                         ? 'Partially paid'

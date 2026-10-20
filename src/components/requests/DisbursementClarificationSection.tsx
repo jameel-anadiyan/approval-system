@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { RespondClarificationModal } from '../portals/RespondClarificationModal';
 import { DisbursementClarificationModal } from '../portals/DisbursementClarificationModal';
+import { DocumentViewer } from './DocumentViewer';
+import { Paperclip } from 'lucide-react';
 
 interface DisbursementClarificationSectionProps {
   request: RequestRecord;
@@ -35,7 +37,8 @@ export const DisbursementClarificationSection: React.FC<DisbursementClarificatio
   const latest = clarifications[0];
   const isPending = latest.status === 'pending_head';
   const isDisbursement = user?.role === 'disbursement';
-  const canRespond = isOwningHead && isPending;
+  const canRespond = isOwningHead && isPending && request.status === 'approved';
+  const clarificationFiles = (request.files || []).filter((f) => f.kind === 'document' && f.clarification_id);
 
   return (
     <div className="space-y-3">
@@ -123,7 +126,7 @@ export const DisbursementClarificationSection: React.FC<DisbursementClarificatio
               </div>
             </div>
 
-            {isDisbursement && (
+            {isDisbursement && request.status === 'approved' && (
               <button
                 type="button"
                 onClick={() => setIsAskingAgain(true)}
@@ -175,6 +178,23 @@ export const DisbursementClarificationSection: React.FC<DisbursementClarificatio
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {clarificationFiles.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-teal-800 uppercase tracking-wider flex items-center gap-1.5">
+              <Paperclip className="w-3.5 h-3.5" />
+              <span>Files added by Head during clarification</span>
+            </h3>
+            <span className="text-xs text-slate-400">{clarificationFiles.length} file(s)</span>
+          </div>
+          <DocumentViewer
+            key={clarificationFiles.map((f) => f.id).join(',')}
+            files={clarificationFiles}
+            title="Clarification Documents"
+          />
         </div>
       )}
 
