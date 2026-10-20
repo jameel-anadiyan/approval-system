@@ -2,6 +2,11 @@
 -- Disbursement officers can send approved requests back to Head for clarification (with voice or text message)
 -- Head can provide clarification and send back to Disbursement (with voice or text message)
 
+-- Self-contained guard: ensure owner head columns exist even if 0017 was not applied
+alter table public.requests
+  add column if not exists owner_head_id uuid references public.profiles(id) on delete set null,
+  add column if not exists owner_head_name text;
+
 create table if not exists public.disbursement_clarifications (
   id uuid primary key default gen_random_uuid(),
   request_id uuid not null references public.requests(id) on delete cascade,
@@ -235,3 +240,6 @@ $$;
 
 revoke execute on function public.respond_disbursement_clarification(uuid, text, text, numeric) from public, anon;
 grant execute on function public.respond_disbursement_clarification(uuid, text, text, numeric) to authenticated;
+
+-- Refresh PostgREST schema cache so new table/functions are visible immediately
+notify pgrst, 'reload schema';
