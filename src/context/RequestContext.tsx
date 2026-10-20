@@ -97,6 +97,10 @@ interface RequestContextType {
   cancelApprovedRequest: (id: string, reason: string, voice?: ActionVoice | null) => Promise<Result>;
   /** Stamps clarification attachments (ADDENDUM) and adds them to Signed Documents + packet. */
   signClarificationFiles: (requestId: string) => Promise<Result>;
+  /** Asset buying: requester types vendor / amount / preference against an uploaded quotation. */
+  setQuote: (fileId: string, vendor: string, amount: number, preferred: boolean) => Promise<Result>;
+  /** Asset buying: Head (or Admin) picks the best quotation; returns the new status. */
+  selectQuote: (requestId: string, fileId: string, remarks?: string) => Promise<Result & { status?: string }>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -316,7 +320,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         .from('request-files')
         .upload(path, f.blob, { contentType, upsert: false });
       if (upErr) throw new Error(`Upload failed for ${f.original_name}: ${upErr.message}`);
-      const { error: regErr } = await supabase.rpc('register_file', {
+      const { data: fileId, error: regErr } = await supabase.rpc('register_file', {
         p_request_id: requestId,
         p_kind: f.kind,
         p_storage_path: path,
@@ -329,6 +333,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (regErr) {
         await supabase.storage.from('request-files').remove([path]);
         throw new Error(`Could not attach ${f.original_name}: ${regErr.message}`);
+      }
+      if (f.kind === 'document' && f.quote_amount && fileId) {
+        const { error: qErr } = await supabase.rpc('set_quote', {
+          p_file_id: fileId as string,
+          p_vendor: f.quote_vendor ?? '',
+          p_amount: f.quote_amount,
+          p_preferred: !!f.quote_preferred,
+        });
+        if (qErr) throw new Error(`Could not save quotation details for ${f.original_name}: ${qErr.message}`);
       }
     }
   };
@@ -364,7 +377,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const { data: newId, error } = await supabase.rpc('create_typed_draft', {
           p_type: type,
           p_title: data.title,
-          p_amount: type === 'general' ? data.amount : null,
+          p_amount: type === 'general' || type === 'asset' ? data.amount : null,
           p_notes: data.notes || null,
           p_details: data.details ?? {},
         });
@@ -1442,6 +1455,27 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const setQuote = async (fileId: string, vendor: string, amount: number, preferred: boolean): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!isBackendConnected) return { success: false, error: 'Quotations need the live backend' };
+    const { error } = await supabase.rpc('set_quote', {
+      p_file_id: fileId, p_vendor: vendor, p_amount: amount, p_preferred: preferred,
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  };
+
+  const selectQuote = async (requestId: string, fileId: string, remarks?: string): Promise<Result & { status?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!isBackendConnected) return { success: false, error: 'Quotations need the live backend' };
+    const { data, error } = await supabase.rpc('select_quote', {
+      p_request_id: requestId, p_file_id: fileId, p_remarks: remarks?.trim() || null,
+    });
+    await loadRequests(true);
+    if (error) return { success: false, error: error.message };
+    return { success: true, status: (data as { status?: string } | null)?.status };
+  };
+
   return (
     <RequestContext.Provider
       value={{
@@ -1471,6 +1505,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         respondDisbursementClarification,
         cancelApprovedRequest,
         signClarificationFiles,
+        setQuote,
+        selectQuote,
       }}
     >
       {children}

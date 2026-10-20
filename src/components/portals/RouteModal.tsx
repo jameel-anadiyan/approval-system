@@ -4,7 +4,7 @@ import { RequestRecord, ApprovalRoute } from '../../types/database';
 import { formatINR, formatINRWhole, TYPE_LABELS, typeOf } from '../../lib/formatters';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
-import { ShieldAlert, ArrowRight, UserCheck, Lock } from 'lucide-react';
+import { ShieldAlert, ArrowRight, UserCheck, Lock, Award } from 'lucide-react';
 
 interface RouteModalProps {
   isOpen: boolean;
@@ -26,6 +26,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { threshold } = useRequests();
+  const isAsset = type === 'asset';
   const isHighValue = type === 'general' && request.amount > threshold;
   const limit = formatINRWhole(threshold);
   const isRequesterHead = request.requester_role === 'head';
@@ -82,7 +83,20 @@ export const RouteModal: React.FC<RouteModalProps> = ({
           </div>
         </div>
 
-        {typeLock && (
+        {isAsset && (
+          <div className="p-3.5 bg-teal-50 border border-teal-200 rounded-xl flex items-start gap-2.5 text-xs text-teal-900">
+            <Award className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+            <div className="leading-relaxed">
+              <span className="font-bold">Asset Buying:</span>{' '}
+              {isRequesterHead
+                ? 'raised by the Head, so it goes to Admin, who selects the best quotation and approves.'
+                : <>the Department Head selects the best of {(request.files ?? []).filter((f) => f.quote_amount).length} quotations.
+                  Up to {limit} the Head approves; above that it goes to Admin automatically.</>}
+            </div>
+          </div>
+        )}
+
+        {!isAsset && typeLock && (
           <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl flex items-start gap-2.5 text-xs text-indigo-900">
             <Lock className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
             <div>
@@ -108,7 +122,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
           </div>
         )}
 
-        {isRequesterHead && (
+        {isRequesterHead && !isAsset && (
           <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-start gap-2.5 text-xs text-purple-900">
             <UserCheck className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
             <div>
@@ -121,6 +135,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
         )}
 
         {/* Route Selection Options */}
+        {!isAsset && (
         <div className="space-y-2.5">
           <label className="text-xs font-bold text-slate-700 block">Choose Route</label>
 
@@ -195,6 +210,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
             </div>
           </label>
         </div>
+        )}
 
         {/* Remarks Input */}
         <div>
@@ -230,7 +246,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
             disabled={isSubmitting}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-md shadow-indigo-200 transition-all disabled:opacity-50"
           >
-            <span>Confirm & Route</span>
+            <span>{isAsset ? (isRequesterHead ? 'Send to Admin' : 'Send to Head for selection') : 'Confirm & Route'}</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>

@@ -8,7 +8,7 @@ import {
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
 
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
-const REQUEST_TYPES = ["general", "discount", "exhibition"] as const;
+const REQUEST_TYPES = ["general", "discount", "exhibition", "asset"] as const;
 
 /** Request types the user may raise (only for roles that raise requests). */
 function parseTypes(v: unknown, role: Role): string[] {

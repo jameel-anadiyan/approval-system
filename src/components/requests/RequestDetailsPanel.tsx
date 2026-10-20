@@ -1,7 +1,7 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
 import { formatINR, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
-import { Percent, CalendarDays } from 'lucide-react';
+import { Percent, CalendarDays, Package } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -75,6 +75,22 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
           <Row label="Discount value" value={money(d.discount_amount ?? request.amount)} />
           <Row label="Customer" value={d.customer_name} />
           <Row label="Bill / reference" value={d.reference} wide />
+        </div>
+      </div>
+    );
+  }
+
+  if (t === 'asset') {
+    return (
+      <div className="bg-white rounded-2xl border border-teal-200 p-5 sm:p-6 shadow-xs">
+        <h3 className="text-sm font-bold text-slate-900 font-display mb-4 flex items-center gap-2">
+          <Package className="w-4 h-4 text-teal-600" /> Asset purchase
+        </h3>
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <Row label="Asset" value={d.asset_name} />
+          <Row label="Quantity" value={d.quantity} />
+          <Row label="Specification" value={d.specification} wide />
+          <Row label="Purpose" value={d.purpose} wide />
         </div>
       </div>
     );

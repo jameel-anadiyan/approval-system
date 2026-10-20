@@ -10,6 +10,7 @@ const ACTION_LABEL: Record<string, string> = {
   routed_B: "Routed to B (Head)", routed_own_A: "Routed own request to A", routed_own_B: "Routed own request to B",
   forwarded: "Reviewed and forwarded to Admin", returned: "Returned for correction", rejected: "Rejected",
   withdrawn: "Withdrawn", approved: "Approved", paid: "Marked as paid",
+  sent_for_quote_selection: "Sent for quotation selection", quote_selected: "Best quotation selected",
 };
 
 function ist(d: string | Date, withTime = true): string {
@@ -46,6 +47,7 @@ function appOrigin(v: unknown): string | null {
 
 const TYPE_LABEL: Record<string, string> = {
   general: "General", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
+  asset: "Asset buying",
 };
 const PROVIDES: Record<string, string> = {
   stall_space: "Stall space", table_chairs: "Table & chairs", electricity_lights: "Electricity & lights",
@@ -54,7 +56,7 @@ const PROVIDES: Record<string, string> = {
 };
 
 // deno-lint-ignore no-explicit-any
-function formSections(r: any, submitted: string): { subtitle: string; sections: FormSection[] } | null {
+function formSections(r: any, submitted: string, files: any[] = []): { subtitle: string; sections: FormSection[] } | null {
   const d = r.details ?? {};
   const money = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : inr(Number(v)));
   const txt = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
@@ -109,6 +111,39 @@ function formSections(r: any, submitted: string): { subtitle: string; sections: 
       ],
     };
   }
+  if (r.request_type === "asset") {
+    // deno-lint-ignore no-explicit-any
+    const quotes = (files ?? []).filter((f: any) => f.quote_amount !== null && f.quote_amount !== undefined);
+    const lowest = quotes.length ? Math.min(...quotes.map((q: { quote_amount: number }) => Number(q.quote_amount))) : null;
+    // deno-lint-ignore no-explicit-any
+    const quoteRows: [string, string][] = quotes.map((q: any, i: number) => [
+      `Q${i + 1} · ${q.quote_vendor ?? q.original_name}`,
+      [money(q.quote_amount), q.quote_status === "selected" ? "SELECTED" : "REJECTED",
+        q.quote_preferred ? "Requester's choice" : null,
+        Number(q.quote_amount) === lowest ? "Lowest" : null].filter(Boolean).join("  ·  "),
+    ]);
+    return {
+      subtitle: "ASSET PURCHASE APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)], ["Subject", txt(r.title)],
+        ] },
+        { title: "Asset", rows: [
+          ["Asset", txt(d.asset_name)], ["Quantity", txt(d.quantity)],
+          ["Specification", txt(d.specification)],
+        ] },
+        { title: "Quotation comparison", rows: [
+          ...quoteRows,
+          ["Approved amount", money(r.amount)],
+          ["Quotation selected by", [r.quote_selected_by_name, r.quote_selected_at ? ist(r.quote_selected_at) : null].filter(Boolean).join(", ") || "—"],
+        ] },
+        ...(d.purpose ? [{ title: "Purpose", text: d.purpose as string }] : []),
+        ...(r.notes ? [{ title: "Remarks", text: r.notes as string }] : []),
+      ],
+    };
+  }
   return null;
 }
 
@@ -156,7 +191,7 @@ Deno.serve(handle(async (req) => {
 
     // deno-lint-ignore no-explicit-any
     const files: any[] = b.files;
-    const form = formSections(r, r.submitted_at ? ist(r.submitted_at, false) : "—");
+    const form = formSections(r, r.submitted_at ? ist(r.submitted_at, false) : "—", b.files);
     if (!files.length && !form) throw new Error("No documents to sign");
     const signedBytes: Uint8Array[] = [];
     const records: Record<string, unknown>[] = [];
@@ -178,20 +213,30 @@ Deno.serve(handle(async (req) => {
     if (form) {
       const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections);
       const out = await stampDocument(formPdf, ctx);
-      await store(out.bytes, ++n, r.request_type === "discount" ? "discount_form" : "exhibition_form", null, out.pageCount);
+      await store(out.bytes, ++n, r.request_type === "discount" ? "discount_form" : r.request_type === "asset" ? "asset_purchase_form" : "exhibition_form", null, out.pageCount);
     }
 
     // One file at a time to keep memory low.
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       const src = await download("request-files", f.storage_path);
+      const isQuote = r.request_type === "asset" && f.quote_amount !== null && f.quote_amount !== undefined;
+      const rejected = isQuote && f.quote_status !== "selected";
+      const fileCtx: StampContext = !isQuote ? ctx : rejected
+        ? { ...ctx, tone: "rejected",
+            headline: `REJECTED QUOTATION · NOT SELECTED · Approval No: ${b.approval_no}`,
+            byLabel: "Rejected by",
+            amount: `${inr(Number(f.quote_amount))} quoted (not selected)` }
+        : { ...ctx, headline: `APPROVED · SELECTED QUOTATION · Approval No: ${b.approval_no}` };
       let out;
       try {
-        out = await stampDocument(src, ctx);
+        out = await stampDocument(src, fileCtx);
       } catch (e) {
         throw new Error(`Could not stamp "${f.original_name}": ${e instanceof Error ? e.message : e}`);
       }
-      await store(out.bytes, ++n, f.original_name, f.id, out.pageCount);
+      const label = !isQuote ? f.original_name
+        : `${rejected ? "REJECTED" : "SELECTED"}_${f.quote_vendor ?? "quote"}_${f.original_name}`;
+      await store(out.bytes, ++n, label, f.id, out.pageCount);
     }
 
     const packet = await buildPacket({

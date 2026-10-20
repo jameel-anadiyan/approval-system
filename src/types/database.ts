@@ -20,7 +20,9 @@ export type HeadConsultationStatus = 'pending' | 'agreed' | 'disagreed';
 
 export type FileKind = 'document' | 'voice_note';
 
-export type RequestType = 'general' | 'discount' | 'exhibition';
+export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset';
+
+export type QuoteStatus = 'pending' | 'selected' | 'rejected';
 
 export interface Shop {
   id: string;
@@ -83,7 +85,15 @@ export interface GeneralDetails {
   total_amount?: number | null;
 }
 
-export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>;
+export interface AssetDetails {
+  asset_name: string;
+  quantity?: string | null;
+  specification?: string | null;
+  purpose?: string | null;
+}
+
+export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>
+  & Partial<AssetDetails>;
 
 export interface Department {
   id: string;
@@ -180,6 +190,11 @@ export interface RequestRecord {
   cancelled_by_name?: string | null;
   cancelled_at?: string | null;
   cancel_reason?: string | null;
+  /** Asset buying: the quotation chosen by the Head (or Admin) */
+  selected_quote_id?: string | null;
+  quote_selected_by?: string | null;
+  quote_selected_by_name?: string | null;
+  quote_selected_at?: string | null;
 }
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
@@ -266,6 +281,11 @@ export interface RequestFile {
   added_by_role?: AppRole | null;
   /** Set when a Head attached this document while answering a Disbursement clarification */
   clarification_id?: string | null;
+  /** Asset buying quotations: typed by the requester against each quotation document */
+  quote_vendor?: string | null;
+  quote_amount?: number | null;
+  quote_preferred?: boolean;
+  quote_status?: QuoteStatus | null;
   /** Client-only: the picked/recorded file awaiting upload to Storage */
   blob?: Blob;
 }

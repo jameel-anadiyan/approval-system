@@ -8,6 +8,7 @@ import { SignedDocuments, VoiceNoteItem } from '../../components/requests/Signed
 import { EditDraftModal } from '../../components/requests/EditDraftModal';
 import { RequestTimeline } from '../../components/requests/RequestTimeline';
 import { RequestDetailsPanel } from '../../components/requests/RequestDetailsPanel';
+import { QuotationsPanel } from '../../components/requests/AssetQuotations';
 import { RouteModal } from '../../components/portals/RouteModal';
 import { ApproveModal } from '../../components/portals/ApproveModal';
 import { ReturnModal } from '../../components/portals/ReturnModal';
@@ -77,6 +78,7 @@ export const RequestDetailPage: React.FC = () => {
     approveRequest,
     markAsPaid,
     cancelApprovedRequest,
+    selectQuote,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
@@ -162,8 +164,21 @@ export const RequestDetailPage: React.FC = () => {
 
   const rType = typeOf(request);
   const isHighValue = rType === 'general' && request.amount > threshold;
+  const isAsset = rType === 'asset';
+  // Asset buying: the owning Head (or Admin when it reached Admin directly) selects the best quotation.
+  const quoteSelectorRole: 'head' | 'admin' | null = !isAsset ? null
+    : isOwningHead && (request.status === 'pending_head_review' || request.status === 'pending_head_approval') ? 'head'
+    : role === 'admin' && request.status === 'pending_admin_approval' && !request.selected_quote_id ? 'admin'
+    : null;
+  const canSelectQuote = !!quoteSelectorRole && !isConsultationBlocked;
+  const needsQuote = isAsset && !request.selected_quote_id;
+  const approveBlocked = isConsultationBlocked || needsQuote;
+  const approveBlockReason = isConsultationBlocked ? consultationBlockReason
+    : needsQuote ? 'Select the best quotation first' : undefined;
   const amountLabel =
-    rType === 'discount' ? 'Discount Value' : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)' : 'Total Requested Amount';
+    rType === 'discount' ? 'Discount Value' : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)'
+      : isAsset ? (request.selected_quote_id ? 'Selected Quotation Amount' : 'Indicative Amount (Head selects final)')
+      : 'Total Requested Amount';
   const voiceNotes = (request.files || []).filter((f) => {
     if (f.kind !== 'voice_note') return false;
     // Clerks, heads, and admins can view all voice notes
@@ -438,6 +453,27 @@ export const RequestDetailPage: React.FC = () => {
           </div>
 
           <RequestDetailsPanel request={request} />
+
+          {isAsset && showOriginals && (
+            <QuotationsPanel
+              request={request}
+              canSelect={canSelectQuote}
+              selectorRole={quoteSelectorRole}
+              threshold={threshold}
+              onSelect={async (fileId, remarks) => {
+                const res = await selectQuote(request.id, fileId, remarks);
+                if (res.success) {
+                  setBanner({
+                    ok: true,
+                    text: res.status === 'pending_admin_approval' && quoteSelectorRole === 'head'
+                      ? 'Quotation selected. Above the limit, so it has been sent to Admin for approval.'
+                      : 'Quotation selected. You can now approve & sign.',
+                  });
+                }
+                return res;
+              }}
+            />
+          )}
 
           {/* Inter-Department Head Consultations Section */}
           {request.consultations && request.consultations.length > 0 ? (
@@ -834,6 +870,12 @@ export const RequestDetailPage: React.FC = () => {
                   <span>Return for Correction</span>
                 </button>
 
+                {isAsset ? (
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 font-semibold text-xs">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Select the best quotation above</span>
+                  </span>
+                ) : (
                 <button
                   type="button"
                   disabled={isConsultationBlocked}
@@ -848,6 +890,7 @@ export const RequestDetailPage: React.FC = () => {
                   <CornerDownRight className="w-3.5 h-3.5" />
                   <span>Forward to Admin…</span>
                 </button>
+                )}
               </>
             )}
 
@@ -874,11 +917,11 @@ export const RequestDetailPage: React.FC = () => {
 
                 <button
                   type="button"
-                  disabled={isConsultationBlocked}
+                  disabled={approveBlocked}
                   onClick={() => setModalState('approve')}
-                  title={isConsultationBlocked ? consultationBlockReason : undefined}
+                  title={approveBlockReason}
                   className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
-                    isConsultationBlocked
+                    approveBlocked
                       ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
                       : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-emerald-200'
                   }`}
@@ -912,11 +955,11 @@ export const RequestDetailPage: React.FC = () => {
 
                 <button
                   type="button"
-                  disabled={isConsultationBlocked}
+                  disabled={approveBlocked}
                   onClick={() => setModalState('approve')}
-                  title={isConsultationBlocked ? consultationBlockReason : undefined}
+                  title={approveBlockReason}
                   className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
-                    isConsultationBlocked
+                    approveBlocked
                       ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
                       : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-emerald-200'
                   }`}

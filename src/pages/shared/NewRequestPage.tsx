@@ -11,13 +11,18 @@ import {
   DiscountForm, ExhibitionForm,
 } from '../../components/requests/TypedRequestFields';
 import { GstSelector } from '../../components/requests/GstSelector';
+import {
+  AssetFields, AssetForm, emptyAsset, toAssetDetails, QuotationsEditor, QuoteRow, initialQuotes,
+  quoteSummary, validateQuotes, newQuoteFiles,
+} from '../../components/requests/AssetQuotations';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package } from 'lucide-react';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
   discount: <BadgePercent className="w-5 h-5" />,
   exhibition: <Store className="w-5 h-5" />,
+  asset: <Package className="w-5 h-5" />,
 };
 
 export const NewRequestPage: React.FC = () => {
@@ -37,6 +42,8 @@ export const NewRequestPage: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
   const [exhibition, setExhibition] = useState<ExhibitionForm>(emptyExhibition);
+  const [asset, setAsset] = useState<AssetForm>(emptyAsset);
+  const [quotes, setQuotes] = useState<QuoteRow[]>(initialQuotes);
   const [files, setFiles] = useState<RequestFile[]>([]);
   const [voiceFile, setVoiceFile] = useState<RequestFile | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,13 +55,19 @@ export const NewRequestPage: React.FC = () => {
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
+  const quoteInfo = quoteSummary(quotes);
   const amount =
-    type === 'discount' ? discountCalc(discount).value : type === 'exhibition' ? exhibitionCalc(exhibition).total : generalTotal;
+    type === 'discount' ? discountCalc(discount).value
+      : type === 'exhibition' ? exhibitionCalc(exhibition).total
+      : type === 'asset' ? quoteInfo.amount
+      : generalTotal;
   const isHighValue = type === 'general' && amount > threshold;
   const docsRequired = type === 'general' || type === 'discount';
   const hasPdf = files.some((f) => f.mime_type === 'application/pdf');
 
-  const allFiles = voiceFile ? [...files, voiceFile] : files;
+  const allFiles = type === 'asset'
+    ? [...newQuoteFiles(quotes), ...(voiceFile ? [voiceFile] : [])]
+    : voiceFile ? [...files, voiceFile] : files;
 
   const handleVoiceRecording = (recorded: { name: string; blob: Blob; duration: number }) => {
     const tempUrl = URL.createObjectURL(recorded.blob);
@@ -76,11 +89,14 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const effectiveTitle = () =>
-    title.trim() || (type === 'exhibition' && exhibition.event_name.trim() ? `Exhibition: ${exhibition.event_name.trim()}` : '');
+    title.trim()
+    || (type === 'exhibition' && exhibition.event_name.trim() ? `Exhibition: ${exhibition.event_name.trim()}` : '')
+    || (type === 'asset' && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '');
 
   const details = (): RequestDetails | null => {
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'exhibition') return toExhibitionDetails(exhibition);
+    if (type === 'asset') return toAssetDetails(asset);
     return {
       base_amount: baseAmount,
       has_gst: hasGst,
@@ -91,6 +107,10 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const validate = (forDraft: boolean): string | null => {
+    if (type === 'asset') {
+      if (!asset.asset_name.trim()) return 'Enter the asset you want to buy.';
+      return validateQuotes(quotes, forDraft);
+    }
     if (!effectiveTitle()) return type === 'exhibition' ? 'Enter the event name.' : 'Please enter a request title.';
     if (type === 'general') {
       if (!forDraft && baseAmount <= 0) return 'Please enter a valid amount greater than zero.';
@@ -120,7 +140,7 @@ export const NewRequestPage: React.FC = () => {
       const draftRes = await createDraft({
         type,
         title: effectiveTitle(),
-        amount: type === 'general' ? generalTotal || 1 : amount,
+        amount: type === 'general' ? generalTotal || 1 : type === 'asset' ? amount || 1 : amount,
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
@@ -188,7 +208,7 @@ export const NewRequestPage: React.FC = () => {
         )}
 
         {/* Request type */}
-        <div className={`grid gap-3 ${allowed.length === 1 ? 'grid-cols-1' : allowed.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
+        <div className={`grid gap-3 ${allowed.length === 1 ? 'grid-cols-1' : allowed.length === 2 ? 'grid-cols-2' : allowed.length === 4 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-3'}`}>
           {allowed.map((t) => (
             <button
               key={t}
@@ -213,12 +233,12 @@ export const NewRequestPage: React.FC = () => {
         {/* Main details */}
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
           <h2 className="text-sm font-bold text-slate-800 font-display border-b border-slate-100 pb-2">
-            {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : 'Request Information'}
+            {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : 'Request Information'}
           </h2>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && <span className="text-rose-500">*</span>}
+              {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && type !== 'asset' && <span className="text-rose-500">*</span>}
             </label>
             <input
               id="request-title"
@@ -228,6 +248,7 @@ export const NewRequestPage: React.FC = () => {
               placeholder={
                 type === 'discount' ? 'e.g. Discount for bridal set – Mrs. Fathima'
                   : type === 'exhibition' ? 'Optional – event name is used if empty'
+                  : type === 'asset' ? 'Optional – asset name is used if empty'
                   : 'e.g. Vendor invoice for showroom lighting'
               }
               className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
@@ -271,6 +292,7 @@ export const NewRequestPage: React.FC = () => {
 
           {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
           {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} />}
+          {type === 'asset' && <AssetFields value={asset} onChange={setAsset} />}
 
           {isHighValue && (
             <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900 animate-in fade-in">
@@ -301,6 +323,17 @@ export const NewRequestPage: React.FC = () => {
         </div>
 
         {/* Attachments */}
+        {type === 'asset' ? (
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h2 className="text-sm font-bold text-slate-800 font-display">
+                Quotations <span className="text-rose-500">*</span>
+              </h2>
+              <span className="text-[11px] text-slate-400">Min. 3 · PDF, JPG, PNG</span>
+            </div>
+            <QuotationsEditor rows={quotes} onChange={setQuotes} disabled={isSubmitting || isSavingDraft} />
+          </div>
+        ) : (
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <h2 className="text-sm font-bold text-slate-800 font-display">
@@ -323,6 +356,7 @@ export const NewRequestPage: React.FC = () => {
             </p>
           )}
         </div>
+        )}
 
         {/* Voice note */}
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">

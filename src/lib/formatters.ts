@@ -219,26 +219,31 @@ export const ACTION_LABELS: Record<string, string> = {
   disbursement_clarification_provided: 'Head: Clarification provided to Disbursement',
   cancelled: 'Approval cancelled by Head',
   clarification_files_signed: 'Clarification files stamped as Addendum',
+  sent_for_quote_selection: 'Sent to Head for quotation selection',
+  quote_selected: 'Best quotation selected',
 };
 
-export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition'];
+export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset'];
 
 export const TYPE_LABELS: Record<RequestType, string> = {
   general: 'General',
   discount: 'Discount Approval',
   exhibition: 'Exhibition / Event',
+  asset: 'Asset Buying',
 };
 
 export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
   general: 'Money request with invoices or bills. Clerk routes to Head (B) or Admin (A).',
   discount: 'Customer discount. Head approval (B-level). No payment step.',
   exhibition: 'Event sponsorship & promotion. Admin approval (A-level), then paid.',
+  asset: 'Min. 3 quotations. Head picks the best — up to ₹10,000 Head approves, above goes to Admin.',
 };
 
 export const TYPE_BADGES: Record<RequestType, string> = {
   general: 'bg-slate-100 text-slate-700 border-slate-200',
   discount: 'bg-amber-50 text-amber-800 border-amber-200',
   exhibition: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  asset: 'bg-teal-50 text-teal-700 border-teal-200',
 };
 
 export const typeOf = (r: { request_type?: RequestType | null }): RequestType => r.request_type ?? 'general';
@@ -246,6 +251,7 @@ export const typeOf = (r: { request_type?: RequestType | null }): RequestType =>
 /** Status label that knows Discount approvals have no payment step. */
 export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null }): string {
   if (r.status === 'approved' && typeOf(r) === 'discount') return 'Approved';
+  if (r.status === 'pending_head_review' && typeOf(r) === 'asset') return 'Head: select quotation';
   return STATUS_META[r.status]?.label ?? r.status;
 }
 

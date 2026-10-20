@@ -10,6 +10,10 @@ import {
   validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
 } from './TypedRequestFields';
 import { GstSelector } from './GstSelector';
+import {
+  AssetFields, assetFromDetails, toAssetDetails, QuotationsEditor, QuoteRow, quotesFromFiles, quoteSummary,
+  validateQuotes, newQuoteFiles,
+} from './AssetQuotations';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -19,7 +23,7 @@ interface EditDraftModalProps {
 
 /** Requester edits a draft / returned request: details, add documents, remove attachments. */
 export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose, request }) => {
-  const { updateDraft, addFiles, removeFile, threshold } = useRequests();
+  const { updateDraft, addFiles, removeFile, setQuote, threshold } = useRequests();
   const type = typeOf(request);
   const [title, setTitle] = useState(request.title);
   const [amountStr, setAmountStr] = useState(() => {
@@ -35,6 +39,8 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [notes, setNotes] = useState(request.notes || '');
   const [discount, setDiscount] = useState(() => discountFromDetails(request.details));
   const [exhibition, setExhibition] = useState(() => exhibitionFromDetails(request.details));
+  const [asset, setAsset] = useState(() => assetFromDetails(request.details));
+  const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -46,8 +52,12 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
   const amount =
-    type === 'discount' ? discountCalc(discount).value : type === 'exhibition' ? exhibitionCalc(exhibition).total : generalTotal;
-  const existing = request.files || [];
+    type === 'discount' ? discountCalc(discount).value
+      : type === 'exhibition' ? exhibitionCalc(exhibition).total
+      : type === 'asset' ? quoteSummary(quotes).amount || request.amount
+      : generalTotal;
+  // Asset quotation documents are edited in the quotation editor; only voice notes are listed here.
+  const existing = (request.files || []).filter((f) => type !== 'asset' || f.kind !== 'document');
 
   const handleRemoveExisting = async (fileId: string) => {
     setError(null);
@@ -60,6 +70,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const getDetails = (): RequestDetails | null => {
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'exhibition') return toExhibitionDetails(exhibition);
+    if (type === 'asset') return toAssetDetails(asset);
     return {
       base_amount: baseAmount,
       has_gst: hasGst,
@@ -75,7 +86,8 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     setError(null);
     if (!title.trim()) return setError('Please enter a title.');
     if (baseAmount <= 0 && type === 'general') return setError('Amount must be more than zero.');
-    const v = type === 'discount' ? validateDiscount(discount) : type === 'exhibition' ? validateExhibition(exhibition) : null;
+    const v = type === 'discount' ? validateDiscount(discount) : type === 'exhibition' ? validateExhibition(exhibition)
+      : type === 'asset' ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true)) : null;
     if (v) return setError(v);
     saveLockRef.current = true;
     setBusy(true);
@@ -87,9 +99,24 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         details: getDetails(),
       });
       if (!upd.success) throw new Error(upd.error);
-      if (newFiles.length) {
-        const add = await addFiles(request.id, newFiles);
+      if (type === 'asset') {
+        // Update typed vendor / amount / preference on already-uploaded quotations that changed.
+        for (const q of quotes) {
+          const f = q.existing;
+          if (!f) continue;
+          const a = parseFloat(q.amount) || 0;
+          if (!q.vendor.trim() || a <= 0) continue;
+          if (f.quote_vendor === q.vendor.trim() && Number(f.quote_amount) === a && !!f.quote_preferred === q.preferred) continue;
+          const res = await setQuote(f.id, q.vendor.trim(), a, q.preferred);
+          if (!res.success) throw new Error(res.error);
+        }
+      }
+      const toAdd = type === 'asset' ? newQuoteFiles(quotes) : newFiles;
+      if (toAdd.length) {
+        const add = await addFiles(request.id, toAdd);
         if (!add.success) throw new Error(add.error);
+      } else if (type === 'asset') {
+        await addFiles(request.id, []); // refresh list after quote edits
       }
       onClose();
     } catch (err) {
@@ -137,6 +164,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         )}
         {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
         {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} />}
+        {type === 'asset' && <AssetFields value={asset} onChange={setAsset} />}
         <div>
           <label htmlFor="edit-notes" className="text-xs font-bold text-slate-700 block mb-1">Purpose / Notes</label>
           <textarea id="edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
@@ -164,6 +192,13 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           </div>
         )}
 
+        {type === 'asset' ? (
+          <div>
+            <span className="text-xs font-bold text-slate-700 block mb-1.5">Quotations</span>
+            <QuotationsEditor rows={quotes} onChange={setQuotes} disabled={busy}
+              onRemoveExisting={(f) => handleRemoveExisting(f.id)} />
+          </div>
+        ) : (
         <div>
           <span className="text-xs font-bold text-slate-700 block mb-1.5">Add documents</span>
           <FileUploader
@@ -173,6 +208,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
             disabled={busy}
           />
         </div>
+        )}
 
         {error && <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{error}</div>}
 

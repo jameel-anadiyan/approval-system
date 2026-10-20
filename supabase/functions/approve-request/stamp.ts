@@ -35,9 +35,12 @@ export interface StampContext {
   headline?: string;
   /** Label before approverLine; default "Approved by" */
   byLabel?: string;
+  /** "rejected" draws the band in red (e.g. quotations that were not selected) */
+  tone?: "approved" | "rejected";
 }
 
 const GREEN = rgb(0.05, 0.42, 0.29);
+const RED = rgb(0.72, 0.11, 0.11);
 const INK = rgb(0.1, 0.12, 0.16);
 const GREY = rgb(0.42, 0.45, 0.5);
 const A4 = { w: 595.28, h: 841.89 };
@@ -88,7 +91,8 @@ function drawQr(page: PDFPage, text: string, lx: number, ly: number, size: numbe
 
 function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string, pw: number, bandH: number, s: number) {
   page.drawRectangle({ x: 0, y: 0, width: pw, height: bandH, color: rgb(1, 1, 1) });
-  page.drawRectangle({ x: 0, y: bandH - 1.6 * s, width: pw, height: 1.6 * s, color: GREEN });
+  const accent = ctx.tone === "rejected" ? RED : GREEN;
+  page.drawRectangle({ x: 0, y: bandH - 1.6 * s, width: pw, height: 1.6 * s, color: accent });
 
   drawImageFit(page, a.seal, 12 * s, (bandH - 84 * s) / 2, 84 * s, 84 * s);
   drawImageFit(page, a.signature, 102 * s, (bandH - 64 * s) / 2, 124 * s, 64 * s);
@@ -100,7 +104,7 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
     const safe = toSafePdfText(text);
     page.drawText(fit(safe, font, size * s, maxW), { x: x0, y: ly, size: size * s, font, color });
   };
-  line(ctx.headline ?? `APPROVED · Approval No: ${ctx.approvalNo}`, bandH - 22 * s, 11, a.bold, GREEN);
+  line(ctx.headline ?? `APPROVED · Approval No: ${ctx.approvalNo}`, bandH - 22 * s, 11, a.bold, accent);
   line(`${ctx.byLabel ?? "Approved by"}: ${ctx.approverLine}`, bandH - 39 * s, 8.5, a.regular);
   line(`Date & time: ${ctx.dateTime}`, bandH - 53 * s, 8.5, a.regular);
   line(`Request ${ctx.requestNo} · Amount ${ctx.amount} · ${pageLabel}`, bandH - 67 * s, 8.5, a.regular);
