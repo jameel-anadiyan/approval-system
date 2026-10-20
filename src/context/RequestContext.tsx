@@ -8,6 +8,7 @@ import {
   RequestType,
   RequestDetails,
   Profile,
+  DisbursementClarification,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -80,6 +81,17 @@ interface RequestContextType {
     requestId?: string
   ) => Promise<Result>;
   loadConsultableHeads: () => Promise<Profile[]>;
+  requestDisbursementClarification: (
+    requestId: string,
+    note?: string,
+    voice?: ActionVoice | null
+  ) => Promise<Result>;
+  respondDisbursementClarification: (
+    clarificationId: string,
+    responseNote?: string,
+    voice?: ActionVoice | null,
+    requestId?: string
+  ) => Promise<Result>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -127,6 +139,9 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
         .sort((a, b) => a.payment_date.localeCompare(b.payment_date) || a.created_at.localeCompare(b.created_at)),
       actions: [...(r.actions || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
       consultations: [...(r.consultations || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      disbursement_clarifications: [...(r.disbursement_clarifications || [])].sort(
+        (a, b) => b.created_at.localeCompare(a.created_at)
+      ),
       files: [...(r.files || [])].sort(
         (a, b) =>
           ((a as RequestFile & { sort_order?: number }).sort_order ?? 0) -
@@ -167,7 +182,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       const { data, error } = await supabase
         .from('requests')
-        .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))')
+        .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path)), disbursement_clarifications(*)')
         .order('created_at', { ascending: false });
       // RLS decides what each role sees; never substitute demo data in live mode.
       setRequests(!error && data ? normalize(data as RequestRecord[], headsMap) : []);
@@ -1054,6 +1069,185 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return [];
   };
 
+  const requestDisbursementClarification = async (
+    requestId: string,
+    note?: string,
+    voice?: ActionVoice | null
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const r = requests.find((x) => x.id === requestId);
+    if (!r) return { success: false, error: 'Request not found' };
+
+    let voicePath: string | null = null;
+    let voiceDuration: number | null = null;
+
+    if (isBackendConnected) {
+      if (voice) {
+        try {
+          const rawType = (voice.blob.type || '').split(';')[0];
+          const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
+          const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
+          voicePath = `${requestId}/disb-voice-${crypto.randomUUID()}.${ext}`;
+          voiceDuration = Math.min(300, Math.max(1, Math.round(voice.duration)));
+          const { error: upErr } = await supabase.storage
+            .from('request-files')
+            .upload(voicePath, voice.blob, { contentType, upsert: false });
+          if (upErr) throw new Error(`Audio upload failed: ${upErr.message}`);
+        } catch (uploadErr: unknown) {
+          return {
+            success: false,
+            error: uploadErr instanceof Error ? uploadErr.message : 'Voice upload failed',
+          };
+        }
+      }
+
+      const { error } = await supabase.rpc('request_disbursement_clarification', {
+        p_request_id: requestId,
+        p_note: note || null,
+        p_voice_path: voicePath,
+        p_voice_duration: voiceDuration,
+      });
+      if (error) return { success: false, error: error.message };
+      await loadRequests(true);
+      return { success: true };
+    }
+
+    // Mock mode
+    const newClarification: DisbursementClarification = {
+      id: `clarif-${Date.now()}`,
+      request_id: requestId,
+      requested_by: user.id,
+      requested_by_name: user.full_name,
+      head_id: r.owner_head_id || 'user-head-fin-002',
+      head_name: r.owner_head_name || 'Rajesh Sharma',
+      request_note: note || null,
+      request_voice_path: voice ? URL.createObjectURL(voice.blob) : null,
+      request_voice_duration: voice ? Math.round(voice.duration) : null,
+      status: 'pending_head',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const action: RequestAction = {
+      id: `act-${Date.now()}`,
+      request_id: requestId,
+      actor_id: user.id,
+      actor_name: user.full_name,
+      actor_role: user.role,
+      action: 'disbursement_clarification_requested',
+      from_status: r.status,
+      to_status: r.status,
+      remarks: note || 'Disbursement sent request to Head for clarification',
+      visible_to_requester: false,
+      created_at: new Date().toISOString(),
+    };
+
+    updateLocalRequests((prev) =>
+      prev.map((req) =>
+        req.id === requestId
+          ? {
+              ...req,
+              disbursement_clarifications: [
+                newClarification,
+                ...(req.disbursement_clarifications || []),
+              ],
+              actions: [action, ...(req.actions || [])],
+            }
+          : req
+      )
+    );
+    return { success: true };
+  };
+
+  const respondDisbursementClarification = async (
+    clarificationId: string,
+    responseNote?: string,
+    voice?: ActionVoice | null,
+    requestId?: string
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+
+    let voicePath: string | null = null;
+    let voiceDuration: number | null = null;
+
+    if (isBackendConnected) {
+      if (voice && requestId) {
+        try {
+          const rawType = (voice.blob.type || '').split(';')[0];
+          const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
+          const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
+          voicePath = `${requestId}/head-clarif-voice-${crypto.randomUUID()}.${ext}`;
+          voiceDuration = Math.min(300, Math.max(1, Math.round(voice.duration)));
+          const { error: upErr } = await supabase.storage
+            .from('request-files')
+            .upload(voicePath, voice.blob, { contentType, upsert: false });
+          if (upErr) throw new Error(`Audio upload failed: ${upErr.message}`);
+        } catch (uploadErr: unknown) {
+          return {
+            success: false,
+            error: uploadErr instanceof Error ? uploadErr.message : 'Voice upload failed',
+          };
+        }
+      }
+
+      const { error } = await supabase.rpc('respond_disbursement_clarification', {
+        p_clarification_id: clarificationId,
+        p_response_note: responseNote || null,
+        p_voice_path: voicePath,
+        p_voice_duration: voiceDuration,
+      });
+      if (error) return { success: false, error: error.message };
+      await loadRequests(true);
+      return { success: true };
+    }
+
+    // Mock mode
+    const targetReq = requests.find((rq) => (rq.disbursement_clarifications || []).some((c) => c.id === clarificationId));
+    const reqStatus = targetReq?.status || 'approved';
+    const action: RequestAction = {
+      id: `act-${Date.now()}`,
+      request_id: requestId || targetReq?.id || '',
+      actor_id: user.id,
+      actor_name: user.full_name,
+      actor_role: user.role,
+      action: 'disbursement_clarification_provided',
+      from_status: reqStatus,
+      to_status: reqStatus,
+      remarks: responseNote || 'Head provided clarification and sent back to Disbursement',
+      visible_to_requester: false,
+      created_at: new Date().toISOString(),
+    };
+
+    updateLocalRequests((prev) =>
+      prev.map((req) => {
+        const clarifs = req.disbursement_clarifications || [];
+        const hasIt = clarifs.some((c) => c.id === clarificationId);
+        if (!hasIt) return req;
+        const updatedClarifs = clarifs.map((c) =>
+          c.id === clarificationId
+            ? {
+                ...c,
+                responded_by: user.id,
+                responded_by_name: user.full_name,
+                response_note: responseNote || null,
+                response_voice_path: voice ? URL.createObjectURL(voice.blob) : null,
+                response_voice_duration: voice ? Math.round(voice.duration) : null,
+                responded_at: new Date().toISOString(),
+                status: 'clarified' as const,
+                updated_at: new Date().toISOString(),
+              }
+            : c
+        );
+        return {
+          ...req,
+          disbursement_clarifications: updatedClarifs,
+          actions: [action, ...(req.actions || [])],
+        };
+      })
+    );
+    return { success: true };
+  };
+
   return (
     <RequestContext.Provider
       value={{
@@ -1079,6 +1273,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         requestHeadConsultations,
         respondHeadConsultation,
         loadConsultableHeads,
+        requestDisbursementClarification,
+        respondDisbursementClarification,
       }}
     >
       {children}

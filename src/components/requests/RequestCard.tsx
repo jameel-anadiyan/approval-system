@@ -4,7 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
 import { useRequests } from '../../context/RequestContext';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle } from 'lucide-react';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -29,6 +29,8 @@ export const RequestCard: React.FC<RequestCardProps> = ({
 
   const docCount = request.files?.filter((f) => f.kind === 'document').length || 0;
   const hasVoiceNote = request.files?.some((f) => f.kind === 'voice_note');
+  const latestClarification = (request.disbursement_clarifications || [])[0];
+  const isPendingClarification = latestClarification?.status === 'pending_head';
 
   return (
     <div
@@ -70,6 +72,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
               <ShieldAlert className="w-3 h-3 text-amber-600" />
               Above {formatINRWhole(threshold)}
+            </span>
+          )}
+          {isPendingClarification && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+              <HelpCircle className="w-3 h-3 text-amber-600" />
+              Clarification Needed
             </span>
           )}
         </div>

@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
-import { CheckCircle2, Clock, CheckCircle, PlusCircle, Building2, TrendingUp, Users } from 'lucide-react';
+import { CheckCircle2, Clock, CheckCircle, PlusCircle, Building2, TrendingUp, Users, HelpCircle } from 'lucide-react';
 
 export const HeadDashboardPage: React.FC = () => {
   const { user } = useAuth();
@@ -29,6 +29,11 @@ export const HeadDashboardPage: React.FC = () => {
     ).length;
     return count + pendingForMe;
   }, 0);
+
+  // Pending clarifications requested by disbursement
+  const pendingDisbursementClarifications = deptRequests.filter((r) =>
+    (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
+  );
 
   // Total department amount approved/paid (discount values are not payouts)
   const sanctionedTotal = deptRequests
@@ -89,6 +94,50 @@ export const HeadDashboardPage: React.FC = () => {
           >
             <span>Review Now</span>
           </button>
+        </div>
+      )}
+
+      {/* Pending Disbursement Clarifications Banner */}
+      {pendingDisbursementClarifications.length > 0 && (
+        <div
+          onClick={() => {
+            if (pendingDisbursementClarifications.length === 1) {
+              navigate(`/requests/${pendingDisbursementClarifications[0].id}`);
+            }
+          }}
+          className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:bg-amber-100/70 transition-all shadow-xs"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <HelpCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-extrabold text-amber-950 font-display flex items-center gap-2">
+                <span>Disbursement Department Clarification Needed</span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                  {pendingDisbursementClarifications.length} on hold
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                The disbursement team has sent {pendingDisbursementClarifications.length === 1 ? 'an approved request' : `${pendingDisbursementClarifications.length} approved requests`} back to you with questions/audio notes. Tap to respond and unblock payment.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+            {pendingDisbursementClarifications.map((pr) => (
+              <button
+                key={pr.id}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/requests/${pr.id}`);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 shadow-xs transition-colors"
+              >
+                <span>Respond (#{pr.approval_no || pr.request_no})</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

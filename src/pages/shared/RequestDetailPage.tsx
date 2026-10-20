@@ -16,7 +16,10 @@ import { ForwardModal } from '../../components/portals/ForwardModal';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { ConsultHeadsModal } from '../../components/portals/ConsultHeadsModal';
 import { RespondConsultationModal } from '../../components/portals/RespondConsultationModal';
+import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
+import { RespondClarificationModal } from '../../components/portals/RespondClarificationModal';
 import { HeadConsultationsSection } from '../../components/requests/HeadConsultationsSection';
+import { DisbursementClarificationSection } from '../../components/requests/DisbursementClarificationSection';
 import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
 import { UserAvatar } from '../../components/common/UserAvatar';
 import {
@@ -29,7 +32,6 @@ import {
 import { paymentSummary } from '../../types/database';
 import {
   ArrowLeft,
-  Download,
   Send,
   RotateCcw,
   XCircle,
@@ -51,6 +53,7 @@ import {
   ThumbsDown,
   Clock,
   UserCheck,
+  HelpCircle,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -74,11 +77,12 @@ export const RequestDetailPage: React.FC = () => {
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | null
   >(null);
   const [consultInitialStatus, setConsultInitialStatus] = useState<'agreed' | 'disagreed' | null>(null);
   const [copiedNo, setCopiedNo] = useState(false);
   const [busy, setBusy] = useState(false);
+  const actionLockRef = useRef(false);
   const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(
     (location.state as { notice?: string } | null)?.notice
       ? { ok: false, text: (location.state as { notice: string }).notice }
@@ -169,6 +173,9 @@ export const RequestDetailPage: React.FC = () => {
   const editable = isOwner && (request.status === 'draft' || request.status === 'returned');
   const pay = paymentSummary(request);
   const payments = request.payments || [];
+  const clarifications = request.disbursement_clarifications || [];
+  const latestClarification = clarifications[0];
+  const isPendingDisbursementClarification = latestClarification?.status === 'pending_head';
 
   const copyApprovalNo = (no: string) => {
     navigator.clipboard.writeText(no);
@@ -183,7 +190,6 @@ export const RequestDetailPage: React.FC = () => {
     if (okText) setBanner({ ok: true, text: okText });
   };
 
-  const actionLockRef = useRef(false);
   const runInline = async (fn: () => Promise<{ success: boolean; error?: string }>, okText: string) => {
     if (actionLockRef.current) return false;
     actionLockRef.current = true;
@@ -459,6 +465,9 @@ export const RequestDetailPage: React.FC = () => {
               No document attached yet. Use <strong>Edit</strong> to attach at least one invoice or bill before submitting.
             </div>
           )}
+
+          {/* Disbursement Clarification Section */}
+          <DisbursementClarificationSection request={request} isOwningHead={isOwningHead || role === 'admin'} />
 
           {/* Signed Approval Packet Card (when approved or paid) */}
           {(request.status === 'approved' || request.status === 'paid') && <SignedDocuments request={request} />}
@@ -873,16 +882,53 @@ export const RequestDetailPage: React.FC = () => {
               </>
             )}
 
-            {/* Disbursement Action */}
-            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && (
+            {/* Owning Head / Admin Action when Disbursement requested clarification */}
+            {(isOwningHead || role === 'admin') && request.status === 'approved' && isPendingDisbursementClarification && (
               <button
                 type="button"
-                onClick={() => setModalState('pay')}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-xs shadow-md hover:bg-teal-700"
+                id="head-respond-disb-bar-btn"
+                onClick={() => setModalState('disb_respond')}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-md shadow-teal-200 transition-all cursor-pointer"
               >
-                <Banknote className="w-4 h-4" />
-                <span>{pay.paid > 0 ? `Pay Balance ${formatINR(pay.balance)}` : 'Record Payment'}</span>
+                <CornerDownRight className="w-3.5 h-3.5" />
+                <span>Send Clarification to Disbursement</span>
               </button>
+            )}
+
+            {/* Disbursement Action */}
+            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && (
+              <>
+                <button
+                  type="button"
+                  id="disb-ask-head-bar-btn"
+                  onClick={() => setModalState('disb_clarify')}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  <HelpCircle className="w-4 h-4 text-amber-600" />
+                  <span>Ask Head for Clarification</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isPendingDisbursementClarification}
+                  onClick={() => setModalState('pay')}
+                  title={isPendingDisbursementClarification ? 'Payment is on hold pending Head clarification' : undefined}
+                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+                    isPendingDisbursementClarification
+                      ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                      : 'bg-teal-600 hover:bg-teal-700 text-white cursor-pointer shadow-teal-200'
+                  }`}
+                >
+                  <Banknote className="w-4 h-4" />
+                  <span>
+                    {isPendingDisbursementClarification
+                      ? 'Payment on Hold'
+                      : pay.paid > 0
+                      ? `Pay Balance ${formatINR(pay.balance)}`
+                      : 'Record Payment'}
+                  </span>
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -909,6 +955,25 @@ export const RequestDetailPage: React.FC = () => {
           consultation={myConsultation}
           initialStatus={consultInitialStatus}
           onSuccess={() => setBanner({ ok: true, text: 'Your consultation decision has been saved.' })}
+        />
+      )}
+
+      {modalState === 'disb_clarify' && (
+        <DisbursementClarificationModal
+          isOpen={true}
+          onClose={() => setModalState(null)}
+          request={request}
+          onSuccess={() => setBanner({ ok: true, text: 'Clarification query sent to Request Owner Head.' })}
+        />
+      )}
+
+      {modalState === 'disb_respond' && latestClarification && (
+        <RespondClarificationModal
+          isOpen={true}
+          onClose={() => setModalState(null)}
+          request={request}
+          clarification={latestClarification}
+          onSuccess={() => setBanner({ ok: true, text: 'Clarification response sent back to Disbursement.' })}
         />
       )}
 

@@ -173,6 +173,30 @@ export interface RequestRecord {
   owner_head_id?: string | null;
   owner_head_name?: string | null;
   owner_head?: Pick<Profile, 'id' | 'full_name' | 'designation' | 'photo_path'> | null;
+  disbursement_clarifications?: DisbursementClarification[];
+}
+
+export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
+
+export interface DisbursementClarification {
+  id: string;
+  request_id: string;
+  requested_by: string;
+  requested_by_name: string;
+  head_id: string;
+  head_name: string;
+  request_note?: string | null;
+  request_voice_path?: string | null;
+  request_voice_duration?: number | null;
+  responded_by?: string | null;
+  responded_by_name?: string | null;
+  response_note?: string | null;
+  response_voice_path?: string | null;
+  response_voice_duration?: number | null;
+  responded_at?: string | null;
+  status: DisbursementClarificationStatus;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface HeadConsultation {

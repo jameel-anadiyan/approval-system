@@ -11,6 +11,7 @@ import {
   Clock,
   ArrowRight,
   Users,
+  HelpCircle,
 } from 'lucide-react';
 
 interface RequestTimelineProps {
@@ -46,6 +47,10 @@ export const RequestTimeline: React.FC<RequestTimelineProps> = ({ actions }) => 
         return <CheckCircle2 className="w-4 h-4 text-emerald-600" />;
       case 'consultation_disagreed':
         return <XCircle className="w-4 h-4 text-rose-600" />;
+      case 'disbursement_clarification_requested':
+        return <HelpCircle className="w-4 h-4 text-amber-600" />;
+      case 'disbursement_clarification_provided':
+        return <CheckCircle2 className="w-4 h-4 text-teal-600" />;
       case 'approved':
         return <CheckCircle2 className="w-4 h-4 text-emerald-600" />;
       case 'returned':

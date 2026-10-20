@@ -207,6 +207,8 @@ export const ACTION_LABELS: Record<string, string> = {
   consultation_requested: 'Requested Inter-Department Head Review',
   consultation_agreed: 'Head Review: Agreed',
   consultation_disagreed: 'Head Review: Disagreed',
+  disbursement_clarification_requested: 'Disbursement: Clarification requested from Head',
+  disbursement_clarification_provided: 'Head: Clarification provided to Disbursement',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition'];
