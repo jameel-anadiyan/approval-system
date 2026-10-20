@@ -13,7 +13,7 @@ const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> 
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div className="pt-4 first:pt-0">
-    <h4 className="text-[11px] font-bold uppercase tracking-wider text-brand-gold-700 mb-2">{title}</h4>
+    <h4 className="text-[11px] font-bold uppercase tracking-wider text-gold-600 mb-2">{title}</h4>
     <div className="grid grid-cols-2 gap-3 text-xs">{children}</div>
   </div>
 );
