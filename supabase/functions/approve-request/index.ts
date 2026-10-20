@@ -197,14 +197,18 @@ Deno.serve(handle(async (req) => {
     const records: Record<string, unknown>[] = [];
     const docsInfo: { name: string; pages: number }[] = [];
 
-    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number) => {
+    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number,
+      inPacket = true) => {
       const fileName = `${b.approval_no}_${String(index).padStart(2, "0")}_${safeName(label)}.pdf`;
       const path = `${requestId}/${fileName}`;
       const { error } = await admin.storage.from("signed-documents")
         .upload(path, bytes, { contentType: "application/pdf", upsert: false });
       if (error) throw new Error(`Upload failed: ${error.message}`);
-      signedBytes.push(bytes);
-      docsInfo.push({ name: label, pages });
+      // Asset buying: the combined packet carries only the form + the selected quotation.
+      if (inPacket) {
+        signedBytes.push(bytes);
+        docsInfo.push({ name: label, pages });
+      }
       records.push({ source_file_id: sourceId, is_packet: false, file_name: fileName, storage_path: path,
         sha256: await sha256(bytes), page_count: pages });
     };
@@ -236,7 +240,7 @@ Deno.serve(handle(async (req) => {
       }
       const label = !isQuote ? f.original_name
         : `${rejected ? "REJECTED" : "SELECTED"}_${f.quote_vendor ?? "quote"}_${f.original_name}`;
-      await store(out.bytes, ++n, label, f.id, out.pageCount);
+      await store(out.bytes, ++n, label, f.id, out.pageCount, !rejected);
     }
 
     const packet = await buildPacket({
