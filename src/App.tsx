@@ -16,6 +16,7 @@ import { RequestDetailPage } from './pages/shared/RequestDetailPage';
 import { ProfilePage } from './pages/shared/ProfilePage';
 import { MyRequestsPage } from './pages/employee/MyRequestsPage';
 import { ClerkInboxPage } from './pages/clerk/ClerkInboxPage';
+import { RegionalInboxPage } from './pages/regional/RegionalInboxPage';
 import { ClerkDeptRequestsPage } from './pages/clerk/ClerkDeptRequestsPage';
 import { HeadDashboardPage } from './pages/head/HeadDashboardPage';
 import { HeadReviewPage } from './pages/head/HeadReviewPage';
@@ -109,6 +110,8 @@ const RoleRedirect: React.FC = () => {
       return <Navigate to="/clerk" replace />;
     case 'disbursement':
       return <Navigate to="/disbursement" replace />;
+    case 'regional_head':
+      return <Navigate to="/regional" replace />;
     case 'employee':
     default:
       return <Navigate to="/my" replace />;
@@ -148,9 +151,14 @@ export const App: React.FC = () => {
                 </Route>
 
                 {/* Roles that can raise requests */}
-                <Route element={<RequireRole roles={['employee', 'clerk', 'head']} />}>
+                <Route element={<RequireRole roles={['employee', 'clerk', 'head', 'regional_head']} />}>
                   <Route path="my" element={<MyRequestsPage />} />
                   <Route path="new" element={<NewRequestPage />} />
+                </Route>
+
+                {/* Regional Head routes */}
+                <Route element={<RequireRole roles={['regional_head']} />}>
+                  <Route path="regional" element={<RegionalInboxPage />} />
                 </Route>
 
                 {/* Clerk routes */}

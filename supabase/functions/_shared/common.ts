@@ -11,7 +11,7 @@ export const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-export type Role = "admin" | "head" | "clerk" | "employee" | "disbursement";
+export type Role = "admin" | "head" | "clerk" | "employee" | "disbursement" | "regional_head";
 
 export interface Profile {
   id: string;

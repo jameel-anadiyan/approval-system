@@ -1,8 +1,10 @@
-export type AppRole = 'admin' | 'head' | 'clerk' | 'employee' | 'disbursement';
+export type AppRole = 'admin' | 'head' | 'clerk' | 'employee' | 'disbursement' | 'regional_head';
 
 export type RequestStatus =
   | 'draft'
   | 'submitted'
+  /** Employee's request waiting for their Regional Head to forward it to the clerk */
+  | 'pending_regional_review'
   | 'returned'
   | 'pending_head_approval'
   | 'pending_head_review'
@@ -28,6 +30,16 @@ export interface Shop {
   id: string;
   name: string;
   code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A department's kind of work; each clerk handles one or more categories. */
+export interface WorkCategory {
+  id: string;
+  department_id: string;
+  name: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -123,6 +135,12 @@ export interface Profile {
   /** Head only — granted by Admin to open the Discount Report */
   can_view_discount_report?: boolean;
   photo_path?: string | null;
+  /** Employee only — the Regional Head their requests go through */
+  regional_head_id?: string | null;
+  /** Regional Head only — shops they cover */
+  rh_shops?: { shop_id: string }[];
+  /** Clerk only — work categories they handle */
+  clerk_cats?: { category_id: string }[];
 }
 
 export interface ApproverCredential {
@@ -195,6 +213,15 @@ export interface RequestRecord {
   quote_selected_by?: string | null;
   quote_selected_by_name?: string | null;
   quote_selected_at?: string | null;
+  /** Work category picked by the requester (decides which clerk gets it) */
+  category_id?: string | null;
+  category_name?: string | null;
+  /** Regional Head the employee's request went through */
+  regional_head_id?: string | null;
+  regional_head_name?: string | null;
+  regional_forwarded_at?: string | null;
+  /** Computed: clerks who may route / return this request */
+  routing_clerk_ids?: string[] | null;
 }
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';

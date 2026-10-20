@@ -1,6 +1,9 @@
 // POST /functions/v1/admin-users
-// Actions: create | reset_password | set_active | update
-// Admin manages Heads and Disbursement users; a Head manages Clerks and Employees of own department.
+// Actions: create | reset_password | set_active | update | update_access | set_photo | remove_photo
+// Admin manages Heads and Disbursement users; a Head manages Clerks, Regional Heads and Employees
+// of own department.
+// Regional Head: one or more shops (shop_ids). Employee: regional_head_id (required when an active
+// Regional Head covers the employee's shop). Clerk: work category_ids.
 import {
   audit, getCaller, handle, HttpError, json, LOGIN_DOMAIN, readJson, requireString, requireUuid,
   validatePassword, type Profile, type Role,
@@ -10,9 +13,11 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
 const REQUEST_TYPES = ["general", "discount", "exhibition", "asset"] as const;
 
+const DEPT_ROLES: Role[] = ["head", "clerk", "employee", "regional_head"];
+
 /** Request types the user may raise (only for roles that raise requests). */
 function parseTypes(v: unknown, role: Role): string[] {
-  if (!(role === "employee" || role === "clerk" || role === "head")) return ["general"];
+  if (!(role === "employee" || role === "clerk" || role === "head" || role === "regional_head")) return ["general"];
   const list = Array.isArray(v) ? v.filter((t) => (REQUEST_TYPES as readonly string[]).includes(t)) : [];
   const uniq = [...new Set(list as string[])];
   if (!uniq.length) throw new HttpError(400, "bad_request", "Select at least one request type.");
@@ -27,10 +32,72 @@ async function parseShop(admin: SupabaseClient, v: unknown): Promise<string | nu
   return id;
 }
 
+/** Regional Head's shops: at least one, all existing and active. */
+async function parseShopIds(admin: SupabaseClient, v: unknown): Promise<string[]> {
+  const ids = [...new Set((Array.isArray(v) ? v : []).map((x) => requireUuid(x, "Shop")))];
+  if (!ids.length) throw new HttpError(400, "bad_request", "Select at least one shop for the Regional Head.");
+  const { data } = await admin.from("shops").select("id").in("id", ids).eq("is_active", true);
+  if ((data ?? []).length !== ids.length) throw new HttpError(400, "bad_request", "A selected shop was not found or is inactive.");
+  return ids;
+}
+
+/** Clerk's work categories: must belong to the clerk's department and be active. */
+async function parseCategoryIds(admin: SupabaseClient, v: unknown, departmentId: string | null): Promise<string[]> {
+  const ids = [...new Set((Array.isArray(v) ? v : []).map((x) => requireUuid(x, "Category")))];
+  if (!ids.length) return [];
+  const { data } = await admin.from("work_categories").select("id")
+    .in("id", ids).eq("department_id", departmentId).eq("is_active", true);
+  if ((data ?? []).length !== ids.length) throw new HttpError(400, "bad_request", "A selected work category was not found.");
+  return ids;
+}
+
+/**
+ * Employee's Regional Head. Must be an active Regional Head of the same department covering the
+ * employee's shop. Required whenever such a Regional Head exists.
+ */
+async function parseRegionalHead(
+  admin: SupabaseClient, v: unknown, departmentId: string | null, shopId: string | null,
+): Promise<string | null> {
+  const { data: rhs } = await admin.from("profiles")
+    .select("id, regional_head_shops(shop_id)")
+    .eq("role", "regional_head").eq("is_active", true).eq("department_id", departmentId);
+  // deno-lint-ignore no-explicit-any
+  const covering = ((rhs ?? []) as any[])
+    .filter((p) => (p.regional_head_shops ?? []).some((s: { shop_id: string }) => s.shop_id === shopId))
+    .map((p) => p.id as string);
+  if (v === null || v === undefined || v === "") {
+    if (covering.length) throw new HttpError(400, "bad_request", "Select the Regional Head for this employee's shop.");
+    return null;
+  }
+  const id = requireUuid(v, "Regional Head");
+  if (!covering.includes(id)) {
+    throw new HttpError(400, "bad_request", "The selected Regional Head does not cover this employee's shop.");
+  }
+  return id;
+}
+
+async function saveRegionalShops(admin: SupabaseClient, userId: string, shopIds: string[]) {
+  const { error: dErr } = await admin.from("regional_head_shops").delete().eq("regional_head_id", userId);
+  if (dErr) throw new HttpError(400, "profile_error", dErr.message);
+  const { error } = await admin.from("regional_head_shops")
+    .insert(shopIds.map((shop_id) => ({ regional_head_id: userId, shop_id })));
+  if (error) throw new HttpError(400, "profile_error", error.message);
+}
+
+async function saveClerkCategories(admin: SupabaseClient, userId: string, categoryIds: string[]) {
+  const { error: dErr } = await admin.from("clerk_categories").delete().eq("clerk_id", userId);
+  if (dErr) throw new HttpError(400, "profile_error", dErr.message);
+  if (!categoryIds.length) return;
+  const { error } = await admin.from("clerk_categories")
+    .insert(categoryIds.map((category_id) => ({ clerk_id: userId, category_id })));
+  if (error) throw new HttpError(400, "profile_error", error.message);
+}
+
 function canManage(me: Profile, target: { role: Role; department_id: string | null }): boolean {
   if (me.role === "admin") return true;
   if (me.role === "head") {
-    return (target.role === "clerk" || target.role === "employee") && target.department_id === me.department_id;
+    return (target.role === "clerk" || target.role === "employee" || target.role === "regional_head") &&
+      target.department_id === me.department_id;
   }
   return false;
 }
@@ -65,12 +132,13 @@ Deno.serve(handle(async (req) => {
       const role = body.role as Role;
       const password = validatePassword(body.password);
       const allowed_types = parseTypes(body.allowed_types, role);
-      const shop_id = await parseShop(admin, body.shop_id);
+      // A Regional Head covers several shops (shop_ids) instead of a single shop.
+      const shop_id = role === "regional_head" ? null : await parseShop(admin, body.shop_id);
       if (role === "employee" && !shop_id) throw new HttpError(400, "bad_request", "Select the employee's shop.");
       let department_id: string | null = null;
       if (me.role === "head") {
         department_id = me.department_id;
-      } else if (role === "head" || role === "clerk" || role === "employee") {
+      } else if (DEPT_ROLES.includes(role)) {
         department_id = requireUuid(body.department_id, "Department");
       }
       if (!canManage(me, { role, department_id })) {
@@ -80,6 +148,10 @@ Deno.serve(handle(async (req) => {
         const { data: dept } = await admin.from("departments").select("id,is_active").eq("id", department_id).maybeSingle();
         if (!dept || !dept.is_active) throw new HttpError(400, "bad_request", "Department not found or inactive.");
       }
+      const shop_ids = role === "regional_head" ? await parseShopIds(admin, body.shop_ids) : [];
+      const category_ids = role === "clerk" ? await parseCategoryIds(admin, body.category_ids, department_id) : [];
+      const regional_head_id = role === "employee"
+        ? await parseRegionalHead(admin, body.regional_head_id, department_id, shop_id) : null;
       const { data: taken } = await admin.from("profiles").select("id").eq("username", username).maybeSingle();
       if (taken) throw new HttpError(409, "username_taken", "That username is already taken.");
       if (role === "head") {
@@ -96,13 +168,22 @@ Deno.serve(handle(async (req) => {
 
       const { error: pErr } = await admin.from("profiles").insert({
         id: created.user.id, username, full_name, designation, role, department_id, shop_id, allowed_types,
-        must_change_password: true, created_by: me.id,
+        regional_head_id, must_change_password: true, created_by: me.id,
       });
       if (pErr) {
         await admin.auth.admin.deleteUser(created.user.id);
         throw new HttpError(400, "profile_error", pErr.message);
       }
-      await audit(admin, me, "user_created", "user", created.user.id, { username, role, department_id, shop_id, allowed_types });
+      try {
+        if (role === "regional_head") await saveRegionalShops(admin, created.user.id, shop_ids);
+        if (role === "clerk") await saveClerkCategories(admin, created.user.id, category_ids);
+      } catch (e) {
+        await admin.from("profiles").delete().eq("id", created.user.id);
+        await admin.auth.admin.deleteUser(created.user.id);
+        throw e;
+      }
+      await audit(admin, me, "user_created", "user", created.user.id,
+        { username, role, department_id, shop_id, allowed_types, shop_ids, category_ids, regional_head_id });
       return json({ id: created.user.id, username });
     }
 
@@ -152,12 +233,20 @@ Deno.serve(handle(async (req) => {
       const userId = requireUuid(body.user_id, "User");
       const target = await loadTarget(admin, me, userId);
       const allowed_types = parseTypes(body.allowed_types, target.role);
-      const shop_id = await parseShop(admin, body.shop_id);
+      const shop_id = target.role === "regional_head" ? null : await parseShop(admin, body.shop_id);
       if (target.role === "employee" && !shop_id) throw new HttpError(400, "bad_request", "Select the employee's shop.");
+      const shop_ids = target.role === "regional_head" ? await parseShopIds(admin, body.shop_ids) : [];
+      const category_ids = target.role === "clerk"
+        ? await parseCategoryIds(admin, body.category_ids, target.department_id) : [];
+      const regional_head_id = target.role === "employee"
+        ? await parseRegionalHead(admin, body.regional_head_id, target.department_id, shop_id) : null;
       const { error } = await admin.from("profiles")
-        .update({ shop_id, allowed_types, updated_at: new Date().toISOString() }).eq("id", userId);
+        .update({ shop_id, allowed_types, regional_head_id, updated_at: new Date().toISOString() }).eq("id", userId);
       if (error) throw new HttpError(400, "profile_error", error.message);
-      await audit(admin, me, "user_access_updated", "user", userId, { username: target.username, shop_id, allowed_types });
+      if (target.role === "regional_head") await saveRegionalShops(admin, userId, shop_ids);
+      if (target.role === "clerk" && Array.isArray(body.category_ids)) await saveClerkCategories(admin, userId, category_ids);
+      await audit(admin, me, "user_access_updated", "user", userId,
+        { username: target.username, shop_id, allowed_types, shop_ids, category_ids, regional_head_id });
       return json({ ok: true });
     }
 

@@ -1,49 +1,206 @@
 import React, { useState } from 'react';
-import type { AppRole, Profile, RequestType, Shop } from '../../types/database';
+import type { AppRole, Profile, RequestType, Shop, WorkCategory } from '../../types/database';
 import { REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
 import { Modal } from '../common/Modal';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, UserCheck, Tags } from 'lucide-react';
 
-export const rolesWithTypes: AppRole[] = ['employee', 'clerk', 'head'];
+export const rolesWithTypes: AppRole[] = ['employee', 'clerk', 'head', 'regional_head'];
 
-/** Shop picker + "may raise these request types" checkboxes. */
-export const AccessFields: React.FC<{
+/** Active Regional Heads of the department who cover the given shop. */
+export function coveringRegionalHeads(users: Profile[], departmentId: string | null | undefined, shopId: string): Profile[] {
+  if (!departmentId || !shopId) return [];
+  return users.filter(
+    (u) =>
+      u.role === 'regional_head' &&
+      u.is_active &&
+      u.department_id === departmentId &&
+      (u.rh_shops || []).some((s) => s.shop_id === shopId)
+  );
+}
+
+export interface ExtraAccess {
+  shopIds: string[];
+  regionalHeadId: string;
+  categoryIds: string[];
+}
+
+interface AccessFieldsProps {
   role: AppRole;
   shops: Shop[];
   shopId: string;
   onShopChange: (id: string) => void;
   types: RequestType[];
   onTypesChange: (t: RequestType[]) => void;
-}> = ({ role, shops, shopId, onShopChange, types, onTypesChange }) => {
+  /** Department of the user being created / edited (drives Regional Head + category lists) */
+  departmentId?: string | null;
+  users?: Profile[];
+  categories?: WorkCategory[];
+  extra?: ExtraAccess;
+  onExtraChange?: (e: ExtraAccess) => void;
+}
+
+const EMPTY_EXTRA: ExtraAccess = { shopIds: [], regionalHeadId: '', categoryIds: [] };
+
+/** Shop picker(s), Regional Head / work categories, and "may raise these request types" checkboxes. */
+export const AccessFields: React.FC<AccessFieldsProps> = ({
+  role, shops, shopId, onShopChange, types, onTypesChange,
+  departmentId, users = [], categories = [], extra = EMPTY_EXTRA, onExtraChange,
+}) => {
   if (!rolesWithTypes.includes(role)) return null;
   const shopRequired = role === 'employee';
-  const activeShops = shops.filter((s) => s.is_active || s.id === shopId);
+  const isRegional = role === 'regional_head';
+  const activeShops = shops.filter((s) => s.is_active || s.id === shopId || extra.shopIds.includes(s.id));
   const toggle = (t: RequestType) =>
     onTypesChange(types.includes(t) ? types.filter((x) => x !== t) : REQUEST_TYPES.filter((x) => x === t || types.includes(x)));
+  const setExtra = (patch: Partial<ExtraAccess>) => onExtraChange?.({ ...extra, ...patch });
+
+  const covering = role === 'employee' ? coveringRegionalHeads(users, departmentId, shopId) : [];
+  const deptCategories = categories.filter(
+    (c) => c.department_id === departmentId && (c.is_active || extra.categoryIds.includes(c.id))
+  );
 
   return (
     <div className="space-y-4">
-      <div>
-        <label htmlFor="access-shop" className="text-xs font-bold text-slate-700 block mb-1">
-          Shop {shopRequired ? <span className="text-rose-500">*</span> : <span className="text-slate-400 font-normal">(optional)</span>}
-        </label>
-        <select
-          id="access-shop"
-          value={shopId}
-          onChange={(e) => onShopChange(e.target.value)}
-          className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-hidden bg-white"
-        >
-          <option value="">{shopRequired ? 'Select shop…' : 'No shop'}</option>
-          {activeShops.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.code})
-            </option>
-          ))}
-        </select>
-        {shops.length === 0 && (
-          <span className="text-[10px] text-amber-700 mt-1 block">No shops yet. Admin can add them under Shops.</span>
-        )}
-      </div>
+      {isRegional ? (
+        <fieldset>
+          <legend className="text-xs font-bold text-slate-700 mb-1.5">
+            Shops under this Regional Head <span className="text-rose-500">*</span>
+          </legend>
+          {activeShops.length === 0 ? (
+            <span className="text-[11px] text-amber-700 block">No shops yet. Admin can add them under Shops.</span>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+              {activeShops.map((s) => {
+                const on = extra.shopIds.includes(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer text-xs transition-colors ${
+                      on ? 'border-cyan-300 bg-cyan-50/70' : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      id={`access-rh-shop-${s.id}`}
+                      checked={on}
+                      onChange={() =>
+                        setExtra({ shopIds: on ? extra.shopIds.filter((x) => x !== s.id) : [...extra.shopIds, s.id] })
+                      }
+                      className="w-4 h-4 accent-cyan-600"
+                    />
+                    <span className="truncate">
+                      <strong className="text-slate-800">{s.name}</strong> <span className="text-slate-400">({s.code})</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <span className="text-[10px] text-slate-400 mt-1 block">
+            Employees of these shops send their requests through this Regional Head.
+          </span>
+        </fieldset>
+      ) : (
+        <div>
+          <label htmlFor="access-shop" className="text-xs font-bold text-slate-700 block mb-1">
+            Shop {shopRequired ? <span className="text-rose-500">*</span> : <span className="text-slate-400 font-normal">(optional)</span>}
+          </label>
+          <select
+            id="access-shop"
+            value={shopId}
+            onChange={(e) => onShopChange(e.target.value)}
+            className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-hidden bg-white"
+          >
+            <option value="">{shopRequired ? 'Select shop…' : 'No shop'}</option>
+            {activeShops.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.code})
+              </option>
+            ))}
+          </select>
+          {shops.length === 0 && (
+            <span className="text-[10px] text-amber-700 mt-1 block">No shops yet. Admin can add them under Shops.</span>
+          )}
+        </div>
+      )}
+
+      {role === 'employee' && (
+        <div>
+          <label htmlFor="access-regional-head" className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+            <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
+            Regional Head {covering.length > 0 && <span className="text-rose-500">*</span>}
+          </label>
+          {!shopId ? (
+            <span className="text-[11px] text-slate-400 block">Select the shop first.</span>
+          ) : covering.length === 0 ? (
+            <span className="text-[11px] text-slate-500 block">
+              No Regional Head covers this shop, so requests go straight to the clerk.
+            </span>
+          ) : (
+            <>
+              <select
+                id="access-regional-head"
+                value={extra.regionalHeadId}
+                onChange={(e) => setExtra({ regionalHeadId: e.target.value })}
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-hidden bg-white"
+              >
+                <option value="">Select Regional Head…</option>
+                {covering.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name}
+                    {u.designation ? ` · ${u.designation}` : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                This employee's requests go to the Regional Head first, who forwards them to the clerk.
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {role === 'clerk' && (
+        <fieldset>
+          <legend className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+            <Tags className="w-3.5 h-3.5 text-indigo-600" />
+            Work categories this clerk handles
+          </legend>
+          {deptCategories.length === 0 ? (
+            <span className="text-[11px] text-slate-500 block">
+              No work categories yet. Add them under <strong>Work Categories</strong> if several clerks share the work.
+            </span>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {deptCategories.map((c) => {
+                const on = extra.categoryIds.includes(c.id);
+                return (
+                  <label
+                    key={c.id}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border cursor-pointer text-xs font-semibold transition-colors ${
+                      on ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      id={`access-cat-${c.id}`}
+                      checked={on}
+                      onChange={() =>
+                        setExtra({
+                          categoryIds: on ? extra.categoryIds.filter((x) => x !== c.id) : [...extra.categoryIds, c.id],
+                        })
+                      }
+                      className="w-3.5 h-3.5 accent-indigo-600"
+                    />
+                    {c.name}
+                    {!c.is_active && <span className="text-[10px] text-slate-400">(inactive)</span>}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </fieldset>
+      )}
 
       <fieldset>
         <legend className="text-xs font-bold text-slate-700 mb-1.5">
@@ -80,40 +237,96 @@ export const AccessFields: React.FC<{
 };
 
 /** Returns an error message, or null when the access settings are valid. */
-export function validateAccess(role: AppRole, shopId: string, types: RequestType[]): string | null {
+export function validateAccess(
+  role: AppRole,
+  shopId: string,
+  types: RequestType[],
+  extra?: ExtraAccess & { coveringCount?: number }
+): string | null {
   if (!rolesWithTypes.includes(role)) return null;
   if (role === 'employee' && !shopId) return "Select the employee's shop.";
+  if (role === 'regional_head' && !(extra?.shopIds.length)) return 'Select at least one shop for the Regional Head.';
+  if (role === 'employee' && (extra?.coveringCount ?? 0) > 0 && !extra?.regionalHeadId) {
+    return "Select the employee's Regional Head.";
+  }
   if (types.length === 0) return 'Select at least one request type.';
   return null;
 }
 
-/** Edit an existing user's shop + allowed request types. */
+/** Edit an existing user's shop(s), Regional Head / categories and allowed request types. */
 export const AccessModal: React.FC<{
   target: Profile;
   shops: Shop[];
+  users?: Profile[];
+  categories?: WorkCategory[];
   onClose: () => void;
-  onSave: (access: { shop_id: string | null; allowed_types: RequestType[] }) => Promise<{ success: boolean; error?: string }>;
-}> = ({ target, shops, onClose, onSave }) => {
+  onSave: (access: {
+    shop_id: string | null;
+    allowed_types: RequestType[];
+    shop_ids?: string[];
+    category_ids?: string[];
+    regional_head_id?: string | null;
+  }) => Promise<{ success: boolean; error?: string }>;
+}> = ({ target, shops, users = [], categories = [], onClose, onSave }) => {
   const [shopId, setShopId] = useState(target.shop_id ?? '');
   const [types, setTypes] = useState<RequestType[]>(target.allowed_types?.length ? target.allowed_types : ['general']);
+  const [extra, setExtra] = useState<ExtraAccess>({
+    shopIds: (target.rh_shops || []).map((s) => s.shop_id),
+    regionalHeadId: target.regional_head_id ?? '',
+    categoryIds: (target.clerk_cats || []).map((c) => c.category_id),
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const covering = target.role === 'employee' ? coveringRegionalHeads(users, target.department_id, shopId) : [];
+  // Changing the shop may leave a Regional Head who doesn't cover the new shop.
+  const regionalHeadId = covering.some((u) => u.id === extra.regionalHeadId) ? extra.regionalHeadId : '';
+
   const save = async () => {
-    const err = validateAccess(target.role, shopId, types);
+    const err = validateAccess(target.role, shopId, types, { ...extra, regionalHeadId, coveringCount: covering.length });
     if (err) return setError(err);
     setBusy(true);
-    const res = await onSave({ shop_id: shopId || null, allowed_types: types });
+    const res = await onSave({
+      shop_id: target.role === 'regional_head' ? null : shopId || null,
+      allowed_types: types,
+      ...(target.role === 'regional_head' ? { shop_ids: extra.shopIds } : {}),
+      ...(target.role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
+      ...(target.role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
+    });
     setBusy(false);
     if (res.success) onClose();
     else setError(res.error || 'Could not save.');
   };
 
   return (
-    <Modal isOpen onClose={onClose} title={`Access · ${target.full_name}`} description="Shop and the request types this user can raise." maxWidth="md">
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={`Access · ${target.full_name}`}
+      description={
+        target.role === 'regional_head'
+          ? 'Shops covered and the request types this Regional Head can raise.'
+          : target.role === 'clerk'
+            ? 'Work categories and the request types this clerk can raise.'
+            : 'Shop, Regional Head and the request types this user can raise.'
+      }
+      maxWidth="md"
+    >
       <div className="space-y-4">
         {error && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl">{error}</div>}
-        <AccessFields role={target.role} shops={shops} shopId={shopId} onShopChange={setShopId} types={types} onTypesChange={setTypes} />
+        <AccessFields
+          role={target.role}
+          shops={shops}
+          shopId={shopId}
+          onShopChange={setShopId}
+          types={types}
+          onTypesChange={setTypes}
+          departmentId={target.department_id}
+          users={users}
+          categories={categories}
+          extra={{ ...extra, regionalHeadId }}
+          onExtraChange={setExtra}
+        />
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
           <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50">
             Cancel

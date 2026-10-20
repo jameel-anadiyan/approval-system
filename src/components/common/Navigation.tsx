@@ -24,6 +24,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { canViewDiscountReport } from '../../lib/discountReport';
+import { isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
 
 interface NavItem {
   label: string;
@@ -41,9 +42,9 @@ export const Navigation: React.FC = () => {
   if (!role) return null;
 
   // Compute live badge counts
-  const clerkToRouteCount = requests.filter(
-    (r) => r.status === 'submitted' && (!user?.department_id || r.department_id === user.department_id)
-  ).length;
+  const clerkToRouteCount = requests.filter((r) => isMyRoutingRequest(r, user)).length;
+
+  const regionalToForwardCount = requests.filter((r) => isMyRegionalRequest(r, user)).length;
 
   const headToApproveCount = requests.filter(
     (r) => r.status === 'pending_head_approval' && (!user?.department_id || r.department_id === user.department_id)
@@ -78,6 +79,15 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
         { label: 'Profile', path: '/profile', icon: UserCheck },
       ];
+      break;
+
+    case 'regional_head':
+      mainNavItems = [
+        { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
+        { label: 'My Requests', path: '/my', icon: FileText },
+        { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
+      ];
+      moreNavItems = [{ label: 'Profile', path: '/profile', icon: UserCheck }];
       break;
 
     case 'clerk':

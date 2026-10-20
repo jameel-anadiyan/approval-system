@@ -15,7 +15,7 @@ import type { RequestStatus } from '../../types/database';
 type StatusGroup = 'approved' | 'pending' | 'rejected' | 'all';
 const STATUS_GROUPS: Record<Exclude<StatusGroup, 'all'>, RequestStatus[]> = {
   approved: ['approved', 'paid'],
-  pending: ['submitted', 'returned', 'pending_head_approval', 'pending_head_review', 'pending_admin_approval', 'approving'],
+  pending: ['pending_regional_review', 'submitted', 'returned', 'pending_head_approval', 'pending_head_review', 'pending_admin_approval', 'approving'],
   rejected: ['rejected', 'withdrawn', 'cancelled'],
 };
 const GROUP_LABELS: Record<StatusGroup, string> = {

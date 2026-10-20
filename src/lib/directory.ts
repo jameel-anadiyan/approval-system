@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase, invokeEdgeFunction } from './supabase';
 import { useAuth } from '../context/AuthContext';
 import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS } from './mockData';
-import type { AppRole, AuditLogEntry, Department, Profile, RequestType, Shop } from '../types/database';
+import type { AppRole, AuditLogEntry, Department, Profile, RequestType, Shop, WorkCategory } from '../types/database';
 
 type Result = { success: boolean; error?: string };
 
@@ -19,6 +19,20 @@ export interface NewUserInput {
   shop_id?: string | null;
   allowed_types?: RequestType[];
   photo?: string;
+  /** Regional Head: shops they cover */
+  shop_ids?: string[];
+  /** Clerk: work categories they handle */
+  category_ids?: string[];
+  /** Employee: their Regional Head */
+  regional_head_id?: string | null;
+}
+
+export interface AccessInput {
+  shop_id: string | null;
+  allowed_types: RequestType[];
+  shop_ids?: string[];
+  category_ids?: string[];
+  regional_head_id?: string | null;
 }
 
 export function useDirectory() {
@@ -26,22 +40,36 @@ export function useDirectory() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [shops, setShops] = useState<Shop[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
+  const [categories, setCategories] = useState<WorkCategory[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
     if (isBackendConnected && user) {
-      const [d, s, p] = await Promise.all([
+      const [d, s, p, c] = await Promise.all([
         supabase.from('departments').select('*').order('name'),
         supabase.from('shops').select('*').order('name'),
         supabase
           .from('profiles')
-          .select('*, department:departments(*), shop:shops(*)')
+          .select(
+            '*, department:departments(*), shop:shops(*), rh_shops:regional_head_shops(shop_id), clerk_cats:clerk_categories(category_id)'
+          )
           .order('created_at', { ascending: false }),
+        supabase.from('work_categories').select('*').order('name'),
       ]);
       setDepartments((d.data as Department[]) ?? []);
       setShops((s.data as Shop[]) ?? []);
-      setUsers((p.data as Profile[]) ?? []);
+      if (p.error) {
+        // Never lose the staff list because of the newer embeds.
+        const basic = await supabase
+          .from('profiles')
+          .select('*, department:departments(*), shop:shops(*)')
+          .order('created_at', { ascending: false });
+        setUsers((basic.data as Profile[]) ?? []);
+      } else {
+        setUsers((p.data as Profile[]) ?? []);
+      }
+      setCategories((c.data as WorkCategory[]) ?? []);
     } else {
       setDepartments(MOCK_DEPARTMENTS);
       setUsers(MOCK_USERS);
@@ -127,11 +155,8 @@ export function useDirectory() {
     return { success: true };
   };
 
-  /** Admin / Head changes a user's shop and which request types they may raise. */
-  const updateAccess = async (
-    userId: string,
-    access: { shop_id: string | null; allowed_types: RequestType[] }
-  ): Promise<Result> => {
+  /** Admin / Head changes a user's shop(s), request types, Regional Head or work categories. */
+  const updateAccess = async (userId: string, access: AccessInput): Promise<Result> => {
     if (live) {
       const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
       if (error) return { success: false, error: error.message };
@@ -140,6 +165,25 @@ export function useDirectory() {
     }
     const shop = shops.find((s) => s.id === access.shop_id) ?? null;
     setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...access, shop } : u)));
+    return { success: true };
+  };
+
+  /** Head (own department) or Admin adds / renames / (de)activates a work category. */
+  const saveCategory = async (input: {
+    id?: string;
+    name: string;
+    is_active?: boolean;
+    department_id?: string | null;
+  }): Promise<Result> => {
+    if (!live) return { success: false, error: 'Work categories need the live backend.' };
+    const { error } = await supabase.rpc('save_work_category', {
+      p_id: input.id ?? null,
+      p_name: input.name,
+      p_is_active: input.is_active ?? true,
+      p_department_id: input.department_id ?? null,
+    });
+    if (error) return { success: false, error: error.message };
+    await reload();
     return { success: true };
   };
 
@@ -225,8 +269,8 @@ export function useDirectory() {
   };
 
   return {
-    departments, shops, users, loading, live, reload, saveDepartment, saveShop, createUser, updateAccess,
-    setDiscountReportAccess, resetPassword, setActive, uploadCredential, setPhoto, removePhoto,
+    departments, shops, users, categories, loading, live, reload, saveDepartment, saveShop, createUser, updateAccess,
+    saveCategory, setDiscountReportAccess, resetPassword, setActive, uploadCredential, setPhoto, removePhoto,
   };
 }
 

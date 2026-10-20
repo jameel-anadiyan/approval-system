@@ -30,6 +30,14 @@ export interface DraftInput {
   notes?: string;
   details?: RequestDetails | null;
   files?: RequestFile[];
+  /** Work category (needed when several clerks split the department's work) */
+  category_id?: string | null;
+}
+
+/** Work categories the current user can pick for a new request. */
+export interface CategoryOptions {
+  required: boolean;
+  categories: { id: string; name: string }[];
 }
 
 export interface PaymentInput {
@@ -49,7 +57,10 @@ interface RequestContextType {
   refreshRequests: () => Promise<void>;
   getRequestById: (id: string) => RequestRecord | undefined;
   createDraft: (data: DraftInput) => Promise<{ success: boolean; id?: string; error?: string }>;
-  updateDraft: (id: string, data: { title: string; amount: number; notes?: string; details?: RequestDetails | null }) => Promise<Result>;
+  updateDraft: (
+    id: string,
+    data: { title: string; amount: number; notes?: string; details?: RequestDetails | null; category_id?: string | null }
+  ) => Promise<Result>;
   addFiles: (id: string, files: RequestFile[]) => Promise<Result>;
   removeFile: (requestId: string, fileId: string) => Promise<Result>;
   deleteDraft: (id: string) => Promise<Result>;
@@ -57,6 +68,10 @@ interface RequestContextType {
   withdrawRequest: (id: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
   routeRequest: (id: string, route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   forwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
+  /** Regional Head forwards an employee's request to the clerk (no approval). */
+  regionalForwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<Result>;
+  /** Work categories the current user can pick, and whether one is required. */
+  loadCategoryOptions: () => Promise<CategoryOptions>;
   returnRequest: (id: string, remarks: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   rejectRequest: (id: string, reason: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   approveRequest: (
@@ -195,7 +210,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const res = await supabase
         .from('requests')
         .select(
-          '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))'
+          '*, routing_clerk_ids, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))'
         )
         .order('created_at', { ascending: false });
 
@@ -383,6 +398,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         if (error) throw error;
         requestId = newId as string;
+        if (data.category_id) {
+          const { error: catErr } = await supabase.rpc('set_request_category', {
+            p_request_id: requestId,
+            p_category_id: data.category_id,
+          });
+          if (catErr) throw catErr;
+        }
         await uploadFiles(requestId, data.files || []);
         await loadRequests();
         return { success: true, id: requestId };
@@ -454,7 +476,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const updateDraft = async (
     id: string,
-    data: { title: string; amount: number; notes?: string; details?: RequestDetails | null }
+    data: { title: string; amount: number; notes?: string; details?: RequestDetails | null; category_id?: string | null }
   ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (isBackendConnected) {
@@ -466,6 +488,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_details: data.details ?? null,
       });
       if (error) return { success: false, error: error.message };
+      if (data.category_id !== undefined) {
+        const { error: catErr } = await supabase.rpc('set_request_category', {
+          p_request_id: id,
+          p_category_id: data.category_id || null,
+        });
+        if (catErr) {
+          await loadRequests();
+          return { success: false, error: catErr.message };
+        }
+      }
       await loadRequests();
       return { success: true };
     }
@@ -763,6 +795,31 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
 
     return { success: true };
+  };
+
+  const regionalForwardRequest = async (id: string, remarks?: string, voice?: ActionVoice | null): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!isBackendConnected) return { success: false, error: 'Regional Head forwarding needs the live backend' };
+    try {
+      await uploadActionVoice(id, voice);
+      const { error } = await supabase.rpc('regional_forward_request', {
+        p_request_id: id,
+        p_remarks: remarks?.trim() || null,
+      });
+      if (error) throw error;
+      await loadRequests();
+      return { success: true };
+    } catch (err: unknown) {
+      return { success: false, error: errMsg(err) };
+    }
+  };
+
+  const loadCategoryOptions = async (): Promise<CategoryOptions> => {
+    if (!isBackendConnected || !user) return { required: false, categories: [] };
+    const { data, error } = await supabase.rpc('request_category_options');
+    if (error || !data) return { required: false, categories: [] };
+    const d = data as Partial<CategoryOptions>;
+    return { required: !!d.required, categories: d.categories ?? [] };
   };
 
   const returnRequest = async (id: string, remarks: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
@@ -1494,6 +1551,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         withdrawRequest,
         routeRequest,
         forwardRequest,
+        regionalForwardRequest,
+        loadCategoryOptions,
         returnRequest,
         rejectRequest,
         approveRequest,

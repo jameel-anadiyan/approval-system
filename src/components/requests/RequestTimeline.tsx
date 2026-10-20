@@ -40,6 +40,7 @@ export const RequestTimeline: React.FC<RequestTimelineProps> = ({ actions }) => 
       case 'routed_A':
       case 'routed_B':
       case 'forwarded':
+      case 'regional_forwarded':
         return <CornerDownRight className="w-4 h-4 text-indigo-600" />;
       case 'consultation_requested':
         return <Users className="w-4 h-4 text-purple-600" />;

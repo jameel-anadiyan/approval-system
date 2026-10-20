@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import type { RequestStatus } from '../../types/database';
 
 const ALL_STATUSES: RequestStatus[] = [
+  'pending_regional_review',
   'submitted',
   'pending_head_review',
   'pending_head_approval',

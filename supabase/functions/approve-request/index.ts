@@ -11,6 +11,7 @@ const ACTION_LABEL: Record<string, string> = {
   forwarded: "Reviewed and forwarded to Admin", returned: "Returned for correction", rejected: "Rejected",
   withdrawn: "Withdrawn", approved: "Approved", paid: "Marked as paid",
   sent_for_quote_selection: "Sent for quotation selection", quote_selected: "Best quotation selected",
+  regional_forwarded: "Forwarded by Regional Head to clerk",
 };
 
 function ist(d: string | Date, withTime = true): string {

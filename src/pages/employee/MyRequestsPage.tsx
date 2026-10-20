@@ -25,6 +25,7 @@ export const MyRequestsPage: React.FC = () => {
         return myRequests.filter((r) =>
           [
             'submitted',
+            'pending_regional_review',
             'pending_head_review',
             'pending_head_approval',
             'pending_admin_approval',

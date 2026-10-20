@@ -16,7 +16,8 @@ import {
   quoteSummary, validateQuotes, newQuoteFiles,
 } from '../../components/requests/AssetQuotations';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck } from 'lucide-react';
+import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
@@ -50,6 +51,8 @@ export const NewRequestPage: React.FC = () => {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef<boolean>(false);
+  const categoryOptions = useCategoryOptions();
+  const [categoryId, setCategoryId] = useState('');
 
   const baseAmount = parseFloat(amountStr) || 0;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
@@ -107,6 +110,7 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const validate = (forDraft: boolean): string | null => {
+    if (!forDraft && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
     if (type === 'asset') {
       if (!asset.asset_name.trim()) return 'Enter the asset you want to buy.';
       return validateQuotes(quotes, forDraft);
@@ -144,6 +148,7 @@ export const NewRequestPage: React.FC = () => {
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
+        category_id: categoryOptions.required ? categoryId || null : null,
       });
       if (!draftRes.success || !draftRes.id) {
         if (draftRes.id) {
@@ -197,6 +202,12 @@ export const NewRequestPage: React.FC = () => {
           {user?.shop ? <>Shop: <span className="font-semibold text-slate-700">{user.shop.name}</span> · </> : null}
           Choose the request type, fill the form and submit for approval.
         </p>
+        {user?.role === 'employee' && user.regional_head_id && (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 rounded-lg px-2.5 py-1">
+            <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
+            Your request goes to your Regional Head first, who forwards it to the clerk.
+          </p>
+        )}
       </div>
 
       <form onSubmit={(e) => { e.preventDefault(); save(true); }} className="space-y-6">
@@ -235,6 +246,8 @@ export const NewRequestPage: React.FC = () => {
           <h2 className="text-sm font-bold text-slate-800 font-display border-b border-slate-100 pb-2">
             {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : 'Request Information'}
           </h2>
+
+          <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">

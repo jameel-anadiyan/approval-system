@@ -14,6 +14,7 @@ import {
   AssetFields, assetFromDetails, toAssetDetails, QuotationsEditor, QuoteRow, quotesFromFiles, quoteSummary,
   validateQuotes, newQuoteFiles,
 } from './AssetQuotations';
+import { WorkCategoryField, useCategoryOptions } from './WorkCategoryField';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -42,6 +43,8 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [asset, setAsset] = useState(() => assetFromDetails(request.details));
   const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
+  const categoryOptions = useCategoryOptions();
+  const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +92,9 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     const v = type === 'discount' ? validateDiscount(discount) : type === 'exhibition' ? validateExhibition(exhibition)
       : type === 'asset' ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true)) : null;
     if (v) return setError(v);
+    if (categoryOptions.required && !categoryOptions.categories.some((c) => c.id === categoryId)) {
+      return setError('Please select the work category.');
+    }
     saveLockRef.current = true;
     setBusy(true);
     try {
@@ -97,6 +103,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         amount: type === 'general' ? generalTotal : amount,
         notes: notes.trim() || undefined,
         details: getDetails(),
+        category_id: categoryOptions.required ? categoryId || null : undefined,
       });
       if (!upd.success) throw new Error(upd.error);
       if (type === 'asset') {
@@ -135,6 +142,8 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
             className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
+        <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
+          currentName={request.category_name} />
         {type === 'general' && (
           <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80">
             <div>

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -14,6 +14,9 @@ import { ApproveModal } from '../../components/portals/ApproveModal';
 import { ReturnModal } from '../../components/portals/ReturnModal';
 import { RejectModal } from '../../components/portals/RejectModal';
 import { ForwardModal } from '../../components/portals/ForwardModal';
+import { RegionalForwardModal } from '../../components/portals/RegionalForwardModal';
+import { isMyRoutingRequest } from '../../lib/workflow';
+import { supabase } from '../../lib/supabase';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { ConsultHeadsModal } from '../../components/portals/ConsultHeadsModal';
 import { RespondConsultationModal } from '../../components/portals/RespondConsultationModal';
@@ -73,6 +76,7 @@ export const RequestDetailPage: React.FC = () => {
     deleteDraft,
     routeRequest,
     forwardRequest,
+    regionalForwardRequest,
     returnRequest,
     rejectRequest,
     approveRequest,
@@ -82,7 +86,7 @@ export const RequestDetailPage: React.FC = () => {
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'regional_forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | null
   >(null);
   const [consultInitialStatus, setConsultInitialStatus] = useState<'agreed' | 'disagreed' | null>(null);
   const [copiedNo, setCopiedNo] = useState(false);
@@ -95,6 +99,30 @@ export const RequestDetailPage: React.FC = () => {
   );
 
   const request = id ? getRequestById(id) : undefined;
+
+  // The department Head may forward / return on the Regional Head's behalf only when that
+  // Regional Head has been deactivated (the server enforces the same rule).
+  const [regionalHeadInactive, setRegionalHeadInactive] = useState(false);
+  const waitingRegionalId =
+    role === 'head' && request?.status === 'pending_regional_review' ? request.regional_head_id ?? null : null;
+  useEffect(() => {
+    if (!waitingRegionalId) {
+      setRegionalHeadInactive(false);
+      return;
+    }
+    let alive = true;
+    supabase
+      .from('profiles')
+      .select('is_active')
+      .eq('id', waitingRegionalId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (alive) setRegionalHeadInactive(!data?.is_active);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [waitingRegionalId]);
 
   if (!request && isLoading) {
     return (
@@ -182,7 +210,7 @@ export const RequestDetailPage: React.FC = () => {
   const voiceNotes = (request.files || []).filter((f) => {
     if (f.kind !== 'voice_note') return false;
     // Clerks, heads, and admins can view all voice notes
-    if (role === 'admin' || role === 'head' || role === 'clerk') return true;
+    if (role === 'admin' || role === 'head' || role === 'clerk' || role === 'regional_head') return true;
     // Requester only sees their own audio notes
     return !f.added_by || f.added_by === user?.id || f.added_by === request.requester_id;
   });
@@ -200,6 +228,14 @@ export const RequestDetailPage: React.FC = () => {
     request.status === 'approved' &&
     (request.owner_head_id === user?.id || (Boolean(user?.department_id) && user?.department_id === request.department_id));
   const originalDocs = (request.files || []).filter((f) => f.kind === 'document' && !f.clarification_id);
+  // Regional Head: forward to clerk or return (never approve / reject).
+  const canRegionalAct =
+    request.status === 'pending_regional_review' &&
+    !isOwner &&
+    ((role === 'regional_head' && request.regional_head_id === user?.id) ||
+      (role === 'head' && user?.department_id === request.department_id && regionalHeadInactive));
+  // Clerk: only the clerk(s) of the request's work category route / return it.
+  const canClerkAct = role === 'clerk' && isMyRoutingRequest(request, user);
 
   const copyApprovalNo = (no: string) => {
     navigator.clipboard.writeText(no);
@@ -426,6 +462,28 @@ export const RequestDetailPage: React.FC = () => {
                   </span>
                 </div>
               )}
+              {request.regional_head_name && (
+                <div>
+                  <span className="text-slate-400 font-medium block">Regional Head</span>
+                  <span className="font-bold text-cyan-900 mt-0.5 flex items-center gap-1">
+                    <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
+                    {request.regional_head_name}
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    {request.regional_forwarded_at
+                      ? `Forwarded ${formatISTDate(request.regional_forwarded_at, false)}`
+                      : request.status === 'pending_regional_review'
+                        ? 'Waiting to forward'
+                        : 'Did not forward'}
+                  </span>
+                </div>
+              )}
+              {request.category_name && (
+                <div>
+                  <span className="text-slate-400 font-medium block">Work Category</span>
+                  <span className="font-bold text-indigo-800 mt-0.5 block">{request.category_name}</span>
+                </div>
+              )}
               <div>
                 <span className="text-slate-400 font-medium block">Submitted Date</span>
                 <span className="font-semibold text-slate-700 mt-0.5 block">
@@ -641,7 +699,7 @@ export const RequestDetailPage: React.FC = () => {
       <div className="action-bar">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap">
           <div className="text-xs text-slate-500 hidden sm:block">
-            Signed in as: <strong className="text-slate-800">{user?.full_name}</strong> ({role})
+            Signed in as: <strong className="text-slate-800">{user?.full_name}</strong> ({role ? ROLE_LABELS[role] ?? role : ''})
           </div>
 
           <div className="action-bar-buttons flex items-center gap-2 flex-wrap w-full sm:w-auto justify-end">
@@ -809,7 +867,7 @@ export const RequestDetailPage: React.FC = () => {
               </button>
             )}
 
-            {isOwner && (request.status === 'submitted' || request.status === 'returned') && (
+            {isOwner && (request.status === 'submitted' || request.status === 'pending_regional_review' || request.status === 'returned') && (
               <button
                 type="button"
                 id="withdraw-request"
@@ -826,8 +884,47 @@ export const RequestDetailPage: React.FC = () => {
               </button>
             )}
 
+            {/* Regional Head Actions: forward to clerk or return (no approve / reject) */}
+            {canRegionalAct && (
+              <>
+                <button
+                  type="button"
+                  id="regional-return"
+                  onClick={() => setModalState('return')}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-amber-200 text-amber-800 bg-amber-50 font-semibold text-xs hover:bg-amber-100"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Return for Correction</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="regional-forward"
+                  onClick={() => setModalState('regional_forward')}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-cyan-600 text-white font-semibold text-xs shadow-md hover:bg-cyan-700"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{role === 'head' ? 'Forward to Clerk (Regional Head inactive)' : 'Forward to Clerk'}</span>
+                </button>
+              </>
+            )}
+
+            {request.status === 'pending_regional_review' && !canRegionalAct && !isOwner && request.regional_head_name && (
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-800 font-semibold text-xs">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Waiting for Regional Head {request.regional_head_name}</span>
+              </span>
+            )}
+
+            {role === 'clerk' && request.status === 'submitted' && !canClerkAct && (
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-semibold text-xs">
+                <Clock className="w-3.5 h-3.5" />
+                <span>With the {request.category_name || 'assigned'} clerk</span>
+              </span>
+            )}
+
             {/* Clerk Actions */}
-            {role === 'clerk' && request.status === 'submitted' && (
+            {canClerkAct && (
               <>
                 <button
                   type="button"
@@ -1141,6 +1238,15 @@ export const RequestDetailPage: React.FC = () => {
           onClose={() => setModalState(null)}
           request={request}
           onForward={(rm, v) => orThrow(forwardRequest(request.id, rm, v), 'Forwarded to Admin.')}
+        />
+      )}
+
+      {modalState === 'regional_forward' && (
+        <RegionalForwardModal
+          isOpen={true}
+          onClose={() => setModalState(null)}
+          request={request}
+          onForward={(rm, v) => orThrow(regionalForwardRequest(request.id, rm, v), 'Forwarded to the clerk.')}
         />
       )}
 

@@ -37,6 +37,8 @@ export const Header: React.FC = () => {
         return '/clerk';
       case 'disbursement':
         return '/disbursement';
+      case 'regional_head':
+        return '/regional';
       case 'employee':
       default:
         return '/my';

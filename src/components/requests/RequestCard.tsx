@@ -4,7 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
 import { useRequests } from '../../context/RequestContext';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag } from 'lucide-react';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -80,6 +80,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               Clarification Needed
             </span>
           )}
+          {request.category_name && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
+              <Tag className="w-3 h-3" />
+              {request.category_name}
+            </span>
+          )}
         </div>
         <StatusBadge status={request.status} requestType={rType} size="sm" />
       </div>
@@ -118,6 +124,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             <div className="text-[11px] text-indigo-700 font-medium flex items-center justify-end gap-1 mt-0.5">
               <UserCheck className="w-3 h-3 text-indigo-500 shrink-0" />
               <span>Head: <strong className="font-semibold text-slate-800">{request.owner_head_name}</strong></span>
+            </div>
+          )}
+          {request.regional_head_name && (
+            <div className="text-[11px] text-cyan-800 font-medium flex items-center justify-end gap-1 mt-0.5">
+              <UserCheck className="w-3 h-3 text-cyan-600 shrink-0" />
+              <span>Regional: <strong className="font-semibold text-slate-800">{request.regional_head_name}</strong></span>
             </div>
           )}
           {request.shop_name && (

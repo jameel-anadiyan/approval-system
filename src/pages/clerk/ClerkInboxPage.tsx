@@ -9,6 +9,7 @@ import { ReturnModal } from '../../components/portals/ReturnModal';
 import { RequestRecord } from '../../types/database';
 import { Inbox, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { formatINRWhole } from '../../lib/formatters';
+import { isMyRoutingRequest } from '../../lib/workflow';
 
 export const ClerkInboxPage: React.FC = () => {
   const { user } = useAuth();
@@ -18,10 +19,11 @@ export const ClerkInboxPage: React.FC = () => {
   const [activeRequest, setActiveRequest] = useState<RequestRecord | null>(null);
   const [modalType, setModalType] = useState<'route' | 'return' | null>(null);
 
-  // Clerk inbox: requests in 'submitted' status in own department (oldest first by default)
-  const pendingRouting = requests.filter(
-    (r) => r.status === 'submitted' && (!user?.department_id || r.department_id === user.department_id)
-  );
+  // Clerk inbox: submitted requests of own department in my work categories (oldest first by default)
+  const pendingRouting = requests.filter((r) => isMyRoutingRequest(r, user));
+  const otherClerksCount = requests.filter(
+    (r) => r.status === 'submitted' && r.department_id === user?.department_id && !isMyRoutingRequest(r, user)
+  ).length;
   const { filters, setFilters, result: visible } = useRequestFilters(pendingRouting, { sort: 'oldest' });
 
   return (
@@ -39,6 +41,11 @@ export const ClerkInboxPage: React.FC = () => {
         </div>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
           Review newly submitted department vouchers (oldest first) and assign approval routes.
+          {otherClerksCount > 0 && (
+            <span className="block text-[11px] text-slate-400 mt-0.5">
+              {otherClerksCount} more waiting with other clerks (other work categories).
+            </span>
+          )}
         </p>
       </div>
 

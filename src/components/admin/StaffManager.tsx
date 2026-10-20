@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
 import type { AppRole, Profile } from '../../types/database';
 import { UserModal } from './UserModal';
-import { AccessModal, rolesWithTypes } from './AccessFields';
+import { AccessModal, coveringRegionalHeads, rolesWithTypes } from './AccessFields';
+import { WorkCategoriesPanel } from './WorkCategoriesPanel';
 import { CredentialsModal } from './CredentialsModal';
 import { PhotoUploadModal } from './PhotoUploadModal';
 import { UserAvatar } from '../common/UserAvatar';
@@ -21,10 +22,12 @@ interface StaffManagerProps {
   addLabel: string;
   /** Admin-only: manage seal & signature for listed users */
   showCredentials?: boolean;
+  /** Show the department Work Categories panel (clerk split) */
+  manageCategories?: boolean;
 }
 
 export const StaffManager: React.FC<StaffManagerProps> = ({
-  title, subtitle, icon: Icon, roles, addLabel, showCredentials = false,
+  title, subtitle, icon: Icon, roles, addLabel, showCredentials = false, manageCategories = false,
 }) => {
   const { user: me } = useAuth();
   const dir = useDirectory();
@@ -45,6 +48,12 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const listed = dir.users.filter(
     (u) => roles.includes(u.role) && (me?.role !== 'head' || u.department_id === me.department_id)
   );
+  const shopName = (id: string) => {
+    const s = dir.shops.find((x) => x.id === id);
+    return s ? s.name : 'Unknown shop';
+  };
+  const userName = (id?: string | null) => dir.users.find((x) => x.id === id)?.full_name;
+  const categoryName = (id: string) => dir.categories.find((c) => c.id === id)?.name ?? 'Unknown';
 
   const toggleActive = async (u: Profile) => {
     setBusyId(u.id);
@@ -107,6 +116,16 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
         </div>
       )}
 
+      {manageCategories && !dir.loading && (
+        <WorkCategoriesPanel
+          categories={dir.categories}
+          users={dir.users}
+          departments={dir.departments}
+          fixedDepartmentId={me?.role === 'head' ? me.department_id : null}
+          onSave={dir.saveCategory}
+        />
+      )}
+
       {dir.loading ? (
         <LoadingSpinner label="Loading users…" />
       ) : listed.length === 0 ? (
@@ -166,7 +185,13 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                 <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
                   <div className="flex items-center gap-1.5 text-slate-600 min-w-0">
                     <Store className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate">{u.shop ? `${u.shop.name} (${u.shop.code})` : 'No shop'}</span>
+                    <span className="truncate">
+                      {u.role === 'regional_head'
+                        ? (u.rh_shops || []).length
+                          ? (u.rh_shops || []).map((s) => shopName(s.shop_id)).join(', ')
+                          : 'No shops assigned'
+                        : u.shop ? `${u.shop.name} (${u.shop.code})` : 'No shop'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-1 flex-wrap">
                     {(u.allowed_types?.length ? u.allowed_types : ['general' as const]).map((t) => (
@@ -175,6 +200,35 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       </span>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {u.role === 'employee' && u.regional_head_id && (
+                <div className="flex items-center gap-1.5 text-xs text-cyan-800">
+                  <UserCheck className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+                  <span className="truncate">Regional Head: <strong>{userName(u.regional_head_id) ?? '—'}</strong></span>
+                </div>
+              )}
+              {u.role === 'employee' && u.is_active && !u.regional_head_id &&
+                coveringRegionalHeads(dir.users, u.department_id, u.shop_id ?? '').length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAccessTarget(u)}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5 text-left"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                  Regional Head not assigned — tap to assign
+                </button>
+              )}
+
+              {u.role === 'clerk' && (u.clerk_cats || []).length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                  <Tags className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  {(u.clerk_cats || []).map((c) => (
+                    <span key={c.category_id} className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700">
+                      {categoryName(c.category_id)}
+                    </span>
+                  ))}
                 </div>
               )}
 
@@ -249,6 +303,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
           onClose={() => setCreateOpen(false)}
           departments={dir.departments.filter((d) => d.is_active)}
           shops={dir.shops}
+          users={dir.users}
+          categories={dir.categories}
           allowedRoles={roles}
           onCreateUser={async (input) => {
             const res = await dir.createUser(input);
@@ -262,6 +318,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
         <AccessModal
           target={accessTarget}
           shops={dir.shops}
+          users={dir.users}
+          categories={dir.categories}
           onClose={() => setAccessTarget(null)}
           onSave={async (access) => {
             const res = await dir.updateAccess(accessTarget.id, access);

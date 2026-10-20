@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { AppRole, Department, RequestType, Shop } from '../../types/database';
+import { AppRole, Department, Profile, RequestType, Shop, WorkCategory } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
 import { UserPlus, ShieldAlert, Camera, Trash2 } from 'lucide-react';
-import { AccessFields, rolesWithTypes, validateAccess } from './AccessFields';
+import { AccessFields, ExtraAccess, coveringRegionalHeads, rolesWithTypes, validateAccess } from './AccessFields';
 import { compressAvatar } from '../../lib/imageUtils';
+import { ROLE_LABELS } from '../../lib/formatters';
 
 interface UserModalProps {
   isOpen: boolean;
   onClose: () => void;
   departments: Department[];
   shops?: Shop[];
+  /** Existing users (to list Regional Heads for a new employee) */
+  users?: Profile[];
+  categories?: WorkCategory[];
   allowedRoles?: AppRole[];
   onCreateUser: (data: {
     username: string;
@@ -22,6 +26,9 @@ interface UserModalProps {
     shop_id?: string | null;
     allowed_types?: RequestType[];
     photo?: string;
+    shop_ids?: string[];
+    category_ids?: string[];
+    regional_head_id?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -30,6 +37,8 @@ export const UserModal: React.FC<UserModalProps> = ({
   onClose,
   departments,
   shops = [],
+  users = [],
+  categories = [],
   allowedRoles = ['head', 'clerk', 'employee', 'disbursement'],
   onCreateUser,
 }) => {
@@ -43,6 +52,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   );
   const [shopId, setShopId] = useState('');
   const [types, setTypes] = useState<RequestType[]>(['general']);
+  const [extra, setExtra] = useState<ExtraAccess>({ shopIds: [], regionalHeadId: '', categoryIds: [] });
   const [password, setPassword] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,7 +72,10 @@ export const UserModal: React.FC<UserModalProps> = ({
     }
   };
 
-  const isDepartmentRequired = role === 'head' || role === 'clerk' || role === 'employee';
+  const isDepartmentRequired = role === 'head' || role === 'clerk' || role === 'employee' || role === 'regional_head';
+  const covering = role === 'employee' ? coveringRegionalHeads(users, departmentId, shopId) : [];
+  // A Regional Head picked for another shop no longer applies.
+  const regionalHeadId = covering.some((u) => u.id === extra.regionalHeadId) ? extra.regionalHeadId : '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,7 +92,7 @@ export const UserModal: React.FC<UserModalProps> = ({
       return;
     }
 
-    const accessErr = validateAccess(role, shopId, types);
+    const accessErr = validateAccess(role, shopId, types, { ...extra, regionalHeadId, coveringCount: covering.length });
     if (accessErr) {
       setError(accessErr);
       return;
@@ -95,9 +108,12 @@ export const UserModal: React.FC<UserModalProps> = ({
         role,
         department_id: isDepartmentRequired ? departmentId : null,
         password,
-        shop_id: withTypes ? shopId || null : null,
+        shop_id: withTypes && role !== 'regional_head' ? shopId || null : null,
         allowed_types: withTypes ? types : undefined,
         photo: photo || undefined,
+        ...(role === 'regional_head' ? { shop_ids: extra.shopIds } : {}),
+        ...(role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
+        ...(role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
       });
 
       if (res.success) {
@@ -106,6 +122,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         setDesignation('');
         setShopId('');
         setTypes(['general']);
+        setExtra({ shopIds: [], regionalHeadId: '', categoryIds: [] });
         setPhoto(null);
         onClose();
       } else {
@@ -228,7 +245,7 @@ export const UserModal: React.FC<UserModalProps> = ({
             >
               {allowedRoles.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {ROLE_LABELS[r] ?? r}
                 </option>
               ))}
             </select>
@@ -275,6 +292,11 @@ export const UserModal: React.FC<UserModalProps> = ({
           onShopChange={setShopId}
           types={types}
           onTypesChange={setTypes}
+          departmentId={departmentId}
+          users={users}
+          categories={categories}
+          extra={{ ...extra, regionalHeadId }}
+          onExtraChange={setExtra}
         />
 
         <div>

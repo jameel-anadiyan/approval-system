@@ -102,6 +102,14 @@ export const STATUS_META: Record<RequestStatus, StatusMeta> = {
     borderColor: 'border-sky-200',
     description: 'Waiting for department clerk to review and route.',
   },
+  pending_regional_review: {
+    label: 'With Regional Head',
+    badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-300 ring-1 ring-cyan-200',
+    bgLight: 'bg-cyan-50',
+    textColor: 'text-cyan-800',
+    borderColor: 'border-cyan-200',
+    description: 'Waiting for the Regional Head to check and forward to the clerk.',
+  },
   returned: {
     label: 'Returned for Correction',
     badgeClass: 'bg-amber-50 text-amber-800 border-amber-300 ring-1 ring-amber-200',
@@ -190,6 +198,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   clerk: 'Clerk',
   employee: 'Employee',
   disbursement: 'Disbursement',
+  regional_head: 'Regional Head',
 };
 
 export const ROLE_BADGES: Record<AppRole, string> = {
@@ -198,6 +207,7 @@ export const ROLE_BADGES: Record<AppRole, string> = {
   clerk: 'bg-blue-50 text-blue-700 border-blue-200',
   employee: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   disbursement: 'bg-amber-50 text-amber-700 border-amber-200',
+  regional_head: 'bg-cyan-50 text-cyan-800 border-cyan-200',
 };
 
 export const ACTION_LABELS: Record<string, string> = {
@@ -221,6 +231,7 @@ export const ACTION_LABELS: Record<string, string> = {
   clarification_files_signed: 'Clarification files stamped as Addendum',
   sent_for_quote_selection: 'Sent to Head for quotation selection',
   quote_selected: 'Best quotation selected',
+  regional_forwarded: 'Regional Head checked and forwarded to Clerk',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset'];
