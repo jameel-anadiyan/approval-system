@@ -5,6 +5,7 @@ import React from 'react';
 import { RequestDetails, ExhibitionProvide } from '../../types/database';
 import { formatINR, PROVIDE_LABELS } from '../../lib/formatters';
 import { Percent, CalendarDays, Megaphone, Target, IndianRupee } from 'lucide-react';
+import { GstSelector } from './GstSelector';
 
 const inputCls =
   'w-full text-base sm:text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors bg-white';
@@ -147,6 +148,7 @@ export interface ExhibitionForm {
   organiser_gstin: string;
   /** null until the requester answers Yes / No */
   gst_invoice: boolean | null;
+  gst_rate: string;
   provides: ExhibitionProvide[];
   provides_other: string;
   voucher_1000_qty: string;
@@ -164,7 +166,9 @@ export interface ExhibitionForm {
 export const emptyExhibition: ExhibitionForm = {
   event_name: '', organiser_contact: '', venue: '', event_dates: '', event_start: '', event_end: '',
   expected_footfall: '', stall_size_location: '',
-  amount_excl_gst: '', payment_mode_due: '', organiser_gstin: '', gst_invoice: null,
+  amount_excl_gst: '', payment_mode_due: '', organiser_gstin: '',
+  gst_invoice: true,
+  gst_rate: '18',
   provides: [], provides_other: '', voucher_1000_qty: '', voucher_500_qty: '', voucher_1000_min: '', voucher_500_min: '',
   voucher_validity: '', lucky_draw: '', winners_draw: '', other_costs: '', total_budget: '', purpose: '',
 };
@@ -176,7 +180,8 @@ export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm
   expected_footfall: str(d?.expected_footfall),
   stall_size_location: str(d?.stall_size_location), amount_excl_gst: str(d?.amount_excl_gst),
   payment_mode_due: str(d?.payment_mode_due), organiser_gstin: str(d?.organiser_gstin),
-  gst_invoice: d?.gst_invoice === undefined || d?.gst_invoice === null ? null : !!d.gst_invoice,
+  gst_invoice: d?.gst_invoice === undefined || d?.gst_invoice === null ? true : !!d.gst_invoice,
+  gst_rate: d?.gst_pct !== undefined && d?.gst_pct !== null ? String(d.gst_pct) : '18',
   provides: (d?.provides ?? []) as ExhibitionProvide[],
   provides_other: str(d?.provides_other), voucher_1000_qty: str(d?.voucher_1000_qty || ''),
   voucher_500_qty: str(d?.voucher_500_qty || ''), voucher_1000_min: str(d?.voucher_1000_min),
@@ -187,9 +192,10 @@ export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm
 
 export function exhibitionCalc(f: ExhibitionForm) {
   const excl = num(f.amount_excl_gst);
-  const pct = f.gst_invoice ? GST_RATE : 0;
-  const gst = Math.round(excl * pct) / 100;
-  const total = excl + gst;
+  const rate = num(f.gst_rate) || 18;
+  const pct = f.gst_invoice ? rate : 0;
+  const gst = Math.round(excl * (pct / 100) * 100) / 100;
+  const total = Math.round((excl + gst) * 100) / 100;
   const suggestedBudget = total + num(f.voucher_1000_qty) * 1000 + num(f.voucher_500_qty) * 500 + num(f.other_costs);
   const budget = f.total_budget.trim() ? num(f.total_budget) : suggestedBudget;
   return { excl, pct, gst, total, suggestedBudget, budget };
@@ -215,8 +221,13 @@ export const toExhibitionDetails = (f: ExhibitionForm): RequestDetails => {
     event_dates: f.event_start ? formatEventWindow(f.event_start, f.event_end) : f.event_dates.trim(),
     event_start: f.event_start || null, event_end: f.event_end || null,
     expected_footfall: f.expected_footfall.trim() || null,
-    stall_size_location: f.stall_size_location.trim() || null, amount_excl_gst: c.excl, gst_pct: c.pct,
-    payment_mode_due: f.payment_mode_due.trim() || null, organiser_gstin: f.organiser_gstin.trim() || null,
+    stall_size_location: f.stall_size_location.trim() || null,
+    amount_excl_gst: c.excl,
+    gst_pct: c.pct,
+    gst_amount: c.gst,
+    total_incl_gst: c.total,
+    payment_mode_due: f.payment_mode_due.trim() || null,
+    organiser_gstin: f.organiser_gstin.trim() || null,
     gst_invoice: !!f.gst_invoice, provides: f.provides, provides_other: f.provides_other.trim() || null,
     voucher_1000_qty: opt(f.voucher_1000_qty), voucher_500_qty: opt(f.voucher_500_qty),
     voucher_1000_min: opt(f.voucher_1000_min), voucher_500_min: opt(f.voucher_500_min),
@@ -316,40 +327,21 @@ export const ExhibitionFields: React.FC<{ value: ExhibitionForm; onChange: (v: E
 
       <Section n="2" title="Sponsorship amount" icon={<IndianRupee className="w-3.5 h-3.5 text-amber-300" />}>
         {field('amount_excl_gst', 'Amount (excl. GST) ₹', { required: true, type: 'number' })}
-        <div>
-          <label className={labelCls}>
-            GST Invoice Provided <span className="text-rose-500">*</span>
-          </label>
-          <div className="flex gap-2">
-            {[true, false].map((v) => (
-              <button
-                key={String(v)}
-                type="button"
-                id={`exh-gst-invoice-${v ? 'yes' : 'no'}`}
-                onClick={() => onChange({ ...value, gst_invoice: v })}
-                className={`flex-1 px-4 py-2.5 rounded-xl text-xs font-bold border transition-all ${
-                  value.gst_invoice === v
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                {v ? `Yes · GST ${GST_RATE}%` : 'No · GST 0%'}
-              </button>
-            ))}
-          </div>
+        
+        <div className="sm:col-span-2">
+          <GstSelector
+            hasGst={Boolean(value.gst_invoice)}
+            onHasGstChange={(has) => onChange({ ...value, gst_invoice: has })}
+            gstRate={num(value.gst_rate) || 18}
+            onGstRateChange={(r) => onChange({ ...value, gst_rate: String(r) })}
+            baseAmount={c.excl}
+            gstAmount={c.gst}
+            totalAmount={c.total}
+            baseLabel="Sponsorship (Excl. GST)"
+            totalLabel="Total Sponsorship (Incl. GST)"
+          />
         </div>
-        <div className="sm:col-span-2 grid grid-cols-2 gap-3">
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-              GST @ {value.gst_invoice === null ? '—' : `${c.pct}%`}
-            </span>
-            <span className="text-sm font-bold text-slate-800">{formatINR(c.gst)}</span>
-          </div>
-          <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
-            <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">Total incl. GST</span>
-            <span className="text-lg font-extrabold font-display text-amber-900">{formatINR(c.total)}</span>
-          </div>
-        </div>
+
         {field('payment_mode_due', 'Payment Mode & Due Date')}
         {field('organiser_gstin', 'Organiser GSTIN')}
       </Section>

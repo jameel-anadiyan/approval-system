@@ -9,6 +9,7 @@ import {
   DiscountFields, ExhibitionFields, discountFromDetails, exhibitionFromDetails, discountCalc, exhibitionCalc,
   validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
 } from './TypedRequestFields';
+import { GstSelector } from './GstSelector';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -25,7 +26,12 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     const gBase = request.details?.base_amount;
     return gBase ? String(gBase) : String(request.amount);
   });
-  const [hasGst, setHasGst] = useState<boolean>(() => Boolean(request.details?.has_gst));
+  const [hasGst, setHasGst] = useState<boolean>(() =>
+    request.details?.has_gst !== undefined ? Boolean(request.details.has_gst) : true
+  );
+  const [gstRate, setGstRate] = useState<number>(() =>
+    Number(request.details?.gst_rate ?? 18)
+  );
   const [notes, setNotes] = useState(request.notes || '');
   const [discount, setDiscount] = useState(() => discountFromDetails(request.details));
   const [exhibition, setExhibition] = useState(() => exhibitionFromDetails(request.details));
@@ -36,7 +42,6 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const saveLockRef = useRef(false);
 
   const baseAmount = parseFloat(amountStr) || 0;
-  const gstRate = 18;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
@@ -115,58 +120,15 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
               {baseAmount > 0 && <span className="text-xs text-slate-500 mt-1 block">Base amount: {formatINR(baseAmount)}</span>}
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Is GST applicable?
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setHasGst(false)}
-                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
-                    !hasGst
-                      ? 'bg-white border-indigo-600 text-indigo-700 ring-1 ring-indigo-600'
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  No GST (0%)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHasGst(true)}
-                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
-                    hasGst
-                      ? 'bg-indigo-50 border-indigo-600 text-indigo-700 ring-1 ring-indigo-600'
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  Yes, Add 18% GST
-                </button>
-              </div>
-            </div>
-
-            {hasGst && baseAmount > 0 && (
-              <div className="pt-2 border-t border-slate-200/80 space-y-1 text-xs text-slate-600">
-                <div className="flex justify-between">
-                  <span>Base (Excl. GST):</span>
-                  <span className="font-mono">{formatINR(baseAmount)}</span>
-                </div>
-                <div className="flex justify-between text-indigo-700 font-medium">
-                  <span>GST @ 18%:</span>
-                  <span className="font-mono">+{formatINR(gstAmount)}</span>
-                </div>
-                <div className="flex justify-between pt-1 border-t border-dashed border-slate-200 text-sm font-bold text-slate-900">
-                  <span>Total (Incl. GST):</span>
-                  <span className="font-mono text-indigo-600">{formatINR(generalTotal)}</span>
-                </div>
-              </div>
-            )}
-            {!hasGst && baseAmount > 0 && (
-              <div className="pt-2 border-t border-slate-200/80 flex justify-between text-sm font-bold text-slate-900">
-                <span className="text-xs">Total Amount:</span>
-                <span className="font-mono text-indigo-600">{formatINR(generalTotal)}</span>
-              </div>
-            )}
+            <GstSelector
+              hasGst={hasGst}
+              onHasGstChange={setHasGst}
+              gstRate={gstRate}
+              onGstRateChange={setGstRate}
+              baseAmount={baseAmount}
+              gstAmount={gstAmount}
+              totalAmount={generalTotal}
+            />
 
             {generalTotal > threshold && (
               <p className="text-[11px] text-amber-700 mt-1 font-medium">Above {formatINRWhole(threshold)}: this will need Admin approval (Route A).</p>

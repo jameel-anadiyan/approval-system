@@ -10,6 +10,7 @@ import {
   validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
   DiscountForm, ExhibitionForm,
 } from '../../components/requests/TypedRequestFields';
+import { GstSelector } from '../../components/requests/GstSelector';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
 import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban } from 'lucide-react';
 
@@ -31,7 +32,8 @@ export const NewRequestPage: React.FC = () => {
   const [type, setType] = useState<RequestType>(allowed[0] ?? 'general');
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
-  const [hasGst, setHasGst] = useState<boolean>(false);
+  const [hasGst, setHasGst] = useState<boolean>(true);
+  const [gstRate, setGstRate] = useState<number>(18);
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
   const [exhibition, setExhibition] = useState<ExhibitionForm>(emptyExhibition);
@@ -43,7 +45,6 @@ export const NewRequestPage: React.FC = () => {
   const submittingRef = useRef<boolean>(false);
 
   const baseAmount = parseFloat(amountStr) || 0;
-  const gstRate = 18;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
@@ -256,58 +257,15 @@ export const NewRequestPage: React.FC = () => {
                 {baseAmount > 0 && <span className="text-xs font-medium text-slate-600 mt-1 block">Base amount: {formatINR(baseAmount)}</span>}
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Is GST applicable? <span className="text-rose-500">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setHasGst(false)}
-                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
-                      !hasGst
-                        ? 'bg-white border-indigo-600 text-indigo-700 shadow-xs ring-1 ring-indigo-600'
-                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    No GST (0%)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHasGst(true)}
-                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
-                      hasGst
-                        ? 'bg-indigo-50 border-indigo-600 text-indigo-700 shadow-xs ring-1 ring-indigo-600'
-                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    Yes, Add 18% GST
-                  </button>
-                </div>
-              </div>
-
-              {hasGst && baseAmount > 0 && (
-                <div className="pt-2 border-t border-slate-200/80 space-y-1.5 text-xs text-slate-600">
-                  <div className="flex justify-between items-center">
-                    <span>Base Amount (Excl. GST):</span>
-                    <span className="font-mono font-medium">{formatINR(baseAmount)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-indigo-700 font-medium">
-                    <span>GST @ 18%:</span>
-                    <span className="font-mono">+{formatINR(gstAmount)}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-1 border-t border-dashed border-slate-200 text-sm font-bold text-slate-900">
-                    <span>Total (Incl. GST):</span>
-                    <span className="font-mono text-indigo-600">{formatINR(generalTotal)}</span>
-                  </div>
-                </div>
-              )}
-              {!hasGst && baseAmount > 0 && (
-                <div className="pt-2 border-t border-slate-200/80 flex justify-between items-center text-sm font-bold text-slate-900">
-                  <span className="text-xs">Total Amount:</span>
-                  <span className="font-mono text-indigo-600">{formatINR(generalTotal)}</span>
-                </div>
-              )}
+              <GstSelector
+                hasGst={hasGst}
+                onHasGstChange={setHasGst}
+                gstRate={gstRate}
+                onGstRateChange={setGstRate}
+                baseAmount={baseAmount}
+                gstAmount={gstAmount}
+                totalAmount={generalTotal}
+              />
             </div>
           )}
 
