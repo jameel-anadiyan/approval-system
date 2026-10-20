@@ -180,10 +180,57 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // ignore
       }
 
-      const { data, error } = await supabase
+      let data: any[] | null = null;
+      let error: any = null;
+
+      const res = await supabase
         .from('requests')
-        .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path)), disbursement_clarifications(*)')
+        .select(
+          '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))'
+        )
         .order('created_at', { ascending: false });
+
+      if (!res.error && res.data) {
+        data = res.data;
+      } else {
+        error = res.error;
+        console.warn('Initial requests load error:', res.error?.message);
+        // Fallback without consultations in case that has an issue
+        const coreRes = await supabase
+          .from('requests')
+          .select(
+            '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)'
+          )
+          .order('created_at', { ascending: false });
+        if (!coreRes.error && coreRes.data) {
+          data = coreRes.data;
+          error = null;
+        }
+      }
+
+      // Safe standalone fetch for disbursement clarifications so missing table/schema never blocks request list loading
+      if (!error && data && data.length > 0) {
+        try {
+          const { data: clarifs, error: clarifErr } = await supabase
+            .from('disbursement_clarifications')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (!clarifErr && clarifs && clarifs.length > 0) {
+            const map = new Map<string, DisbursementClarification[]>();
+            clarifs.forEach((c: any) => {
+              const list = map.get(c.request_id) || [];
+              list.push(c as DisbursementClarification);
+              map.set(c.request_id, list);
+            });
+            data.forEach((r: any) => {
+              r.disbursement_clarifications = map.get(r.id) || [];
+            });
+          }
+        } catch {
+          // Table not yet migrated; gracefully ignored so requests still display!
+        }
+      }
+
       // RLS decides what each role sees; never substitute demo data in live mode.
       setRequests(!error && data ? normalize(data as RequestRecord[], headsMap) : []);
       setIsLoading(false);
