@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { UserCheck } from 'lucide-react';
 import { useRequests } from '../../context/RequestContext';
 import type { UserTargetHead } from '../../types/database';
@@ -12,6 +12,7 @@ export const TargetHeadField: React.FC<{
   const { getUserTargetHeads } = useRequests();
   const [heads, setHeads] = useState<UserTargetHead[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const initialPickDone = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -19,10 +20,13 @@ export const TargetHeadField: React.FC<{
       if (!alive) return;
       setHeads(list);
       setLoaded(true);
-      // Auto-select default head if none selected yet
-      if (!value && list.length > 0) {
-        const def = list.find((h) => h.is_default) || list[0];
-        onChange(def.head_id);
+      // Auto-select default head on initial mount only if none selected yet
+      if (!initialPickDone.current && list.length > 0) {
+        initialPickDone.current = true;
+        if (!value) {
+          const def = list.find((h) => h.is_default) || list[0];
+          onChange(def.head_id);
+        }
       }
     });
     return () => {

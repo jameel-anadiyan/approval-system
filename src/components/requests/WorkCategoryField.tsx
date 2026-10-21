@@ -11,6 +11,7 @@ export function useCategoryOptions(targetHeadId?: string | null) {
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let alive = true;
+    setOptions({ required: false, categories: [] });
     setLoaded(false);
     loadCategoryOptions(targetHeadId).then((o) => {
       if (!alive) return;

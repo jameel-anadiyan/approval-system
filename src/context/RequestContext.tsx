@@ -845,24 +845,30 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const loadCategoryOptions = async (targetHeadId?: string | null): Promise<CategoryOptions> => {
-    if (!isBackendConnected || !user) return { required: false, categories: [] };
-    const { data, error } = await supabase.rpc('request_category_options', {
-      p_target_head_id: targetHeadId || null,
-    });
-    if (error || !data) return { required: false, categories: [] };
-    const d = data as Partial<CategoryOptions>;
-    return { required: !!d.required, categories: d.categories ?? [] };
-  };
+  const loadCategoryOptions = useCallback(
+    async (targetHeadId?: string | null): Promise<CategoryOptions> => {
+      if (!isBackendConnected || !user) return { required: false, categories: [] };
+      const { data, error } = await supabase.rpc('request_category_options', {
+        p_target_head_id: targetHeadId || null,
+      });
+      if (error || !data) return { required: false, categories: [] };
+      const d = data as Partial<CategoryOptions>;
+      return { required: !!d.required, categories: d.categories ?? [] };
+    },
+    [isBackendConnected, user]
+  );
 
-  const getUserTargetHeads = async (userId?: string): Promise<UserTargetHead[]> => {
-    if (!isBackendConnected || !user) return [];
-    const { data, error } = await supabase.rpc('get_user_target_heads', {
-      p_user_id: userId || null,
-    });
-    if (error || !data) return [];
-    return data as UserTargetHead[];
-  };
+  const getUserTargetHeads = useCallback(
+    async (userId?: string): Promise<UserTargetHead[]> => {
+      if (!isBackendConnected || !user) return [];
+      const { data, error } = await supabase.rpc('get_user_target_heads', {
+        p_user_id: userId || null,
+      });
+      if (error || !data) return [];
+      return data as UserTargetHead[];
+    },
+    [isBackendConnected, user]
+  );
 
   const returnRequest = async (id: string, remarks: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
