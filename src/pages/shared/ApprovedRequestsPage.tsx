@@ -8,10 +8,11 @@ import {
   Filter, ShieldCheck, Banknote, Sparkles
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState';
+import { canUserViewApprovedRequest } from '../../lib/workflow';
 import type { RequestType, RequestRecord } from '../../types/database';
 
 export const ApprovedRequestsPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { requests } = useRequests();
   const navigate = useNavigate();
 
@@ -19,10 +20,15 @@ export const ApprovedRequestsPage: React.FC = () => {
   const [selectedType, setSelectedType] = useState<string>('all');
   const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
 
-  // Filter approved or paid requests that the current user has access to
+  // Filter approved or paid requests that the current user has access to based on their role:
+  // - Head: only respective head's approvals (approved by this head or by admin for their department/scope)
+  // - Clerk: only applications they touched (routed by them or acted on)
+  // - Regional Head: only applications they touched (forwarded/managed by them or acted on)
+  // - Employee: strictly their own requests
+  // - Admin: all approved
   const approvedList = useMemo(() => {
-    return requests.filter((r) => r.status === 'approved' || r.status === 'paid');
-  }, [requests]);
+    return requests.filter((r) => canUserViewApprovedRequest(r, user));
+  }, [requests, user]);
 
   const filtered = useMemo(() => {
     return approvedList.filter((r) => {
@@ -76,7 +82,15 @@ export const ApprovedRequestsPage: React.FC = () => {
             <div>
               <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display">Approved Requests</h1>
               <p className="text-xs sm:text-sm text-slate-500">
-                Official approved and finalized requests with signed approval documents.
+                {role === 'head'
+                  ? 'Official approvals for your department, approved by you or admin.'
+                  : role === 'clerk'
+                  ? 'Official approvals for requests handled and routed by you.'
+                  : role === 'regional_head'
+                  ? 'Official approvals for requests submitted or forwarded by you.'
+                  : role === 'employee'
+                  ? 'Your official approved requests with signed approval documents.'
+                  : 'Official approved and finalized requests with signed approval documents.'}
               </p>
             </div>
           </div>
