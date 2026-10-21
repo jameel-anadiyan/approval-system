@@ -57,7 +57,7 @@ export function useDirectory() {
         supabase
           .from('profiles')
           .select(
-            '*, department:departments(*), shop:shops(*), rh_shops:regional_head_shops(shop_id), clerk_cats:clerk_categories(category_id), user_heads:user_heads(head_id, is_default)'
+            '*, department:departments(*), shop:shops(*), rh_shops:regional_head_shops!regional_head_shops_regional_head_id_fkey(shop_id), clerk_cats:clerk_categories!clerk_categories_clerk_id_fkey(category_id), user_heads:user_heads!user_heads_user_id_fkey(head_id, is_default)'
           )
           .order('created_at', { ascending: false }),
         supabase.from('work_categories').select('*').order('name'),
@@ -65,12 +65,44 @@ export function useDirectory() {
       setDepartments((d.data as Department[]) ?? []);
       setShops((s.data as Shop[]) ?? []);
       if (p.error) {
-        // Never lose the staff list because of the newer embeds.
-        const basic = await supabase
-          .from('profiles')
-          .select('*, department:departments(*), shop:shops(*)')
-          .order('created_at', { ascending: false });
-        setUsers((basic.data as Profile[]) ?? []);
+        console.warn('Profiles load with embeds failed, using multi-query fallback:', p.error.message);
+        try {
+          const [basicRes, rhShopsRes, clerkCatsRes, userHeadsRes] = await Promise.all([
+            supabase.from('profiles').select('*, department:departments(*), shop:shops(*)').order('created_at', { ascending: false }),
+            supabase.from('regional_head_shops').select('regional_head_id, shop_id'),
+            supabase.from('clerk_categories').select('clerk_id, category_id'),
+            supabase.from('user_heads').select('user_id, head_id, is_default'),
+          ]);
+          const rhMap: Record<string, { shop_id: string }[]> = {};
+          (rhShopsRes.data || []).forEach((r: any) => {
+            if (!rhMap[r.regional_head_id]) rhMap[r.regional_head_id] = [];
+            rhMap[r.regional_head_id].push({ shop_id: r.shop_id });
+          });
+          const catMap: Record<string, { category_id: string }[]> = {};
+          (clerkCatsRes.data || []).forEach((c: any) => {
+            if (!catMap[c.clerk_id]) catMap[c.clerk_id] = [];
+            catMap[c.clerk_id].push({ category_id: c.category_id });
+          });
+          const headMap: Record<string, { head_id: string; is_default: boolean }[]> = {};
+          (userHeadsRes.data || []).forEach((h: any) => {
+            if (!headMap[h.user_id]) headMap[h.user_id] = [];
+            headMap[h.user_id].push({ head_id: h.head_id, is_default: !!h.is_default });
+          });
+          const merged = ((basicRes.data as Profile[]) ?? []).map((u) => ({
+            ...u,
+            rh_shops: rhMap[u.id] || [],
+            clerk_cats: catMap[u.id] || [],
+            user_heads: headMap[u.id] || [],
+          }));
+          setUsers(merged);
+        } catch {
+          // Never lose the staff list
+          const basic = await supabase
+            .from('profiles')
+            .select('*, department:departments(*), shop:shops(*)')
+            .order('created_at', { ascending: false });
+          setUsers((basic.data as Profile[]) ?? []);
+        }
       } else {
         setUsers((p.data as Profile[]) ?? []);
       }
@@ -156,6 +188,9 @@ export function useDirectory() {
       updated_at: new Date().toISOString(), department: dept,
       shop_id: input.shop_id ?? null, shop, allowed_types: input.allowed_types ?? ['general'],
       photo_path: input.photo || null,
+      rh_shops: (input.shop_ids || []).map((shop_id) => ({ shop_id })),
+      clerk_cats: (input.category_ids || []).map((category_id) => ({ category_id })),
+      user_heads: (input.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === input.default_head_id })),
     }, ...prev]);
     return { success: true };
   };
@@ -169,7 +204,14 @@ export function useDirectory() {
       return { success: true };
     }
     const shop = shops.find((s) => s.id === access.shop_id) ?? null;
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...access, shop } : u)));
+    setUsers((prev) => prev.map((u) => (u.id === userId ? {
+      ...u,
+      ...access,
+      shop,
+      rh_shops: (access.shop_ids || []).map((shop_id) => ({ shop_id })),
+      clerk_cats: (access.category_ids || []).map((category_id) => ({ category_id })),
+      user_heads: (access.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === access.default_head_id })),
+    } : u)));
     return { success: true };
   };
 
