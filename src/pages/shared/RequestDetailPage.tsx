@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -241,6 +241,12 @@ export const RequestDetailPage: React.FC = () => {
   // Clerk: only the clerk(s) of the request's work category route / return it.
   const canClerkAct = role === 'clerk' && isMyRoutingRequest(request, user);
 
+  const latestReturnAction = useMemo(() => {
+    return (request.actions || [])
+      .filter((a) => a.action === 'returned')
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+  }, [request.actions]);
+
   const copyApprovalNo = (no: string) => {
     navigator.clipboard.writeText(no);
     setCopiedNo(true);
@@ -380,6 +386,74 @@ export const RequestDetailPage: React.FC = () => {
               <p className="text-slate-700 bg-white/80 border border-rose-100 rounded-lg px-2.5 py-1.5 break-words">
                 “{request.cancel_reason}”
               </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {request.status === 'returned' && (
+        <div
+          id="returned-banner"
+          className="mb-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-50/90 via-amber-50/60 to-white border-2 border-amber-300 shadow-sm flex items-start gap-3.5 animate-in fade-in"
+        >
+          <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <RotateCcw className="w-5 h-5" />
+          </div>
+          <div className="text-xs space-y-2 min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-sm font-extrabold text-amber-950 font-display">
+                Returned for Correction
+              </p>
+              {latestReturnAction?.created_at && (
+                <span className="text-[11px] font-semibold text-amber-800 bg-amber-100/70 border border-amber-200/80 px-2 py-0.5 rounded-md">
+                  {formatISTDate(latestReturnAction.created_at)}
+                </span>
+              )}
+            </div>
+
+            <p className="text-amber-900 leading-relaxed font-medium">
+              Returned by{' '}
+              <strong>{latestReturnAction?.actor_name || 'Reviewer'}</strong>
+              {latestReturnAction?.actor_role ? ` (${ROLE_LABELS[latestReturnAction.actor_role] || latestReturnAction.actor_role})` : ''}.
+              {isOwner
+                ? ' Please review the return remarks below, click Edit to update details or attachments, then click Resubmit.'
+                : ` Waiting for ${request.requester_name} to make corrections and resubmit.`}
+            </p>
+
+            {latestReturnAction?.remarks && (
+              <div className="text-slate-800 bg-white border border-amber-200 rounded-xl p-3.5 font-medium text-xs break-words shadow-2xs leading-relaxed">
+                <span className="font-bold text-amber-900 block mb-1">Reason / Instructions for correction:</span>
+                “{latestReturnAction.remarks}”
+              </div>
+            )}
+
+            {isOwner && (
+              <div className="pt-1 flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  id="returned-edit-btn"
+                  onClick={() => setModalState('edit')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-xs transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Edit Request</span>
+                </button>
+                <button
+                  type="button"
+                  id="returned-resubmit-btn"
+                  disabled={busy}
+                  onClick={() =>
+                    runInline(async () => {
+                      const res = await submitRequest(request.id);
+                      return res;
+                    }, 'Request resubmitted.')
+                  }
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs transition-colors disabled:opacity-50"
+                >
+                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span>Resubmit</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

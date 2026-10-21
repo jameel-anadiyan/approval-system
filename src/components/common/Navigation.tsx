@@ -22,6 +22,7 @@ import {
   Percent,
   CheckCircle2,
   Send,
+  RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -47,6 +48,16 @@ export const Navigation: React.FC = () => {
   const clerkToRouteCount = requests.filter((r) => isMyRoutingRequest(r, user)).length;
 
   const regionalToForwardCount = requests.filter((r) => isMyRegionalRequest(r, user)).length;
+
+  const regionalReturnedCount = requests.filter(
+    (r) =>
+      (r.regional_head_id === user?.id || (r.requester_id === user?.id && r.status !== 'draft')) &&
+      r.status === 'returned'
+  ).length;
+
+  const employeeReturnedCount = requests.filter(
+    (r) => r.requester_id === user?.id && r.status === 'returned'
+  ).length;
 
   const headToApproveCount = requests.filter(
     (r) => r.status === 'pending_head_approval' && (!user?.department_id || r.department_id === user.department_id)
@@ -77,7 +88,7 @@ export const Navigation: React.FC = () => {
   switch (role) {
     case 'employee':
       mainNavItems = [
-        { label: 'My Requests', path: '/my', icon: FileText },
+        { label: 'My Requests', path: '/my', icon: FileText, badge: employeeReturnedCount },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
         { label: 'Profile', path: '/profile', icon: UserCheck },
@@ -88,6 +99,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
         { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
+        { label: 'Returned', path: '/regional/returned', icon: RotateCcw, badge: regionalReturnedCount },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];

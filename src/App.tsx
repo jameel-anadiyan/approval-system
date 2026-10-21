@@ -162,6 +162,7 @@ export const App: React.FC = () => {
                 <Route element={<RequireRole roles={['regional_head']} />}>
                   <Route path="regional" element={<RegionalInboxPage />} />
                   <Route path="regional/forwarded" element={<RegionalInboxPage />} />
+                  <Route path="regional/returned" element={<RegionalInboxPage />} />
                 </Route>
 
                 {/* Clerk routes */}
