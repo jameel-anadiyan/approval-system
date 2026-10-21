@@ -29,6 +29,8 @@ interface UserModalProps {
     shop_ids?: string[];
     category_ids?: string[];
     regional_head_id?: string | null;
+    head_ids?: string[];
+    default_head_id?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -52,7 +54,21 @@ export const UserModal: React.FC<UserModalProps> = ({
   );
   const [shopId, setShopId] = useState('');
   const [types, setTypes] = useState<RequestType[]>(['general']);
-  const [extra, setExtra] = useState<ExtraAccess>({ shopIds: [], regionalHeadId: '', categoryIds: [] });
+
+  const initialHeadId =
+    user?.role === 'head'
+      ? user.id
+      : (users.find((u) => u.role === 'head' && u.department_id === (user?.department_id || departments[0]?.id))?.id ||
+         users.find((u) => u.role === 'head')?.id ||
+         '');
+
+  const [extra, setExtra] = useState<ExtraAccess>({
+    shopIds: [],
+    regionalHeadId: '',
+    categoryIds: [],
+    headIds: initialHeadId ? [initialHeadId] : [],
+    defaultHeadId: initialHeadId,
+  });
   const [password, setPassword] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -101,6 +117,7 @@ export const UserModal: React.FC<UserModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      const defaultHead = extra.defaultHeadId || (extra.headIds.length > 0 ? extra.headIds[0] : null);
       const res = await onCreateUser({
         username: cleanUsername,
         full_name: fullName.trim(),
@@ -114,6 +131,9 @@ export const UserModal: React.FC<UserModalProps> = ({
         ...(role === 'regional_head' ? { shop_ids: extra.shopIds } : {}),
         ...(role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
         ...(role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
+        ...(role === 'employee' || role === 'regional_head'
+          ? { head_ids: extra.headIds, default_head_id: defaultHead }
+          : {}),
       });
 
       if (res.success) {
@@ -122,7 +142,13 @@ export const UserModal: React.FC<UserModalProps> = ({
         setDesignation('');
         setShopId('');
         setTypes(['general']);
-        setExtra({ shopIds: [], regionalHeadId: '', categoryIds: [] });
+        setExtra({
+          shopIds: [],
+          regionalHeadId: '',
+          categoryIds: [],
+          headIds: initialHeadId ? [initialHeadId] : [],
+          defaultHeadId: initialHeadId,
+        });
         setPhoto(null);
         onClose();
       } else {

@@ -20,6 +20,8 @@ import {
   FileSpreadsheet,
   Store,
   Percent,
+  CheckCircle2,
+  Send,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -76,6 +78,7 @@ export const Navigation: React.FC = () => {
     case 'employee':
       mainNavItems = [
         { label: 'My Requests', path: '/my', icon: FileText },
+        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
         { label: 'Profile', path: '/profile', icon: UserCheck },
       ];
@@ -84,16 +87,21 @@ export const Navigation: React.FC = () => {
     case 'regional_head':
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
-        { label: 'My Requests', path: '/my', icon: FileText },
+        { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
+        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
-      moreNavItems = [{ label: 'Profile', path: '/profile', icon: UserCheck }];
+      moreNavItems = [
+        { label: 'My Requests', path: '/my', icon: FileText },
+        { label: 'Profile', path: '/profile', icon: UserCheck },
+      ];
       break;
 
     case 'clerk':
       mainNavItems = [
         { label: 'To Route', path: '/clerk', icon: Inbox, badge: clerkToRouteCount },
         { label: 'Department', path: '/clerk/department', icon: Building2 },
+        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
@@ -106,10 +114,11 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
-        { label: 'From Other Heads', path: '/head/consultations', icon: Users, badge: headConsultationsCount },
+        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
+        { label: 'From Other Heads', path: '/head/consultations', icon: Users, badge: headConsultationsCount },
         { label: 'My Seal & Sign', path: '/head/credentials', icon: ShieldCheck },
         ...(canViewDiscountReport(user) ? [{ label: 'Discount Report', path: '/reports/discounts', icon: Percent }] : []),
         { label: 'Staff Users', path: '/head/users', icon: Users },
@@ -123,6 +132,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
+        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'All Requests', path: '/admin/requests', icon: FileSpreadsheet },
       ];
       moreNavItems = [
@@ -144,6 +154,7 @@ export const Navigation: React.FC = () => {
         { label: 'Search', path: '/disbursement', icon: Search },
         { label: 'Awaiting Pay', path: '/disbursement/awaiting', icon: Clock, badge: disbAwaitingCount },
         { label: 'Paid History', path: '/disbursement/paid', icon: CheckCircle },
+        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
       ];
       moreNavItems = [
         { label: 'Verify Scan', path: '/disbursement/verify', icon: ShieldCheck },
@@ -163,7 +174,7 @@ export const Navigation: React.FC = () => {
             <NavLink
               key={item.path}
               to={item.path}
-              end={item.path === '/admin' || item.path === '/head' || item.path === '/clerk' || item.path === '/disbursement' || item.path === '/my'}
+              end={item.path === '/admin' || item.path === '/head' || item.path === '/clerk' || item.path === '/disbursement' || item.path === '/my' || item.path === '/regional' || item.path === '/approved'}
               className={({ isActive }) =>
                 `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
@@ -209,7 +220,7 @@ export const Navigation: React.FC = () => {
             <NavLink
               key={item.path}
               to={item.path}
-              end={item.path === '/admin' || item.path === '/head' || item.path === '/clerk' || item.path === '/disbursement' || item.path === '/my'}
+              end={item.path === '/admin' || item.path === '/head' || item.path === '/clerk' || item.path === '/disbursement' || item.path === '/my' || item.path === '/regional' || item.path === '/approved'}
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center flex-1 h-full relative transition-colors ${
                   isActive

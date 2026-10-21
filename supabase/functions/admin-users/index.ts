@@ -11,7 +11,7 @@ import {
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
 
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
-const REQUEST_TYPES = ["general", "discount", "exhibition", "asset"] as const;
+const REQUEST_TYPES = ["general", "discount", "exhibition", "asset", "non_cash"] as const;
 
 const DEPT_ROLES: Role[] = ["head", "clerk", "employee", "regional_head"];
 
@@ -93,6 +93,42 @@ async function saveClerkCategories(admin: SupabaseClient, userId: string, catego
   if (error) throw new HttpError(400, "profile_error", error.message);
 }
 
+/** Parse assigned Heads for an employee or regional head, ensuring active heads and valid default. */
+async function parseHeadIds(
+  admin: SupabaseClient, v: unknown, defaultCandidate?: string | null,
+): Promise<{ headIds: string[]; defaultHeadId: string | null }> {
+  let ids = [...new Set((Array.isArray(v) ? v : []).map((x) => requireUuid(x, "Head")))];
+  if (defaultCandidate && !ids.includes(defaultCandidate)) {
+    ids.unshift(defaultCandidate);
+  }
+  if (!ids.length) {
+    const { data: activeHeads } = await admin.from("profiles").select("id").eq("role", "head").eq("is_active", true);
+    if (activeHeads?.length) ids = activeHeads.map((h) => h.id as string);
+  }
+  const { data } = await admin.from("profiles").select("id").in("id", ids).eq("role", "head").eq("is_active", true);
+  const validIds = (data ?? []).map((h) => h.id as string);
+  const defId = defaultCandidate && validIds.includes(defaultCandidate) ? defaultCandidate : (validIds[0] ?? null);
+  return { headIds: validIds, defaultHeadId: defId };
+}
+
+async function saveUserHeads(admin: SupabaseClient, userId: string, headIds: string[], defaultHeadId: string | null) {
+  const { error: dErr } = await admin.from("user_heads").delete().eq("user_id", userId);
+  if (dErr) throw new HttpError(400, "profile_error", dErr.message);
+  if (headIds.length) {
+    const { error: insErr } = await admin.from("user_heads").insert(
+      headIds.map((head_id) => ({
+        user_id: userId,
+        head_id,
+        is_default: head_id === defaultHeadId,
+      }))
+    );
+    if (insErr) throw new HttpError(400, "profile_error", insErr.message);
+  }
+  const { error: pErr } = await admin.from("profiles").update({ default_head_id: defaultHeadId }).eq("id", userId);
+  if (pErr) throw new HttpError(400, "profile_error", pErr.message);
+}
+
+
 function canManage(me: Profile, target: { role: Role; department_id: string | null }): boolean {
   if (me.role === "admin") return true;
   if (me.role === "head") {
@@ -160,6 +196,11 @@ Deno.serve(handle(async (req) => {
         if (head) throw new HttpError(409, "head_exists", "This department already has an active Head. Deactivate them first.");
       }
 
+      const { headIds, defaultHeadId } = (role === "employee" || role === "regional_head")
+        ? await parseHeadIds(admin, body.head_ids, me.role === "head" ? me.id : (body.default_head_id ? requireUuid(body.default_head_id, "Default Head") : null))
+        : { headIds: [], defaultHeadId: null };
+
+
       const { data: created, error } = await admin.auth.admin.createUser({
         email: `${username}@${LOGIN_DOMAIN}`, password, email_confirm: true,
         user_metadata: { username, full_name },
@@ -177,13 +218,16 @@ Deno.serve(handle(async (req) => {
       try {
         if (role === "regional_head") await saveRegionalShops(admin, created.user.id, shop_ids);
         if (role === "clerk") await saveClerkCategories(admin, created.user.id, category_ids);
+        if (role === "employee" || role === "regional_head") {
+          await saveUserHeads(admin, created.user.id, headIds, defaultHeadId);
+        }
       } catch (e) {
         await admin.from("profiles").delete().eq("id", created.user.id);
         await admin.auth.admin.deleteUser(created.user.id);
         throw e;
       }
       await audit(admin, me, "user_created", "user", created.user.id,
-        { username, role, department_id, shop_id, allowed_types, shop_ids, category_ids, regional_head_id });
+        { username, role, department_id, shop_id, allowed_types, shop_ids, category_ids, regional_head_id, head_ids: headIds, default_head_id: defaultHeadId });
       return json({ id: created.user.id, username });
     }
 
@@ -245,6 +289,12 @@ Deno.serve(handle(async (req) => {
       if (error) throw new HttpError(400, "profile_error", error.message);
       if (target.role === "regional_head") await saveRegionalShops(admin, userId, shop_ids);
       if (target.role === "clerk" && Array.isArray(body.category_ids)) await saveClerkCategories(admin, userId, category_ids);
+      if ((target.role === "employee" || target.role === "regional_head") && (Array.isArray(body.head_ids) || body.default_head_id)) {
+        const { headIds, defaultHeadId } = await parseHeadIds(
+          admin, body.head_ids, body.default_head_id ? requireUuid(body.default_head_id, "Default Head") : null
+        );
+        await saveUserHeads(admin, userId, headIds, defaultHeadId);
+      }
       await audit(admin, me, "user_access_updated", "user", userId,
         { username: target.username, shop_id, allowed_types, shop_ids, category_ids, regional_head_id });
       return json({ ok: true });

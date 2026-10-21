@@ -5,11 +5,13 @@ import { formatDuration } from '../../lib/formatters';
 interface VoiceRecorderProps {
   onRecordingComplete: (file: { name: string; blob: Blob; duration: number }) => void;
   onClear?: () => void;
+  onRecordingStateChange?: (recording: boolean) => void;
 }
 
 export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   onRecordingComplete,
   onClear,
+  onRecordingStateChange,
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0);
@@ -58,13 +60,19 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
+        if (e.data && e.data.size > 0) {
           audioChunksRef.current.push(e.data);
         }
       };
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (blob.size <= 0) {
+          setMicError('No audio was captured. Please speak into your microphone and try again.');
+          handleClear();
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         const url = URL.createObjectURL(blob);
         setAudioBlob(blob);
         setAudioUrl(url);
@@ -80,6 +88,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 
       mediaRecorder.start(250);
       setIsRecording(true);
+      onRecordingStateChange?.(true);
       setRecordTime(0);
       elapsedRef.current = 0;
 
@@ -95,10 +104,18 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.requestData();
+        }
+      } catch {
+        /* ignore */
+      }
       mediaRecorderRef.current.stop();
     }
     if (timerRef.current) clearInterval(timerRef.current);
     setIsRecording(false);
+    onRecordingStateChange?.(false);
   };
 
   const handleClear = () => {

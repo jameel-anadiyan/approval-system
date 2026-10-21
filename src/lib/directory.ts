@@ -25,6 +25,9 @@ export interface NewUserInput {
   category_ids?: string[];
   /** Employee: their Regional Head */
   regional_head_id?: string | null;
+  /** Employee & Regional Head: heads they can submit requests to */
+  head_ids?: string[];
+  default_head_id?: string | null;
 }
 
 export interface AccessInput {
@@ -33,6 +36,8 @@ export interface AccessInput {
   shop_ids?: string[];
   category_ids?: string[];
   regional_head_id?: string | null;
+  head_ids?: string[];
+  default_head_id?: string | null;
 }
 
 export function useDirectory() {
@@ -52,7 +57,7 @@ export function useDirectory() {
         supabase
           .from('profiles')
           .select(
-            '*, department:departments(*), shop:shops(*), rh_shops:regional_head_shops(shop_id), clerk_cats:clerk_categories(category_id)'
+            '*, department:departments(*), shop:shops(*), rh_shops:regional_head_shops(shop_id), clerk_cats:clerk_categories(category_id), user_heads:user_heads(head_id, is_default)'
           )
           .order('created_at', { ascending: false }),
         supabase.from('work_categories').select('*').order('name'),

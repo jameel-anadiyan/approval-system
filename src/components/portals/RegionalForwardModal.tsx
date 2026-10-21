@@ -16,11 +16,16 @@ interface RegionalForwardModalProps {
 export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({ isOpen, onClose, request, onForward }) => {
   const [remarks, setRemarks] = useState('');
   const [voice, setVoice] = useState<ActionVoice | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isRecording) {
+      setError('Please stop your voice recording first before forwarding.');
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
@@ -65,7 +70,11 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({ isOp
           />
         </div>
 
-        <ActionVoiceField onChange={setVoice} label="Voice message for the clerk (optional)" />
+        <ActionVoiceField
+          onChange={setVoice}
+          onRecordingStateChange={setIsRecording}
+          label="Voice message for the clerk (optional)"
+        />
 
         {error && <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{error}</div>}
 

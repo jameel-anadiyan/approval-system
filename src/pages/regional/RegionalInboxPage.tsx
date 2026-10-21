@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
@@ -14,7 +15,19 @@ import { isMyRegionalRequest } from '../../lib/workflow';
 export const RegionalInboxPage: React.FC = () => {
   const { user } = useAuth();
   const { requests } = useRequests();
-  const [tab, setTab] = useState<'pending' | 'history'>('pending');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isHistoryPath = location.pathname.endsWith('/forwarded');
+  const [tab, setTab] = useState<'pending' | 'history'>(isHistoryPath ? 'history' : 'pending');
+
+  useEffect(() => {
+    setTab(location.pathname.endsWith('/forwarded') ? 'history' : 'pending');
+  }, [location.pathname]);
+
+  const handleTabChange = (newTab: 'pending' | 'history') => {
+    setTab(newTab);
+    navigate(newTab === 'history' ? '/regional/forwarded' : '/regional');
+  };
 
   const pending = requests.filter((r) => isMyRegionalRequest(r, user));
   const history = requests.filter(
@@ -22,6 +35,7 @@ export const RegionalInboxPage: React.FC = () => {
   );
   const source = tab === 'pending' ? pending : history;
   const { filters, setFilters, result: visible } = useRequestFilters(source, { sort: tab === 'pending' ? 'oldest' : 'newest' });
+
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -58,7 +72,7 @@ export const RegionalInboxPage: React.FC = () => {
             role="tab"
             id={`regional-tab-${key}`}
             aria-selected={tab === key}
-            onClick={() => setTab(key)}
+            onClick={() => handleTabChange(key)}
             className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
               tab === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
             }`}

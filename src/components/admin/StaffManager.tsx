@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
@@ -219,6 +219,33 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                   <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
                   Regional Head not assigned — tap to assign
                 </button>
+              )}
+
+              {(u.role === 'employee' || u.role === 'regional_head') && (
+                <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-600">
+                  <Users className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span className="font-semibold text-slate-700">Heads:</span>
+                  {(u.user_heads && u.user_heads.length > 0) ? (
+                    u.user_heads.map((uh) => {
+                      const hName = userName(uh.head_id) ?? 'Unknown Head';
+                      const isDef = uh.is_default || u.default_head_id === uh.head_id;
+                      return (
+                        <span
+                          key={uh.head_id}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            isDef
+                              ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          {hName} {isDef && '★'}
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="text-[11px] text-slate-400 italic">None assigned</span>
+                  )}
+                </div>
               )}
 
               {u.role === 'clerk' && (u.clerk_cats || []).length > 0 && (

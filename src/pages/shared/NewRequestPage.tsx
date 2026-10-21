@@ -16,14 +16,16 @@ import {
   quoteSummary, validateQuotes, newQuoteFiles,
 } from '../../components/requests/AssetQuotations';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck } from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
+import { TargetHeadField } from '../../components/requests/TargetHeadField';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
   discount: <BadgePercent className="w-5 h-5" />,
   exhibition: <Store className="w-5 h-5" />,
   asset: <Package className="w-5 h-5" />,
+  non_cash: <FileCheck className="w-5 h-5" />,
 };
 
 export const NewRequestPage: React.FC = () => {
@@ -53,6 +55,7 @@ export const NewRequestPage: React.FC = () => {
   const submittingRef = useRef<boolean>(false);
   const categoryOptions = useCategoryOptions();
   const [categoryId, setCategoryId] = useState('');
+  const [targetHeadId, setTargetHeadId] = useState('');
 
   const baseAmount = parseFloat(amountStr) || 0;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
@@ -60,7 +63,8 @@ export const NewRequestPage: React.FC = () => {
 
   const quoteInfo = quoteSummary(quotes);
   const amount =
-    type === 'discount' ? discountCalc(discount).value
+    type === 'non_cash' ? 0
+      : type === 'discount' ? discountCalc(discount).value
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
       : type === 'asset' ? quoteInfo.amount
       : generalTotal;
@@ -97,6 +101,7 @@ export const NewRequestPage: React.FC = () => {
     || (type === 'asset' && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '');
 
   const details = (): RequestDetails | null => {
+    if (type === 'non_cash') return null;
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'exhibition') return toExhibitionDetails(exhibition);
     if (type === 'asset') return toAssetDetails(asset);
@@ -144,11 +149,12 @@ export const NewRequestPage: React.FC = () => {
       const draftRes = await createDraft({
         type,
         title: effectiveTitle(),
-        amount: type === 'general' ? generalTotal || 1 : type === 'asset' ? amount || 1 : amount,
+        amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal || 1 : type === 'asset' ? amount || 1 : amount),
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
         category_id: categoryOptions.required ? categoryId || null : null,
+        target_head_id: targetHeadId || null,
       });
       if (!draftRes.success || !draftRes.id) {
         if (draftRes.id) {
@@ -244,8 +250,10 @@ export const NewRequestPage: React.FC = () => {
         {/* Main details */}
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
           <h2 className="text-sm font-bold text-slate-800 font-display border-b border-slate-100 pb-2">
-            {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : 'Request Information'}
+            {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
           </h2>
+
+          <TargetHeadField value={targetHeadId} onChange={setTargetHeadId} />
 
           <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
 
@@ -267,6 +275,15 @@ export const NewRequestPage: React.FC = () => {
               className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
             />
           </div>
+
+          {type === 'non_cash' && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200/80 rounded-xl text-xs text-emerald-900 leading-relaxed flex items-start gap-2">
+              <FileCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>Non-Cash Request:</strong> This request is for operational or internal approval with no cash or disbursement involved.
+              </div>
+            </div>
+          )}
 
           {type === 'general' && (
             <div className="space-y-3.5 bg-slate-50/80 p-4 rounded-xl border border-slate-200/80">

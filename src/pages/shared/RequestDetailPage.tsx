@@ -209,8 +209,12 @@ export const RequestDetailPage: React.FC = () => {
       : 'Total Requested Amount';
   const voiceNotes = (request.files || []).filter((f) => {
     if (f.kind !== 'voice_note') return false;
+    // Regional heads only see requester voice notes or their own voice notes (NOT clerk, admin, head)
+    if (role === 'regional_head') {
+      return !f.added_by || f.added_by === user?.id;
+    }
     // Clerks, heads, and admins can view all voice notes
-    if (role === 'admin' || role === 'head' || role === 'clerk' || role === 'regional_head') return true;
+    if (role === 'admin' || role === 'head' || role === 'clerk') return true;
     // Requester only sees their own audio notes
     return !f.added_by || f.added_by === user?.id || f.added_by === request.requester_id;
   });
@@ -368,7 +372,7 @@ export const RequestDetailPage: React.FC = () => {
               Cancelled by <strong>{request.cancelled_by_name || 'Head'}</strong>
               {request.cancelled_at && <> on {formatISTDate(request.cancelled_at)}</>}. Signed documents for{' '}
               {request.approval_no || 'this approval'} are void.
-              {rType !== 'discount' && pay.paid > 0 && (
+              {rType !== 'discount' && rType !== 'non_cash' && pay.paid > 0 && (
                 <> {formatINR(pay.paid)} was paid before cancellation; the balance {formatINR(pay.balance)} will not be paid.</>
               )}
             </p>
@@ -393,7 +397,7 @@ export const RequestDetailPage: React.FC = () => {
                   {amountLabel}
                 </span>
                 <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-display mt-0.5">
-                  {formatINR(request.amount)}
+                  {rType === 'non_cash' ? 'Non Cash' : formatINR(request.amount)}
                 </div>
               </div>
               {isHighValue && (
@@ -611,7 +615,7 @@ export const RequestDetailPage: React.FC = () => {
             </div>
           )}
 
-          {rType !== 'discount' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && pay.paid > 0)) && (
+          {rType !== 'discount' && rType !== 'non_cash' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && pay.paid > 0)) && (
             <div className="bg-white rounded-2xl border border-teal-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 font-bold text-teal-800 text-sm">
@@ -1094,7 +1098,7 @@ export const RequestDetailPage: React.FC = () => {
             )}
 
             {/* Disbursement Action */}
-            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && (
+            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && rType !== 'non_cash' && (
               <>
                 <button
                   type="button"

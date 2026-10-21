@@ -22,7 +22,7 @@ export type HeadConsultationStatus = 'pending' | 'agreed' | 'disagreed';
 
 export type FileKind = 'document' | 'voice_note';
 
-export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset';
+export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'non_cash';
 
 export type QuoteStatus = 'pending' | 'selected' | 'rejected';
 
@@ -141,6 +141,18 @@ export interface Profile {
   rh_shops?: { shop_id: string }[];
   /** Clerk only — work categories they handle */
   clerk_cats?: { category_id: string }[];
+  /** Default assigned Head for employee / regional head */
+  default_head_id?: string | null;
+  /** Heads assigned to this employee / regional head */
+  user_heads?: { head_id: string; is_default: boolean }[];
+}
+
+export interface UserTargetHead {
+  head_id: string;
+  head_name: string;
+  department_id: string;
+  department_name: string;
+  is_default: boolean;
 }
 
 export interface ApproverCredential {

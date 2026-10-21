@@ -48,7 +48,7 @@ function appOrigin(v: unknown): string | null {
 
 const TYPE_LABEL: Record<string, string> = {
   general: "General", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
-  asset: "Asset buying",
+  asset: "Asset buying", non_cash: "Non-cash request",
 };
 const PROVIDES: Record<string, string> = {
   stall_space: "Stall space", table_chairs: "Table & chairs", electricity_lights: "Electricity & lights",
@@ -250,7 +250,7 @@ Deno.serve(handle(async (req) => {
         ["Approval No", b.approval_no],
         ["Request No", r.request_no],
         ["Type", TYPE_LABEL[r.request_type] ?? "General"],
-        ["Amount", inr(Number(r.amount))],
+        ["Amount", r.request_type === "non_cash" ? "Non-Cash (No payment)" : inr(Number(r.amount))],
         ["Department", r.department ?? "—"],
         ["Shop", r.shop_name ?? "—"],
         ["Requested by", r.requester_name],

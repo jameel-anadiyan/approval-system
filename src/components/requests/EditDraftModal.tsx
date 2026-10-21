@@ -15,6 +15,7 @@ import {
   validateQuotes, newQuoteFiles,
 } from './AssetQuotations';
 import { WorkCategoryField, useCategoryOptions } from './WorkCategoryField';
+import { TargetHeadField } from './TargetHeadField';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
   const categoryOptions = useCategoryOptions();
   const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
+  const [targetHeadId, setTargetHeadId] = useState<string>(request.owner_head_id ?? '');
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +57,8 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
   const amount =
-    type === 'discount' ? discountCalc(discount).value
+    type === 'non_cash' ? 0
+      : type === 'discount' ? discountCalc(discount).value
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
       : type === 'asset' ? quoteSummary(quotes).amount || request.amount
       : generalTotal;
@@ -71,6 +74,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   };
 
   const getDetails = (): RequestDetails | null => {
+    if (type === 'non_cash') return null;
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'exhibition') return toExhibitionDetails(exhibition);
     if (type === 'asset') return toAssetDetails(asset);
@@ -100,10 +104,11 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     try {
       const upd = await updateDraft(request.id, {
         title: title.trim(),
-        amount: type === 'general' ? generalTotal : amount,
+        amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal : amount),
         notes: notes.trim() || undefined,
         details: getDetails(),
         category_id: categoryOptions.required ? categoryId || null : undefined,
+        target_head_id: targetHeadId || undefined,
       });
       if (!upd.success) throw new Error(upd.error);
       if (type === 'asset') {
@@ -142,6 +147,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
             className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
+        <TargetHeadField value={targetHeadId} onChange={setTargetHeadId} />
         <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
           currentName={request.category_name} />
         {type === 'general' && (

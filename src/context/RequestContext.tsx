@@ -9,6 +9,7 @@ import {
   RequestDetails,
   Profile,
   DisbursementClarification,
+  UserTargetHead,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -32,6 +33,8 @@ export interface DraftInput {
   files?: RequestFile[];
   /** Work category (needed when several clerks split the department's work) */
   category_id?: string | null;
+  /** Approving Head chosen by requester (for employee / regional head with multiple heads) */
+  target_head_id?: string | null;
 }
 
 /** Work categories the current user can pick for a new request. */
@@ -59,7 +62,14 @@ interface RequestContextType {
   createDraft: (data: DraftInput) => Promise<{ success: boolean; id?: string; error?: string }>;
   updateDraft: (
     id: string,
-    data: { title: string; amount: number; notes?: string; details?: RequestDetails | null; category_id?: string | null }
+    data: {
+      title: string;
+      amount: number;
+      notes?: string;
+      details?: RequestDetails | null;
+      category_id?: string | null;
+      target_head_id?: string | null;
+    }
   ) => Promise<Result>;
   addFiles: (id: string, files: RequestFile[]) => Promise<Result>;
   removeFile: (requestId: string, fileId: string) => Promise<Result>;
@@ -72,6 +82,8 @@ interface RequestContextType {
   regionalForwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<Result>;
   /** Work categories the current user can pick, and whether one is required. */
   loadCategoryOptions: () => Promise<CategoryOptions>;
+  /** Heads available for a user to submit requests to */
+  getUserTargetHeads: (userId?: string) => Promise<UserTargetHead[]>;
   returnRequest: (id: string, remarks: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   rejectRequest: (id: string, reason: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   approveRequest: (
@@ -364,6 +376,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   /** Approver voice note: upload to {request_id}/voice-… then register it on the request. */
   const uploadActionVoice = async (requestId: string, voice?: ActionVoice | null) => {
     if (!voice || !isBackendConnected) return;
+    if (!voice.blob || voice.blob.size <= 0) return;
     const rawType = (voice.blob.type || '').split(';')[0];
     const contentType = rawType.startsWith('audio/') ? rawType : 'audio/webm';
     const ext = contentType.includes('mp4') ? 'm4a' : contentType.includes('ogg') ? 'ogg' : 'webm';
@@ -392,9 +405,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const { data: newId, error } = await supabase.rpc('create_typed_draft', {
           p_type: type,
           p_title: data.title,
-          p_amount: type === 'general' || type === 'asset' ? data.amount : null,
+          p_amount: type === 'non_cash' ? 0 : (type === 'general' || type === 'asset' ? data.amount : null),
           p_notes: data.notes || null,
           p_details: data.details ?? {},
+          p_target_head_id: data.target_head_id || null,
         });
         if (error) throw error;
         requestId = newId as string;
@@ -476,7 +490,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const updateDraft = async (
     id: string,
-    data: { title: string; amount: number; notes?: string; details?: RequestDetails | null; category_id?: string | null }
+    data: {
+      title: string;
+      amount: number;
+      notes?: string;
+      details?: RequestDetails | null;
+      category_id?: string | null;
+      target_head_id?: string | null;
+    }
   ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (isBackendConnected) {
@@ -488,6 +509,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_details: data.details ?? null,
       });
       if (error) return { success: false, error: error.message };
+      if (data.target_head_id) {
+        const { error: headErr } = await supabase.rpc('set_request_target_head', {
+          p_request_id: id,
+          p_head_id: data.target_head_id,
+        });
+        if (headErr) {
+          await loadRequests();
+          return { success: false, error: headErr.message };
+        }
+      }
       if (data.category_id !== undefined) {
         const { error: catErr } = await supabase.rpc('set_request_category', {
           p_request_id: id,
@@ -820,6 +851,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (error || !data) return { required: false, categories: [] };
     const d = data as Partial<CategoryOptions>;
     return { required: !!d.required, categories: d.categories ?? [] };
+  };
+
+  const getUserTargetHeads = async (userId?: string): Promise<UserTargetHead[]> => {
+    if (!isBackendConnected || !user) return [];
+    const { data, error } = await supabase.rpc('get_user_target_heads', {
+      p_user_id: userId || null,
+    });
+    if (error || !data) return [];
+    return data as UserTargetHead[];
   };
 
   const returnRequest = async (id: string, remarks: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
@@ -1553,6 +1593,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         forwardRequest,
         regionalForwardRequest,
         loadCategoryOptions,
+        getUserTargetHeads,
         returnRequest,
         rejectRequest,
         approveRequest,

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { AppRole, Profile, RequestType, Shop, WorkCategory } from '../../types/database';
 import { REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
 import { Modal } from '../common/Modal';
-import { KeyRound, UserCheck, Tags } from 'lucide-react';
+import { KeyRound, UserCheck, Tags, Users } from 'lucide-react';
 
 export const rolesWithTypes: AppRole[] = ['employee', 'clerk', 'head', 'regional_head'];
 
@@ -22,6 +22,8 @@ export interface ExtraAccess {
   shopIds: string[];
   regionalHeadId: string;
   categoryIds: string[];
+  headIds: string[];
+  defaultHeadId: string;
 }
 
 interface AccessFieldsProps {
@@ -39,9 +41,15 @@ interface AccessFieldsProps {
   onExtraChange?: (e: ExtraAccess) => void;
 }
 
-const EMPTY_EXTRA: ExtraAccess = { shopIds: [], regionalHeadId: '', categoryIds: [] };
+const EMPTY_EXTRA: ExtraAccess = {
+  shopIds: [],
+  regionalHeadId: '',
+  categoryIds: [],
+  headIds: [],
+  defaultHeadId: '',
+};
 
-/** Shop picker(s), Regional Head / work categories, and "may raise these request types" checkboxes. */
+/** Shop picker(s), Regional Head / work categories, Department Heads, and "may raise these request types" checkboxes. */
 export const AccessFields: React.FC<AccessFieldsProps> = ({
   role, shops, shopId, onShopChange, types, onTypesChange,
   departmentId, users = [], categories = [], extra = EMPTY_EXTRA, onExtraChange,
@@ -50,6 +58,7 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
   const shopRequired = role === 'employee';
   const isRegional = role === 'regional_head';
   const activeShops = shops.filter((s) => s.is_active || s.id === shopId || extra.shopIds.includes(s.id));
+  const availableHeads = users.filter((u) => u.role === 'head' && u.is_active);
   const toggle = (t: RequestType) =>
     onTypesChange(types.includes(t) ? types.filter((x) => x !== t) : REQUEST_TYPES.filter((x) => x === t || types.includes(x)));
   const setExtra = (patch: Partial<ExtraAccess>) => onExtraChange?.({ ...extra, ...patch });
@@ -202,6 +211,82 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
         </fieldset>
       )}
 
+      {(role === 'employee' || role === 'regional_head') && (
+        <fieldset>
+          <legend className="text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-indigo-600" />
+              Assigned Department Heads <span className="text-rose-500">*</span>
+            </span>
+            <span className="text-[10px] text-slate-400 font-normal">Choose which Heads can receive requests</span>
+          </legend>
+          {availableHeads.length === 0 ? (
+            <span className="text-[11px] text-amber-700 block">No active Department Heads found.</span>
+          ) : (
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                {availableHeads.map((h) => {
+                  const isChecked = extra.headIds.includes(h.id);
+                  const isDefault = extra.defaultHeadId === h.id || (extra.headIds.length === 1 && isChecked);
+                  return (
+                    <div
+                      key={h.id}
+                      className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border text-xs transition-colors ${
+                        isChecked ? 'border-indigo-300 bg-indigo-50/60' : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1">
+                        <input
+                          type="checkbox"
+                          id={`access-head-${h.id}`}
+                          checked={isChecked}
+                          onChange={() => {
+                            const next = isChecked
+                              ? extra.headIds.filter((id) => id !== h.id)
+                              : [...extra.headIds, h.id];
+                            let nextDef = extra.defaultHeadId;
+                            if (!next.includes(nextDef)) {
+                              nextDef = next[0] || '';
+                            } else if (!nextDef && next.length > 0) {
+                              nextDef = next[0];
+                            }
+                            setExtra({ headIds: next, defaultHeadId: nextDef });
+                          }}
+                          className="w-4 h-4 accent-indigo-600 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <strong className="text-slate-800 block truncate">{h.full_name}</strong>
+                          <span className="text-[10px] text-slate-500 block truncate">
+                            {h.department?.name || h.designation || 'Dept Head'}
+                          </span>
+                        </div>
+                      </label>
+                      {isChecked && (
+                        <button
+                          type="button"
+                          onClick={() => setExtra({ defaultHeadId: h.id })}
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded-md shrink-0 transition-all ${
+                            isDefault
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+                          }`}
+                          title={isDefault ? 'Primary Default Head' : 'Click to make Primary Default Head'}
+                        >
+                          {isDefault ? 'Default' : 'Make Default'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <span className="text-[10px] text-slate-400 block">
+                Requests default to the primary Head, but the user can select any assigned Head when drafting a request.
+              </span>
+            </div>
+          )}
+        </fieldset>
+      )}
+
       <fieldset>
         <legend className="text-xs font-bold text-slate-700 mb-1.5">
           Request types this user can raise <span className="text-rose-500">*</span>
@@ -249,6 +334,9 @@ export function validateAccess(
   if (role === 'employee' && (extra?.coveringCount ?? 0) > 0 && !extra?.regionalHeadId) {
     return "Select the employee's Regional Head.";
   }
+  if ((role === 'employee' || role === 'regional_head') && extra && (!extra.headIds || extra.headIds.length === 0)) {
+    return 'Select at least one Department Head for this user.';
+  }
   if (types.length === 0) return 'Select at least one request type.';
   return null;
 }
@@ -266,14 +354,32 @@ export const AccessModal: React.FC<{
     shop_ids?: string[];
     category_ids?: string[];
     regional_head_id?: string | null;
+    head_ids?: string[];
+    default_head_id?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
 }> = ({ target, shops, users = [], categories = [], onClose, onSave }) => {
   const [shopId, setShopId] = useState(target.shop_id ?? '');
   const [types, setTypes] = useState<RequestType[]>(target.allowed_types?.length ? target.allowed_types : ['general']);
+
+  const initialHeadIds = (target.user_heads || []).map((uh) => uh.head_id);
+  const fallbackHeadId =
+    target.default_head_id ||
+    (target.user_heads || []).find((uh) => uh.is_default)?.head_id ||
+    users.find((u) => u.role === 'head' && u.department_id === target.department_id)?.id ||
+    '';
+  const resolvedHeadIds = initialHeadIds.length > 0 ? initialHeadIds : (fallbackHeadId ? [fallbackHeadId] : []);
+  const resolvedDefaultHead =
+    target.default_head_id ||
+    (target.user_heads || []).find((uh) => uh.is_default)?.head_id ||
+    resolvedHeadIds[0] ||
+    '';
+
   const [extra, setExtra] = useState<ExtraAccess>({
     shopIds: (target.rh_shops || []).map((s) => s.shop_id),
     regionalHeadId: target.regional_head_id ?? '',
     categoryIds: (target.clerk_cats || []).map((c) => c.category_id),
+    headIds: resolvedHeadIds,
+    defaultHeadId: resolvedDefaultHead,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -286,12 +392,16 @@ export const AccessModal: React.FC<{
     const err = validateAccess(target.role, shopId, types, { ...extra, regionalHeadId, coveringCount: covering.length });
     if (err) return setError(err);
     setBusy(true);
+    const finalDefaultHead = extra.defaultHeadId || (extra.headIds.length > 0 ? extra.headIds[0] : null);
     const res = await onSave({
       shop_id: target.role === 'regional_head' ? null : shopId || null,
       allowed_types: types,
       ...(target.role === 'regional_head' ? { shop_ids: extra.shopIds } : {}),
       ...(target.role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
       ...(target.role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
+      ...(target.role === 'employee' || target.role === 'regional_head'
+        ? { head_ids: extra.headIds, default_head_id: finalDefaultHead }
+        : {}),
     });
     setBusy(false);
     if (res.success) onClose();
@@ -305,10 +415,10 @@ export const AccessModal: React.FC<{
       title={`Access · ${target.full_name}`}
       description={
         target.role === 'regional_head'
-          ? 'Shops covered and the request types this Regional Head can raise.'
+          ? 'Shops covered, assigned Heads, and request types this Regional Head can raise.'
           : target.role === 'clerk'
-            ? 'Work categories and the request types this clerk can raise.'
-            : 'Shop, Regional Head and the request types this user can raise.'
+            ? 'Work categories and request types this clerk can raise.'
+            : 'Shop, Regional Head, assigned Heads, and request types this user can raise.'
       }
       maxWidth="md"
     >

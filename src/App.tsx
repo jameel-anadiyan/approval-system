@@ -25,6 +25,7 @@ import { AdminApprovePage } from './pages/admin/AdminApprovePage';
 import { AdminAllRequestsPage } from './pages/admin/AdminAllRequestsPage';
 import { AdminCredentialsPage } from './pages/admin/AdminCredentialsPage';
 import { DisbursementPage } from './pages/disbursement/DisbursementPage';
+import { ApprovedRequestsPage } from './pages/shared/ApprovedRequestsPage';
 
 // Secondary pages are code-split
 const page = <K extends string>(loader: () => Promise<Record<K, React.ComponentType>>, name: K) =>
@@ -144,6 +145,7 @@ export const App: React.FC = () => {
                 {/* Everyone signed in */}
                 <Route path="requests/:id" element={<RequestDetailPage />} />
                 <Route path="profile" element={<ProfilePage />} />
+                <Route path="approved" element={<ApprovedRequestsPage />} />
 
                 {/* Discount report (Admin + Heads with access) */}
                 <Route element={<RequireDiscountReport />}>
@@ -159,6 +161,7 @@ export const App: React.FC = () => {
                 {/* Regional Head routes */}
                 <Route element={<RequireRole roles={['regional_head']} />}>
                   <Route path="regional" element={<RegionalInboxPage />} />
+                  <Route path="regional/forwarded" element={<RegionalInboxPage />} />
                 </Route>
 
                 {/* Clerk routes */}
