@@ -39,19 +39,20 @@ export const RegionalInboxPage: React.FC = () => {
   }, [location.pathname]);
 
   const handleTabChange = (newTab: 'pending' | 'forwarded' | 'returned') => {
+    if (newTab === 'returned') {
+      navigate('/returned');
+      return;
+    }
     setTab(newTab);
-    navigate(
-      newTab === 'returned'
-        ? '/regional/returned'
-        : newTab === 'forwarded'
-        ? '/regional/forwarded'
-        : '/regional'
-    );
+    navigate(newTab === 'forwarded' ? '/regional/forwarded' : '/regional');
   };
 
-  // Scope: employee requests under this Regional Head, plus any requests raised by this Regional Head
+  // Scope: any non-draft request visible to this Regional Head under RLS, plus their own drafts
   const isRegionalScope = (r: RequestRecord) =>
-    r.regional_head_id === user?.id || (r.requester_id === user?.id && r.status !== 'draft');
+    r.requester_id === user?.id ||
+    r.regional_head_id === user?.id ||
+    (user?.department_id && r.department_id === user.department_id) ||
+    r.status !== 'draft';
 
   // 1. Pending (To forward): employee requests waiting for regional head action
   const pending = requests.filter((r) => isMyRegionalRequest(r, user));
@@ -59,9 +60,13 @@ export const RegionalInboxPage: React.FC = () => {
   // 2. Returned for correction: requests in scope that were returned
   const returned = requests.filter((r) => isRegionalScope(r) && r.status === 'returned');
 
-  // 3. Forwarded / in progress: non-pending, non-returned requests in scope
+  // 3. Forwarded / in progress: all requests in scope that have been forwarded or submitted
+  // (includes requests in routing, in review, approved, paid, or returned for correction)
   const forwarded = requests.filter(
-    (r) => isRegionalScope(r) && r.status !== 'pending_regional_review' && r.status !== 'returned'
+    (r) =>
+      isRegionalScope(r) &&
+      r.status !== 'pending_regional_review' &&
+      (r.status !== 'draft' || r.requester_id === user?.id)
   );
 
   const source = tab === 'pending' ? pending : tab === 'returned' ? returned : forwarded;
