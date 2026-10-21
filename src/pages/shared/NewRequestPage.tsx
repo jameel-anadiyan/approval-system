@@ -53,9 +53,9 @@ export const NewRequestPage: React.FC = () => {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef<boolean>(false);
-  const categoryOptions = useCategoryOptions();
-  const [categoryId, setCategoryId] = useState('');
   const [targetHeadId, setTargetHeadId] = useState('');
+  const categoryOptions = useCategoryOptions(targetHeadId || null);
+  const [categoryId, setCategoryId] = useState('');
 
   const baseAmount = parseFloat(amountStr) || 0;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
@@ -253,7 +253,15 @@ export const NewRequestPage: React.FC = () => {
             {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
           </h2>
 
-          <TargetHeadField value={targetHeadId} onChange={setTargetHeadId} />
+          <TargetHeadField
+            value={targetHeadId}
+            onChange={(newHeadId) => {
+              if (newHeadId !== targetHeadId) {
+                setTargetHeadId(newHeadId);
+                setCategoryId('');
+              }
+            }}
+          />
 
           <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
 

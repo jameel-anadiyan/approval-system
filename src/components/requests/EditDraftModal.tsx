@@ -44,9 +44,9 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [asset, setAsset] = useState(() => assetFromDetails(request.details));
   const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
-  const categoryOptions = useCategoryOptions();
-  const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
   const [targetHeadId, setTargetHeadId] = useState<string>(request.owner_head_id ?? '');
+  const categoryOptions = useCategoryOptions(targetHeadId || null);
+  const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +147,15 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
             className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
-        <TargetHeadField value={targetHeadId} onChange={setTargetHeadId} />
+        <TargetHeadField
+          value={targetHeadId}
+          onChange={(newHeadId) => {
+            if (newHeadId !== targetHeadId) {
+              setTargetHeadId(newHeadId);
+              setCategoryId('');
+            }
+          }}
+        />
         <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
           currentName={request.category_name} />
         {type === 'general' && (

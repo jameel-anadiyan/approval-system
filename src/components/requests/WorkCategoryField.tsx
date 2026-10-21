@@ -2,14 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { Tags } from 'lucide-react';
 import { useRequests, type CategoryOptions } from '../../context/RequestContext';
 
-/** Loads the work categories the current user can pick (only needed when several clerks split the work). */
-export function useCategoryOptions() {
+/** Loads the work categories the current user can pick (only needed when several clerks split the work).
+ * Dynamically reloads when a different target Head is selected.
+ */
+export function useCategoryOptions(targetHeadId?: string | null) {
   const { loadCategoryOptions } = useRequests();
   const [options, setOptions] = useState<CategoryOptions>({ required: false, categories: [] });
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let alive = true;
-    loadCategoryOptions().then((o) => {
+    setLoaded(false);
+    loadCategoryOptions(targetHeadId).then((o) => {
       if (!alive) return;
       setOptions(o);
       setLoaded(true);
@@ -17,8 +20,7 @@ export function useCategoryOptions() {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadCategoryOptions, targetHeadId]);
   return { ...options, loaded };
 }
 

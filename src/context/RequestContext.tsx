@@ -81,7 +81,7 @@ interface RequestContextType {
   /** Regional Head forwards an employee's request to the clerk (no approval). */
   regionalForwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<Result>;
   /** Work categories the current user can pick, and whether one is required. */
-  loadCategoryOptions: () => Promise<CategoryOptions>;
+  loadCategoryOptions: (targetHeadId?: string | null) => Promise<CategoryOptions>;
   /** Heads available for a user to submit requests to */
   getUserTargetHeads: (userId?: string) => Promise<UserTargetHead[]>;
   returnRequest: (id: string, remarks: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
@@ -845,9 +845,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const loadCategoryOptions = async (): Promise<CategoryOptions> => {
+  const loadCategoryOptions = async (targetHeadId?: string | null): Promise<CategoryOptions> => {
     if (!isBackendConnected || !user) return { required: false, categories: [] };
-    const { data, error } = await supabase.rpc('request_category_options');
+    const { data, error } = await supabase.rpc('request_category_options', {
+      p_target_head_id: targetHeadId || null,
+    });
     if (error || !data) return { required: false, categories: [] };
     const d = data as Partial<CategoryOptions>;
     return { required: !!d.required, categories: d.categories ?? [] };
