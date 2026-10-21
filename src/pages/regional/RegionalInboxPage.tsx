@@ -47,12 +47,9 @@ export const RegionalInboxPage: React.FC = () => {
     navigate(newTab === 'forwarded' ? '/regional/forwarded' : '/regional');
   };
 
-  // Scope: any non-draft request visible to this Regional Head under RLS, plus their own drafts
+  // Scope: strictly requests belonging to this Regional Head (his own requests or employee requests assigned to him)
   const isRegionalScope = (r: RequestRecord) =>
-    r.requester_id === user?.id ||
-    r.regional_head_id === user?.id ||
-    (user?.department_id && r.department_id === user.department_id) ||
-    r.status !== 'draft';
+    r.requester_id === user?.id || r.regional_head_id === user?.id;
 
   // 1. Pending (To forward): employee requests waiting for regional head action
   const pending = requests.filter((r) => isMyRegionalRequest(r, user));

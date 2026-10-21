@@ -40,8 +40,14 @@ export const ReturnedRequestsPage: React.FC = () => {
 
   // All returned requests visible to the user under RLS
   const returnedList = useMemo(() => {
-    return requests.filter((r) => r.status === 'returned');
-  }, [requests]);
+    return requests.filter((r) => {
+      if (r.status !== 'returned') return false;
+      if (user?.role === 'regional_head') {
+        return r.regional_head_id === user?.id || r.requester_id === user?.id;
+      }
+      return true;
+    });
+  }, [requests, user?.role, user?.id]);
 
   // Breakdowns
   const myReturnedCount = useMemo(() => {

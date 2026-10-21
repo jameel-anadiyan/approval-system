@@ -46,7 +46,16 @@ export const Navigation: React.FC = () => {
   if (!role) return null;
 
   // Compute live badge counts
-  const returnedCount = requests.filter((r) => r.status === 'returned').length;
+  const returnedCount = requests.filter((r) => {
+    if (r.status !== 'returned') return false;
+    if (role === 'regional_head') {
+      return r.regional_head_id === user?.id || r.requester_id === user?.id;
+    }
+    if (role === 'employee') {
+      return r.requester_id === user?.id;
+    }
+    return true;
+  }).length;
 
   const clerkToRouteCount = requests.filter((r) => isMyRoutingRequest(r, user)).length;
 
