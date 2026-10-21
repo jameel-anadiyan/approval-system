@@ -34,6 +34,7 @@ interface NavItem {
   path: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: number;
+  badgeVariant?: 'rose' | 'amber';
   highlight?: boolean;
 }
 
@@ -45,19 +46,11 @@ export const Navigation: React.FC = () => {
   if (!role) return null;
 
   // Compute live badge counts
+  const returnedCount = requests.filter((r) => r.status === 'returned').length;
+
   const clerkToRouteCount = requests.filter((r) => isMyRoutingRequest(r, user)).length;
 
   const regionalToForwardCount = requests.filter((r) => isMyRegionalRequest(r, user)).length;
-
-  const regionalReturnedCount = requests.filter(
-    (r) =>
-      (r.regional_head_id === user?.id || (r.requester_id === user?.id && r.status !== 'draft')) &&
-      r.status === 'returned'
-  ).length;
-
-  const employeeReturnedCount = requests.filter(
-    (r) => r.requester_id === user?.id && r.status === 'returned'
-  ).length;
 
   const headToApproveCount = requests.filter(
     (r) => r.status === 'pending_head_approval' && (!user?.department_id || r.department_id === user.department_id)
@@ -88,7 +81,8 @@ export const Navigation: React.FC = () => {
   switch (role) {
     case 'employee':
       mainNavItems = [
-        { label: 'My Requests', path: '/my', icon: FileText, badge: employeeReturnedCount },
+        { label: 'My Requests', path: '/my', icon: FileText },
+        { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
         { label: 'Profile', path: '/profile', icon: UserCheck },
@@ -99,7 +93,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
         { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
-        { label: 'Returned', path: '/regional/returned', icon: RotateCcw, badge: regionalReturnedCount },
+        { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
@@ -113,6 +107,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Route', path: '/clerk', icon: Inbox, badge: clerkToRouteCount },
         { label: 'Department', path: '/clerk/department', icon: Building2 },
+        { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
@@ -126,6 +121,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
+        { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
@@ -144,10 +140,11 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
+        { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
-        { label: 'All Requests', path: '/admin/requests', icon: FileSpreadsheet },
       ];
       moreNavItems = [
+        { label: 'All Requests', path: '/admin/requests', icon: FileSpreadsheet },
         { label: 'Discount Report', path: '/reports/discounts', icon: Percent },
         { label: 'Departments', path: '/admin/departments', icon: Building2 },
         { label: 'Shops', path: '/admin/shops', icon: Store },
@@ -165,10 +162,11 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Search', path: '/disbursement', icon: Search },
         { label: 'Awaiting Pay', path: '/disbursement/awaiting', icon: Clock, badge: disbAwaitingCount },
-        { label: 'Paid History', path: '/disbursement/paid', icon: CheckCircle },
+        { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
       ];
       moreNavItems = [
+        { label: 'Paid History', path: '/disbursement/paid', icon: CheckCircle },
         { label: 'Verify Scan', path: '/disbursement/verify', icon: ShieldCheck },
         { label: 'Profile', path: '/profile', icon: UserCheck },
       ];
@@ -186,7 +184,16 @@ export const Navigation: React.FC = () => {
             <NavLink
               key={item.path}
               to={item.path}
-              end={item.path === '/admin' || item.path === '/head' || item.path === '/clerk' || item.path === '/disbursement' || item.path === '/my' || item.path === '/regional' || item.path === '/approved'}
+              end={
+                item.path === '/admin' ||
+                item.path === '/head' ||
+                item.path === '/clerk' ||
+                item.path === '/disbursement' ||
+                item.path === '/my' ||
+                item.path === '/regional' ||
+                item.path === '/approved' ||
+                item.path === '/returned'
+              }
               className={({ isActive }) =>
                 `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
@@ -209,10 +216,12 @@ export const Navigation: React.FC = () => {
                   </div>
                   {item.badge !== undefined && item.badge > 0 && (
                     <span
-                      className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                      className={`px-2 py-0.5 text-xs font-bold rounded-full transition-all ${
                         isActive
                           ? 'bg-white/20 text-white'
-                          : 'bg-rose-500 text-white'
+                          : item.badgeVariant === 'amber'
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'bg-rose-500 text-white shadow-xs'
                       }`}
                     >
                       {item.badge}
@@ -232,7 +241,16 @@ export const Navigation: React.FC = () => {
             <NavLink
               key={item.path}
               to={item.path}
-              end={item.path === '/admin' || item.path === '/head' || item.path === '/clerk' || item.path === '/disbursement' || item.path === '/my' || item.path === '/regional' || item.path === '/approved'}
+              end={
+                item.path === '/admin' ||
+                item.path === '/head' ||
+                item.path === '/clerk' ||
+                item.path === '/disbursement' ||
+                item.path === '/my' ||
+                item.path === '/regional' ||
+                item.path === '/approved' ||
+                item.path === '/returned'
+              }
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center flex-1 h-full relative transition-colors ${
                   isActive
@@ -246,7 +264,11 @@ export const Navigation: React.FC = () => {
               <div className="relative">
                 <item.icon className="w-5 h-5" />
                 {item.badge !== undefined && item.badge > 0 && (
-                  <span className="absolute -top-1.5 -right-2 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white">
+                  <span
+                    className={`absolute -top-1.5 -right-2 min-w-4 h-4 px-1 rounded-full ${
+                      item.badgeVariant === 'amber' ? 'bg-amber-500' : 'bg-rose-500'
+                    } text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-xs`}
+                  >
                     {item.badge > 9 ? '9+' : item.badge}
                   </span>
                 )}
@@ -298,15 +320,26 @@ export const Navigation: React.FC = () => {
                   to={item.path}
                   onClick={() => setShowMoreMenu(false)}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 p-3 rounded-xl border text-xs font-semibold transition-all ${
+                    `flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition-all ${
                       isActive
                         ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
                         : 'border-slate-100 bg-slate-50/60 text-slate-700 hover:bg-slate-100'
                     }`
                   }
                 >
-                  <item.icon className="w-4 h-4 shrink-0 text-slate-400" />
-                  <span className="truncate">{item.label}</span>
+                  <div className="flex items-center gap-3 truncate">
+                    <item.icon className="w-4 h-4 shrink-0 text-slate-400" />
+                    <span className="truncate">{item.label}</span>
+                  </div>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span
+                      className={`px-1.5 py-0.2 text-[10px] font-bold rounded-full ${
+                        item.badgeVariant === 'amber' ? 'bg-amber-500 text-white' : 'bg-rose-500 text-white'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>
