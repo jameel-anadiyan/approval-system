@@ -322,22 +322,65 @@ export function useDirectory() {
   /** Admin adds / renames / (de)activates a region in Region Master (Head cannot manage this). */
   const saveRegion = async (input: { id?: string; name: string; code: string; is_active?: boolean }): Promise<Result> => {
     if (live) {
-      const { error } = await supabase.rpc('save_region', {
+      // 1. Try RPC first
+      const { error: rpcErr } = await supabase.rpc('save_region', {
         p_id: input.id ?? null,
         p_name: input.name,
         p_code: input.code,
         p_is_active: input.is_active ?? true,
       });
-      if (error) {
-        return {
-          success: false,
-          error: error.message.includes('does not exist')
-            ? 'Database error: Please execute migration 0034_regions_and_exhibition_rules.sql in your Supabase SQL Editor.'
-            : error.message,
-        };
+
+      if (!rpcErr) {
+        await reload();
+        return { success: true };
       }
-      await reload();
-      return { success: true };
+
+      // 2. Direct table fallback if table exists but RPC hasn't been reloaded
+      if (
+        rpcErr.message.includes('schema cache') ||
+        rpcErr.message.includes('not found') ||
+        rpcErr.message.includes('does not exist')
+      ) {
+        try {
+          if (input.id) {
+            const { error: updateErr } = await supabase
+              .from('regions')
+              .update({
+                name: input.name.trim(),
+                code: input.code.trim().toUpperCase(),
+                is_active: input.is_active ?? true,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', input.id);
+            if (!updateErr) {
+              await reload();
+              return { success: true };
+            }
+          } else {
+            const { error: insertErr } = await supabase
+              .from('regions')
+              .insert({
+                name: input.name.trim(),
+                code: input.code.trim().toUpperCase(),
+                is_active: input.is_active ?? true,
+              });
+            if (!insertErr) {
+              await reload();
+              return { success: true };
+            }
+          }
+        } catch {
+          // Fall through to friendly error
+        }
+      }
+
+      return {
+        success: false,
+        error:
+          rpcErr.message.includes('schema cache') || rpcErr.message.includes('does not exist')
+            ? 'Database migration required: Please run migration 0034_regions_and_exhibition_rules.sql in your Supabase SQL Editor.'
+            : rpcErr.message,
+      };
     }
     setRegions((prev) =>
       input.id

@@ -53,10 +53,11 @@ insert into public.regions (name, code, is_active) values
 on conflict (code) do nothing;
 
 -- 5. RPC to save/update a region (Admin only) ---------------------------------
+drop function if exists public.save_region(uuid, text, text, boolean);
 create or replace function public.save_region(
-  p_id uuid,
-  p_name text,
-  p_code text,
+  p_id uuid default null,
+  p_name text default null,
+  p_code text default null,
   p_is_active boolean default true
 )
 returns uuid language plpgsql security definer set search_path = '' as $$
@@ -94,6 +95,7 @@ revoke execute on function public.save_region(uuid, text, text, boolean) from pu
 grant execute on function public.save_region(uuid, text, text, boolean) to authenticated;
 
 -- 6. RPC to set a Head's access to Special Waiting List tab (Admin only) ------
+drop function if exists public.set_exhibition_waitlist_access(uuid, boolean);
 create or replace function public.set_exhibition_waitlist_access(
   p_user_id uuid,
   p_allowed boolean
@@ -120,6 +122,7 @@ revoke execute on function public.set_exhibition_waitlist_access(uuid, boolean) 
 grant execute on function public.set_exhibition_waitlist_access(uuid, boolean) to authenticated;
 
 -- 7. RPC to approve or reject exhibition waitlist (Head with access or Admin) -
+drop function if exists public.decide_exhibition_waitlist(uuid, text, text);
 create or replace function public.decide_exhibition_waitlist(
   p_request_id uuid,
   p_action text, -- 'approve' | 'reject'
@@ -148,7 +151,8 @@ begin
 
     perform public._log_action(
       r.id, me, 'forwarded', r.status, r.status,
-      coalesce(nullif(btrim(p_remarks), ''), 'Special Waiting List Exhibition approved by Head')
+      coalesce(nullif(btrim(p_remarks), ''), 'Special Waiting List Exhibition approved by Head'),
+      true
     );
   elsif p_action = 'reject' then
     update public.requests
@@ -161,7 +165,8 @@ begin
 
     perform public._log_action(
       r.id, me, 'rejected', r.status, 'rejected',
-      coalesce(nullif(btrim(p_remarks), ''), 'Special Waiting List Exhibition rejected')
+      coalesce(nullif(btrim(p_remarks), ''), 'Special Waiting List Exhibition rejected'),
+      true
     );
   else
     raise exception 'Invalid action % (expected approve or reject)', p_action;
