@@ -42,75 +42,84 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let mounted = true;
     let unsubscribe: (() => void) | undefined;
 
+    const onSync = (e: Event) => {
+      const custom = e as CustomEvent<Profile>;
+      if (custom.detail && mounted) {
+        setUser(custom.detail);
+      }
+    };
+    window.addEventListener('approval_app_user_sync', onSync);
+
     (async () => {
-      const conn = await checkSupabaseConnection();
-      if (!mounted) return;
-      setIsBackendConnected(conn.connected);
+      try {
+        const conn = await checkSupabaseConnection();
+        if (!mounted) return;
+        setIsBackendConnected(conn.connected);
 
-      if (conn.connected) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const profile = await loadProfile(session.user.id);
-          if (mounted) setUser(profile && profile.is_active ? profile : null);
-          if (!profile || !profile.is_active) await supabase.auth.signOut();
+        if (conn.connected) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const profile = await loadProfile(session.user.id);
+            if (mounted) setUser(profile && profile.is_active ? profile : null);
+            if (!profile || !profile.is_active) await supabase.auth.signOut();
+          }
+          const { data } = supabase.auth.onAuthStateChange((event, s) => {
+            if (event === 'SIGNED_OUT' || !s?.user) {
+              if (mounted) setUser(null);
+            }
+          });
+          unsubscribe = () => data.subscription.unsubscribe();
+        } else {
+          const saved = localStorage.getItem(SANDBOX_USER_KEY);
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved) as Profile;
+              const matched = MOCK_USERS.find((u) => u.id === parsed.id || u.username === parsed.username);
+              const fresh: Profile = matched
+                ? {
+                    ...matched,
+                    ...parsed,
+                    can_view_exhibition_waitlist:
+                      parsed.can_view_exhibition_waitlist !== undefined
+                        ? parsed.can_view_exhibition_waitlist
+                        : matched.can_view_exhibition_waitlist,
+                    can_view_discount_report:
+                      parsed.can_view_discount_report !== undefined
+                        ? parsed.can_view_discount_report
+                        : matched.can_view_discount_report,
+                    region_id: parsed.region_id ?? matched.region_id,
+                    allowed_types: parsed.allowed_types ?? matched.allowed_types,
+                  }
+                : parsed;
+
+              if (fresh.role === 'admin') {
+                fresh.can_view_exhibition_waitlist = true;
+                fresh.can_view_discount_report = true;
+              }
+              if (fresh.username === 'head_fin' && fresh.can_view_exhibition_waitlist === undefined) {
+                fresh.can_view_exhibition_waitlist = true;
+              }
+              if (mounted) setUser(fresh);
+              localStorage.setItem(SANDBOX_USER_KEY, JSON.stringify(fresh));
+            } catch {
+              localStorage.removeItem(SANDBOX_USER_KEY);
+            }
+          }
         }
-        const { data } = supabase.auth.onAuthStateChange((event, s) => {
-          if (event === 'SIGNED_OUT' || !s?.user) {
-            if (mounted) setUser(null);
-          }
-        });
-        unsubscribe = () => data.subscription.unsubscribe();
-      } else {
-        const saved = localStorage.getItem(SANDBOX_USER_KEY);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved) as Profile;
-            const matched = MOCK_USERS.find((u) => u.id === parsed.id || u.username === parsed.username);
-            const fresh: Profile = matched
-              ? {
-                  ...matched,
-                  ...parsed,
-                  can_view_exhibition_waitlist:
-                    parsed.can_view_exhibition_waitlist !== undefined
-                      ? parsed.can_view_exhibition_waitlist
-                      : matched.can_view_exhibition_waitlist,
-                  can_view_discount_report:
-                    parsed.can_view_discount_report !== undefined
-                      ? parsed.can_view_discount_report
-                      : matched.can_view_discount_report,
-                  region_id: parsed.region_id ?? matched.region_id,
-                  allowed_types: parsed.allowed_types ?? matched.allowed_types,
-                }
-              : parsed;
-
-            if (fresh.role === 'admin') {
-              fresh.can_view_exhibition_waitlist = true;
-              fresh.can_view_discount_report = true;
-            }
-            if (fresh.username === 'head_fin' && fresh.can_view_exhibition_waitlist === undefined) {
-              fresh.can_view_exhibition_waitlist = true;
-            }
-            if (mounted) setUser(fresh);
-            localStorage.setItem(SANDBOX_USER_KEY, JSON.stringify(fresh));
-          } catch {
-            localStorage.removeItem(SANDBOX_USER_KEY);
-          }
+      } catch (err) {
+        console.error('Failed to initialize auth:', err);
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
         }
       }
-      const onSync = (e: Event) => {
-        const custom = e as CustomEvent<Profile>;
-        if (custom.detail && mounted) {
-          setUser(custom.detail);
-        }
-      };
-      window.addEventListener('approval_app_user_sync', onSync);
-
-      return () => {
-        mounted = false;
-        unsubscribe?.();
-        window.removeEventListener('approval_app_user_sync', onSync);
-      };
     })();
+
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+      window.removeEventListener('approval_app_user_sync', onSync);
+    };
   }, []);
 
   const refreshProfile = useCallback(async () => {
