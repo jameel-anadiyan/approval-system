@@ -189,6 +189,21 @@ export function useDirectory() {
         ...input,
       });
       if (error) return { success: false, error: error.message };
+
+      // Ensure region_id is assigned directly via RPC or direct update
+      if (input.region_id && data?.id) {
+        const { error: rpcErr } = await supabase.rpc('set_user_region', {
+          p_user_id: data.id,
+          p_region_id: input.region_id,
+        });
+        if (rpcErr) {
+          await supabase
+            .from('profiles')
+            .update({ region_id: input.region_id, updated_at: new Date().toISOString() })
+            .eq('id', data.id);
+        }
+      }
+
       if (input.photo && data?.id) {
         await invokeEdgeFunction('admin-users', {
           action: 'set_photo',
@@ -218,11 +233,26 @@ export function useDirectory() {
     return { success: true };
   };
 
-  /** Admin / Head changes a user's shop(s), request types, Regional Head or work categories. */
+  /** Admin / Head changes a user's shop(s), request types, Regional Head, Region or work categories. */
   const updateAccess = async (userId: string, access: AccessInput): Promise<Result> => {
     if (live) {
       const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
       if (error) return { success: false, error: error.message };
+
+      // Directly persist region_id to guarantee persistence in live PostgreSQL
+      if (access.region_id !== undefined) {
+        const { error: rpcErr } = await supabase.rpc('set_user_region', {
+          p_user_id: userId,
+          p_region_id: access.region_id || null,
+        });
+        if (rpcErr) {
+          await supabase
+            .from('profiles')
+            .update({ region_id: access.region_id || null, updated_at: new Date().toISOString() })
+            .eq('id', userId);
+        }
+      }
+
       await reload();
       return { success: true };
     }
@@ -232,12 +262,34 @@ export function useDirectory() {
       ...u,
       ...access,
       shop,
-      region_id: access.region_id !== undefined ? access.region_id : u.region_id,
+      region_id: access.region_id !== undefined ? (access.region_id || null) : u.region_id,
       region: access.region_id !== undefined ? region : u.region,
       rh_shops: (access.shop_ids || []).map((shop_id) => ({ shop_id })),
       clerk_cats: (access.category_ids || []).map((category_id) => ({ category_id })),
       user_heads: (access.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === access.default_head_id })),
     } : u)));
+    return { success: true };
+  };
+
+  /** Explicitly assign or clear a user's Region (Admin only). */
+  const setUserRegion = async (userId: string, regionId: string | null): Promise<Result> => {
+    if (live) {
+      const { error: rpcErr } = await supabase.rpc('set_user_region', {
+        p_user_id: userId,
+        p_region_id: regionId || null,
+      });
+      if (rpcErr) {
+        const { error: updateErr } = await supabase
+          .from('profiles')
+          .update({ region_id: regionId || null, updated_at: new Date().toISOString() })
+          .eq('id', userId);
+        if (updateErr) return { success: false, error: updateErr.message };
+      }
+      await reload();
+      return { success: true };
+    }
+    const region = regionId ? regions.find((r) => r.id === regionId) ?? null : null;
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, region_id: regionId || null, region } : u)));
     return { success: true };
   };
 
@@ -468,7 +520,7 @@ export function useDirectory() {
 
   return {
     departments, shops, regions, users, categories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
-    createUser, updateAccess, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
+    createUser, updateAccess, setUserRegion, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto,
   };
 }

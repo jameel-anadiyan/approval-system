@@ -133,6 +133,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         allowed_types: withTypes ? types : undefined,
         photo: photo || undefined,
         ...(role === 'regional_head' ? { shop_ids: extra.shopIds, region_id: extra.regionId || null } : {}),
+        ...(role === 'head' ? { region_id: extra.regionId || null } : {}),
         ...(role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
         ...(role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
         ...(role === 'employee' || role === 'regional_head'

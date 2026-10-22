@@ -316,6 +316,32 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
         </fieldset>
       )}
 
+      {role === 'head' && (
+        <div>
+          <label htmlFor="access-region-head" className="text-xs font-bold text-slate-700 block mb-1">
+            Assigned Region <span className="text-[10px] font-normal text-slate-400">(Optional / Region Master)</span>
+          </label>
+          <select
+            id="access-region-head"
+            value={extra.regionId || ''}
+            onChange={(e) => setExtra({ regionId: e.target.value })}
+            className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden bg-white"
+          >
+            <option value="">None / All Regions</option>
+            {regions
+              .filter((r) => r.is_active || r.id === extra.regionId)
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.code})
+                </option>
+              ))}
+          </select>
+          <span className="text-[10px] text-slate-400 mt-1 block">
+            Optionally associate this Department Head with an enterprise region from Region Master.
+          </span>
+        </div>
+      )}
+
       <fieldset>
         <legend className="text-xs font-bold text-slate-700 mb-1.5">
           Request types this user can raise <span className="text-rose-500">*</span>
@@ -430,6 +456,7 @@ export const AccessModal: React.FC<{
       shop_id: target.role === 'regional_head' ? null : shopId || null,
       allowed_types: types,
       ...(target.role === 'regional_head' ? { shop_ids: extra.shopIds, region_id: extra.regionId || null } : {}),
+      ...(target.role === 'head' ? { region_id: extra.regionId || null } : {}),
       ...(target.role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
       ...(target.role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
       ...(target.role === 'employee' || target.role === 'regional_head'
@@ -449,9 +476,11 @@ export const AccessModal: React.FC<{
       description={
         target.role === 'regional_head'
           ? 'Region, shops covered, assigned Heads, and request types this Regional Head can raise.'
-          : target.role === 'clerk'
-            ? 'Work categories and request types this clerk can raise.'
-            : 'Shop, Regional Head, assigned Heads, and request types this user can raise.'
+          : target.role === 'head'
+            ? 'Region and request types this Department Head can raise.'
+            : target.role === 'clerk'
+              ? 'Work categories and request types this clerk can raise.'
+              : 'Shop, Regional Head, assigned Heads, and request types this user can raise.'
       }
       maxWidth="md"
     >

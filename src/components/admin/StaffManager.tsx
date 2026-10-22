@@ -215,7 +215,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                 </div>
               )}
 
-              {u.role === 'regional_head' && (
+              {(u.role === 'regional_head' || (u.role === 'head' && (u.region || u.region_id))) && (
                 <div className="flex items-center gap-1.5 text-xs text-indigo-800 bg-indigo-50/70 border border-indigo-200/80 rounded-xl px-2.5 py-1 w-fit">
                   <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                   <span>Region: <strong>{u.region?.name || dir.regions.find((r) => r.id === u.region_id)?.name || 'Not assigned'}</strong></span>
