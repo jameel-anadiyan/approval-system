@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
+import { useDirectory } from '../../lib/directory';
 import { formatINR } from '../../lib/formatters';
 import { extractEventDate } from '../../lib/exhibitionQuota';
 import {
@@ -10,14 +11,9 @@ import {
   ChevronRight,
   MapPin,
   PlusCircle,
-  Store,
   AlertTriangle,
   CheckCircle2,
-  Clock,
-  User,
-  Info,
   Calendar as CalendarIcon,
-  X,
   ExternalLink,
 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
@@ -26,10 +22,12 @@ import { RequestRecord } from '../../types/database';
 export const ExhibitionCalendarPage: React.FC = () => {
   const { user } = useAuth();
   const { requests } = useRequests();
+  const dir = useDirectory();
   const navigate = useNavigate();
 
   const [currentDate, setCurrentDate] = useState(() => new Date());
-  const [selectedRegionId, setSelectedRegionId] = useState<string>(() => user?.region_id || 'all');
+  // Default to 'all' so all booked exhibitions across all regions immediately display
+  const [selectedRegionId, setSelectedRegionId] = useState<string>('all');
   const [selectedDayEvents, setSelectedDayEvents] = useState<{
     dateStr: string;
     displayDate: string;
@@ -49,34 +47,44 @@ export const ExhibitionCalendarPage: React.FC = () => {
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
   const gotoToday = () => setCurrentDate(new Date());
 
-  // Active exhibition requests (all requested exhibitions count, not just approved)
+  // Active exhibition requests (all initiated exhibitions immediately count and reflect on calendar)
   const exhibitionRequests = useMemo(() => {
     return requests.filter((r) => {
       if (r.request_type !== 'exhibition') return false;
-      if (r.status === 'draft' || r.status === 'rejected' || r.status === 'withdrawn' || r.status === 'cancelled') return false;
+      // Do NOT filter drafts: initiated requests immediately claim the date/slot.
+      // Only rejected, withdrawn, or cancelled requests release the slot.
+      if (r.status === 'rejected' || r.status === 'withdrawn' || r.status === 'cancelled') return false;
       return true;
     });
   }, [requests]);
 
-  // Extract distinct regions
+  // Extract distinct regions (from directory regions + active requests + current user)
   const regionsList = useMemo(() => {
     const map = new Map<string, string>();
-    exhibitionRequests.forEach((r) => {
-      if (r.region_id && r.region_name) {
-        map.set(r.region_id, r.region_name);
-      }
+    // Pre-fill from active directory regions
+    dir.regions.forEach((rg) => {
+      if (rg.id && rg.name) map.set(rg.id, rg.name);
     });
-    // Ensure user's own region is in the list
+    // Add any regions from requests
+    exhibitionRequests.forEach((r) => {
+      const regId = r.region_id || (r.details as any)?.region_id;
+      const regName = r.region_name || (r.details as any)?.region_name;
+      if (regId && regName) map.set(regId, regName);
+    });
+    // Add user's assigned region
     if (user?.region_id && user?.region?.name) {
       map.set(user.region_id, user.region.name);
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [exhibitionRequests, user]);
+  }, [dir.regions, exhibitionRequests, user]);
 
   // Filter requests by selected region (if not "all")
   const regionFilteredRequests = useMemo(() => {
     if (selectedRegionId === 'all') return exhibitionRequests;
-    return exhibitionRequests.filter((r) => r.region_id === selectedRegionId);
+    return exhibitionRequests.filter((r) => {
+      const regId = r.region_id || (r.details as any)?.region_id;
+      return regId === selectedRegionId;
+    });
   }, [exhibitionRequests, selectedRegionId]);
 
   // Group requests by YYYY-MM-DD
@@ -105,7 +113,7 @@ export const ExhibitionCalendarPage: React.FC = () => {
     for (let i = firstDayIndex - 1; i >= 0; i--) {
       const dayNum = daysInPrevMonth - i;
       const prevDate = new Date(year, month - 1, dayNum);
-      const dateStr = prevDate.toISOString().slice(0, 10);
+      const dateStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
       days.push({
         dateStr,
         dayNum,
@@ -115,10 +123,11 @@ export const ExhibitionCalendarPage: React.FC = () => {
     }
 
     // Current month days
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     for (let d = 1; d <= daysInMonth; d++) {
       const curDate = new Date(year, month, d);
-      const dateStr = curDate.toISOString().slice(0, 10);
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       days.push({
         dateStr,
         dayNum: d,
@@ -131,7 +140,7 @@ export const ExhibitionCalendarPage: React.FC = () => {
     const remaining = (7 - (days.length % 7)) % 7;
     for (let n = 1; n <= remaining; n++) {
       const nextDate = new Date(year, month + 1, n);
-      const dateStr = nextDate.toISOString().slice(0, 10);
+      const dateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(n).padStart(2, '0')}`;
       days.push({
         dateStr,
         dayNum: n,
@@ -177,12 +186,17 @@ export const ExhibitionCalendarPage: React.FC = () => {
               onChange={(e) => setSelectedRegionId(e.target.value)}
               className="bg-transparent border-none outline-hidden cursor-pointer font-bold text-slate-800"
             >
-              <option value="all">All Regions</option>
-              {regionsList.map((rg) => (
-                <option key={rg.id} value={rg.id}>
-                  {rg.name}
-                </option>
-              ))}
+              <option value="all">All Regions ({exhibitionRequests.length} active)</option>
+              {regionsList.map((rg) => {
+                const count = exhibitionRequests.filter(
+                  (r) => (r.region_id || (r.details as any)?.region_id) === rg.id
+                ).length;
+                return (
+                  <option key={rg.id} value={rg.id}>
+                    {rg.name} {count > 0 ? `(${count})` : ''}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -235,23 +249,23 @@ export const ExhibitionCalendarPage: React.FC = () => {
           </span>
         </div>
 
-        {/* Color Legend */}
-        <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold text-slate-600">
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-emerald-500 shadow-2xs" />
+        {/* Color Legend (Filled Orange = Partially Booked, Filled Red = Fully Booked, Violet Dot = Special Request) */}
+        <div className="flex flex-wrap items-center gap-3.5 text-xs font-semibold text-slate-700">
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded-md bg-white border-2 border-emerald-500 shadow-2xs inline-block" />
             <span>Open (0/2 Booked)</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-amber-500 shadow-2xs" />
-            <span>1 Slot Booked</span>
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded-md bg-orange-500 border border-orange-600 shadow-2xs inline-block" />
+            <span className="text-orange-950 font-bold">1 Slot Booked (Orange Tile)</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-indigo-600 shadow-2xs" />
-            <span>2 Slots Booked (Full)</span>
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded-md bg-red-600 border border-red-700 shadow-2xs inline-block" />
+            <span className="text-red-950 font-bold">Fully Booked (Red Tile)</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-rose-500 shadow-2xs" />
-            <span>Special Waitlist</span>
+          <div className="flex items-center gap-2">
+            <span className="w-3.5 h-3.5 rounded-full bg-violet-600 ring-2 ring-white shadow-xs inline-block animate-pulse" />
+            <span className="text-violet-950 font-bold">Special Request (Violet Dot)</span>
           </div>
         </div>
       </div>
@@ -279,20 +293,32 @@ export const ExhibitionCalendarPage: React.FC = () => {
             const standardCount = standardEvents.length;
             const waitlistCount = waitlistEvents.length;
 
-            // Determine day badge and border color
-            let tileBg = 'bg-white';
-            let statusDot = 'bg-emerald-400';
-            let statusLabel = 'Open';
+            // Filled tile colors as requested:
+            // Orange when partially booked (1 slot booked)
+            // Red when fully booked (2 slots booked)
+            // Open (0 slots): White tile
+            let tileClass = 'bg-white hover:bg-slate-50 text-slate-900 border-slate-100';
+            let dayNumClass = 'text-slate-800';
+            let statusLabel = 'Open (0/2)';
+            let statusClass = 'text-emerald-700 font-medium';
 
-            if (standardCount === 1) {
-              tileBg = 'bg-amber-50/30';
-              statusDot = 'bg-amber-500';
-              statusLabel = '1 Booked';
+            if (!day.isCurrentMonth) {
+              tileClass = 'opacity-30 bg-slate-100/60 text-slate-400 border-slate-100 pointer-events-none';
+              dayNumClass = 'text-slate-400';
+              statusLabel = '';
+            } else if (standardCount === 1) {
+              tileClass = 'bg-orange-500 hover:bg-orange-600 border-orange-600 text-white shadow-xs';
+              dayNumClass = 'text-white';
+              statusLabel = '1 of 2 Booked';
+              statusClass = 'text-orange-100 font-bold';
             } else if (standardCount >= 2) {
-              tileBg = 'bg-indigo-50/30';
-              statusDot = 'bg-indigo-600';
-              statusLabel = '2 Booked';
+              tileClass = 'bg-red-600 hover:bg-red-700 border-red-700 text-white shadow-xs';
+              dayNumClass = 'text-white';
+              statusLabel = 'Fully Booked (2/2)';
+              statusClass = 'text-red-100 font-bold';
             }
+
+            const isFilledColor = day.isCurrentMonth && standardCount >= 1;
 
             return (
               <div
@@ -311,71 +337,94 @@ export const ExhibitionCalendarPage: React.FC = () => {
                     events: dayEvents,
                   });
                 }}
-                className={`min-h-[110px] sm:min-h-[130px] p-2.5 flex flex-col justify-between transition-all hover:bg-slate-50/80 cursor-pointer relative group ${
-                  !day.isCurrentMonth ? 'opacity-40 bg-slate-50/50' : tileBg
-                } ${day.isToday ? 'ring-2 ring-indigo-500 ring-inset' : ''}`}
+                className={`min-h-[115px] sm:min-h-[135px] p-2.5 flex flex-col justify-between transition-all cursor-pointer relative group border ${tileClass} ${
+                  day.isToday
+                    ? isFilledColor
+                      ? 'ring-3 ring-white ring-inset shadow-md'
+                      : 'ring-3 ring-indigo-500 ring-inset shadow-md'
+                    : ''
+                }`}
               >
                 {/* Date Header in cell */}
                 <div className="flex items-center justify-between">
-                  <span
-                    className={`text-xs font-bold ${
-                      day.isToday
-                        ? 'w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center font-extrabold shadow-xs'
-                        : 'text-slate-800'
-                    }`}
-                  >
-                    {day.dayNum}
-                  </span>
+                  {day.isToday ? (
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-black shadow-xs ${
+                        isFilledColor
+                          ? standardCount === 1
+                            ? 'bg-white text-orange-600'
+                            : 'bg-white text-red-600'
+                          : 'bg-indigo-600 text-white'
+                      }`}
+                    >
+                      {day.dayNum} Today
+                    </span>
+                  ) : (
+                    <span className={`text-xs font-black ${dayNumClass}`}>
+                      {day.dayNum}
+                    </span>
+                  )}
 
+                  {/* Header Indicators */}
                   {day.isCurrentMonth && (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
+                      {/* Special Request gets a Violet Dot */}
                       {waitlistCount > 0 && (
                         <span
-                          className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white"
-                          title={`${waitlistCount} Waitlist Request(s)`}
+                          className="w-3.5 h-3.5 rounded-full bg-violet-600 ring-2 ring-white shadow-sm shrink-0 inline-block animate-pulse"
+                          title={`${waitlistCount} Special Waitlist Request(s)`}
                         />
                       )}
-                      <span
-                        className={`w-2.5 h-2.5 rounded-full ${statusDot} ring-2 ring-white`}
-                        title={statusLabel}
-                      />
+                      {!isFilledColor && (
+                        <span
+                          className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-1 ring-emerald-500/30"
+                          title="Open Date"
+                        />
+                      )}
                     </div>
                   )}
                 </div>
 
                 {/* Day Events preview */}
-                <div className="mt-1 space-y-1 flex-1 overflow-hidden">
+                <div className="mt-1.5 space-y-1 flex-1 overflow-hidden">
                   {standardEvents.slice(0, 2).map((ev) => (
                     <div
                       key={ev.id}
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold truncate bg-indigo-100/80 text-indigo-900 border border-indigo-200/60"
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold truncate ${
+                        isFilledColor
+                          ? 'bg-black/25 text-white border border-white/20 backdrop-blur-xs'
+                          : 'bg-indigo-50 text-indigo-900 border border-indigo-200'
+                      }`}
                       title={`${ev.details?.event_name || ev.title} (${ev.requester_name})`}
                     >
                       {ev.details?.event_name || ev.title}
                     </div>
                   ))}
 
+                  {/* Special Request Waitlist Pill */}
                   {waitlistEvents.length > 0 && (
                     <div
-                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold truncate bg-rose-100 text-rose-900 border border-rose-200 flex items-center gap-1"
-                      title={`${waitlistCount} Special Waitlist`}
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold truncate flex items-center gap-1 ${
+                        isFilledColor
+                          ? 'bg-violet-900/90 text-white border border-violet-400 shadow-2xs'
+                          : 'bg-violet-100 text-violet-950 border border-violet-300'
+                      }`}
+                      title={`${waitlistCount} Special Waitlist Request(s)`}
                     >
-                      <AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                      <span className="w-2 h-2 rounded-full bg-violet-300 shrink-0" />
                       <span>{waitlistCount} Waitlist</span>
                     </div>
                   )}
                 </div>
 
-                {/* Bottom status hint on hover */}
-                <div className="text-[10px] font-semibold text-slate-400 group-hover:text-indigo-600 transition-colors pt-1">
-                  {standardCount === 0 ? (
-                    <span className="text-emerald-700">Open (0/2)</span>
-                  ) : standardCount === 1 ? (
-                    <span className="text-amber-700">1 of 2 slots</span>
-                  ) : (
-                    <span className="text-indigo-700">Full (2/2)</span>
-                  )}
-                </div>
+                {/* Bottom status hint */}
+                {day.isCurrentMonth && (
+                  <div className="pt-1 flex items-center justify-between text-[10px]">
+                    <span className={statusClass}>
+                      {statusLabel}
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -394,12 +443,18 @@ export const ExhibitionCalendarPage: React.FC = () => {
             <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-700">Daily Regional Quota</span>
-                <span className="font-bold text-indigo-700">
+                <span className={`font-black px-2.5 py-0.5 rounded-full ${
+                  selectedDayEvents.events.filter((r) => !r.is_waitlist).length >= 2
+                    ? 'bg-red-100 text-red-700 border border-red-200'
+                    : selectedDayEvents.events.filter((r) => !r.is_waitlist).length === 1
+                    ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                }`}>
                   {selectedDayEvents.events.filter((r) => !r.is_waitlist).length} / 2 Slots Booked
                 </span>
               </div>
               <p className="text-slate-600 text-[11px] leading-relaxed">
-                Rules: Any single Regional Head can book up to 2 slots on this date. Other Regional Heads in the same region must submit via the Special Waiting List.
+                Rules: Any single Regional Head can book up to 2 slots on this date. Other Regional Heads in the same region must submit via the Special Waiting List (indicated with violet dot).
               </p>
             </div>
 
@@ -430,7 +485,7 @@ export const ExhibitionCalendarPage: React.FC = () => {
                     key={r.id}
                     className={`p-3.5 rounded-xl border transition-all ${
                       r.is_waitlist
-                        ? 'bg-rose-50/70 border-rose-200 text-rose-950'
+                        ? 'bg-violet-50/80 border-violet-200 text-violet-950'
                         : 'bg-white border-slate-200 text-slate-900'
                     }`}
                   >
@@ -441,9 +496,9 @@ export const ExhibitionCalendarPage: React.FC = () => {
                             {r.details?.event_name || r.title}
                           </span>
                           {r.is_waitlist ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 border border-rose-300">
-                              <AlertTriangle className="w-3 h-3 text-rose-600" />
-                              Special Waitlist
+                            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-900 border border-violet-300">
+                              <span className="w-2 h-2 rounded-full bg-violet-600"></span>
+                              Special Waitlist Request
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 border border-indigo-200">
@@ -455,7 +510,7 @@ export const ExhibitionCalendarPage: React.FC = () => {
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : 'bg-amber-50 text-amber-700 border-amber-200'
                           }`}>
-                            {r.status === 'approved' || r.status === 'paid' ? 'Approved' : 'Requested (Counts as Booked)'}
+                            {r.status === 'approved' || r.status === 'paid' ? 'Approved' : 'Requested (Slot Reserved)'}
                           </span>
                         </div>
 

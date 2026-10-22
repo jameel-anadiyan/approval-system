@@ -439,13 +439,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // Guarantee region and waitlist fields are saved on the request record
         if (type === 'exhibition' && requestId) {
           const isWaitlist = Boolean(data.details && 'is_waitlist' in data.details ? data.details.is_waitlist : false);
-          const regId = user.region_id || (data.details && 'region_id' in data.details ? (data.details as any).region_id : null);
-          const regName = user.region?.name || null;
+          const regId = (data.details && 'region_id' in data.details ? (data.details as any).region_id : null) || user.region_id || null;
+          const regName = (data.details && 'region_name' in data.details ? (data.details as any).region_name : null) || user.region?.name || null;
           await supabase
             .from('requests')
             .update({
               region_id: regId || null,
-              region_name: regName,
+              region_name: regName || null,
               is_waitlist: isWaitlist,
             })
             .eq('id', requestId);
@@ -570,11 +570,18 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           return { success: false, error: catErr.message };
         }
       }
-      if (data.details && 'is_waitlist' in data.details) {
-        await supabase
-          .from('requests')
-          .update({ is_waitlist: Boolean(data.details.is_waitlist) })
-          .eq('id', id);
+      if (data.details && ('is_waitlist' in data.details || 'region_id' in data.details || 'region_name' in data.details)) {
+        const updatePayload: Record<string, any> = {};
+        if ('is_waitlist' in data.details) updatePayload.is_waitlist = Boolean(data.details.is_waitlist);
+        if ('region_id' in data.details && (data.details as any).region_id) {
+          updatePayload.region_id = (data.details as any).region_id;
+        }
+        if ('region_name' in data.details && (data.details as any).region_name) {
+          updatePayload.region_name = (data.details as any).region_name;
+        }
+        if (Object.keys(updatePayload).length > 0) {
+          await supabase.from('requests').update(updatePayload).eq('id', id);
+        }
       }
       await loadRequests();
       return { success: true };
@@ -583,12 +590,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       prev.map((r) => {
         if (r.id !== id) return r;
         const isWaitlist = data.details && 'is_waitlist' in data.details ? Boolean(data.details.is_waitlist) : r.is_waitlist;
+        const regId = data.details && 'region_id' in data.details ? (data.details as any).region_id : r.region_id;
+        const regName = data.details && 'region_name' in data.details ? (data.details as any).region_name : r.region_name;
         return {
           ...r,
           title: data.title,
           amount: data.amount,
           notes: data.notes || null,
           details: data.details !== undefined ? data.details : r.details,
+          region_id: regId,
+          region_name: regName,
           is_waitlist: isWaitlist,
           updated_at: new Date().toISOString(),
         };

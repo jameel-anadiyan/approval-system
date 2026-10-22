@@ -16,13 +16,48 @@ export interface ExhibitionQuotaStatus {
 
 /** Extracts the YYYY-MM-DD date string from an event date or ISO timestamp. */
 export function extractEventDate(eventStart?: string | null, eventDates?: string | null): string | null {
-  if (eventStart && eventStart.length >= 10) {
-    return eventStart.slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const toYMD = (d: Date) => {
+    if (isNaN(d.getTime())) return null;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  if (eventStart && typeof eventStart === 'string') {
+    const trimmed = eventStart.trim();
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    const parsed = new Date(trimmed);
+    const res = toYMD(parsed);
+    if (res) return res;
   }
-  if (eventDates) {
-    // Attempt to parse standard date strings
-    const match = eventDates.match(/(\d{4}-\d{2}-\d{2})/);
-    if (match) return match[1];
+
+  if (eventDates && typeof eventDates === 'string') {
+    const trimmed = eventDates.trim();
+    const isoMatch = trimmed.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+    // Match DD Mon YYYY (e.g. 12 Nov 2026, 12 November 2026)
+    const textDateMatch = trimmed.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+    if (textDateMatch) {
+      const parsed = new Date(`${textDateMatch[1]} ${textDateMatch[2]} ${textDateMatch[3]}`);
+      const res = toYMD(parsed);
+      if (res) return res;
+    }
+
+    // Match Mon DD, YYYY (e.g. Nov 12, 2026)
+    const usDateMatch = trimmed.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+    if (usDateMatch) {
+      const parsed = new Date(`${usDateMatch[1]} ${usDateMatch[2]} ${usDateMatch[3]}`);
+      const res = toYMD(parsed);
+      if (res) return res;
+    }
+
+    const prefix = trimmed.split(/[,–—-]/)[0].trim();
+    if (prefix) {
+      const parsed = new Date(prefix);
+      const res = toYMD(parsed);
+      if (res) return res;
+    }
   }
   return null;
 }
@@ -64,11 +99,12 @@ export function checkExhibitionQuota(params: {
   }
 
   // Active exhibition requests on this date in this region:
-  // When a request is submitted/raised it counts immediately, not just once approved.
+  // When a request is initiated (including drafts), it reserves the slot immediately.
+  // Only rejected, withdrawn, or cancelled requests release the slot.
   const matchingRequests = allRequests.filter((r) => {
     if (r.id === excludeRequestId) return false;
     if (r.request_type !== 'exhibition') return false;
-    if (r.status === 'draft' || r.status === 'rejected' || r.status === 'withdrawn' || r.status === 'cancelled') return false;
+    if (r.status === 'rejected' || r.status === 'withdrawn' || r.status === 'cancelled') return false;
 
     // Check region match
     const rRegId = r.region_id || (r.details as any)?.region_id;
