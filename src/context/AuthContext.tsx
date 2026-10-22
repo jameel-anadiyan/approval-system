@@ -25,7 +25,7 @@ const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
 async function loadProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('*, department:departments(*), shop:shops(*)')
+    .select('*, department:departments(*), shop:shops(*), region:regions(*)')
     .eq('id', userId)
     .maybeSingle();
   if (error || !data) return null;

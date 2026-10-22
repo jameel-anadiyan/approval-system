@@ -1,10 +1,46 @@
 -- 0036_exhibition_request_counting_and_rls.sql
--- Ensures that as soon as an exhibition request is raised/submitted ("when request"),
+-- Ensures that as soon as an exhibition request is initiated (draft, submitted, pending, or approved),
 -- it immediately counts towards the regional date quota (max 2 per day) and appears
--- in the Exhibition Calendar as Booked, even before it is approved ("not just approved").
+-- in the Exhibition Calendar as Booked. Only rejected, withdrawn, or cancelled requests release the slot.
 
--- 1. Update RLS policy so all authenticated users with exhibition access can see
--- requested exhibitions across regions to accurately count slots & view calendar.
+-- 1. Trigger to automatically populate region_id, region_name, and is_waitlist on public.requests
+create or replace function public._auto_fill_request_region()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_req public.profiles;
+  v_rh public.profiles;
+begin
+  if new.request_type = 'exhibition' then
+    if new.region_id is null then
+      select * into v_req from public.profiles where id = new.requester_id;
+      if v_req.region_id is not null then
+        new.region_id := v_req.region_id;
+      elsif v_req.regional_head_id is not null then
+        select * into v_rh from public.profiles where id = v_req.regional_head_id;
+        new.region_id := v_rh.region_id;
+      elsif new.details is not null and new.details ? 'region_id' and (new.details->>'region_id') ~ '^[0-9a-fA-F-]{36}$' then
+        new.region_id := (new.details->>'region_id')::uuid;
+      end if;
+    end if;
+
+    if new.region_id is not null and (new.region_name is null or new.region_name = '') then
+      select name into new.region_name from public.regions where id = new.region_id;
+    end if;
+
+    if new.details is not null and (new.details->>'is_waitlist')::boolean is true then
+      new.is_waitlist := true;
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_auto_fill_request_region on public.requests;
+create trigger trg_auto_fill_request_region
+  before insert or update on public.requests
+  for each row execute function public._auto_fill_request_region();
+
+-- 2. Update RLS policy so all staff with exhibition access can see initiated exhibitions
+-- (excluding only rejected, withdrawn, and cancelled) to immediately count booked slots & display calendar.
 drop policy if exists requests_select on public.requests;
 create policy requests_select on public.requests for select using (
   ((select public.my_role()) is not null) and (
@@ -23,13 +59,13 @@ create policy requests_select on public.requests for select using (
     or (((select public.my_role()) = 'disbursement'::public.app_role)
         and (status = any (array['approved'::public.request_status, 'paid'::public.request_status, 'cancelled'::public.request_status]))
         and (request_type not in ('discount'::public.request_type, 'non_cash'::public.request_type)))
-    or (request_type = 'exhibition'::public.request_type and status <> 'draft'::public.request_status)
+    or (request_type = 'exhibition'::public.request_type and status not in ('rejected'::public.request_status, 'withdrawn'::public.request_status, 'cancelled'::public.request_status))
     or exists (select 1 from public.head_consultations hc
                 where hc.request_id = requests.id and hc.head_id = (select auth.uid()))
   )
 );
 
--- 2. Update can_view_request helper
+-- 3. Update can_view_request helper
 create or replace function public.can_view_request(p_request_id uuid)
  returns boolean language sql stable security definer set search_path to '' as $function$
   select exists (
@@ -44,7 +80,7 @@ create or replace function public.can_view_request(p_request_id uuid)
         or (me.role = 'head' and me.can_view_exhibition_waitlist and r.is_waitlist and r.status <> 'draft')
         or (me.role = 'regional_head' and (r.regional_head_id = me.id or r.requester_id = me.id) and (r.status <> 'draft' or r.requester_id = me.id))
         or (me.role = 'disbursement' and r.status in ('approved','paid','cancelled'))
-        or (r.request_type = 'exhibition' and r.status <> 'draft')
+        or (r.request_type = 'exhibition' and r.status not in ('rejected', 'withdrawn', 'cancelled'))
         or exists (
           select 1 from public.head_consultations hc
           where hc.request_id = r.id and hc.head_id = me.id
@@ -55,7 +91,7 @@ $function$;
 revoke execute on function public.can_view_request(uuid) from public, anon;
 grant execute on function public.can_view_request(uuid) to authenticated;
 
--- 3. Update create_typed_draft to automatically persist region_id, region_name, and is_waitlist
+-- 4. Update create_typed_draft
 create or replace function public.create_typed_draft(
   p_type public.request_type,
   p_title text,
@@ -101,13 +137,10 @@ begin
   if v_title is null and p_type = 'non_cash' then v_title := 'Non-Cash Request'; end if;
   if v_title is null then raise exception 'Title is required'; end if;
 
-  -- Determine target head and department
   if p_target_head_id is not null then
     select * into v_target_head from public.profiles
     where id = p_target_head_id and role = 'head' and is_active;
-    if v_target_head.id is null then
-      raise exception 'The selected Head is not active or not found';
-    end if;
+    if v_target_head.id is null then raise exception 'The selected Head is not active or not found'; end if;
     v_dept_id := v_target_head.department_id;
     v_owner_head_id := v_target_head.id;
     v_owner_head_name := v_target_head.full_name;
@@ -127,7 +160,6 @@ begin
 
   select name into v_shop from public.shops where id = me.shop_id;
 
-  -- Determine Region and Special Waitlist for Exhibition requests
   v_region_id := null;
   v_region_name := null;
   v_is_waitlist := false;
@@ -162,7 +194,7 @@ end $function$;
 revoke execute on function public.create_typed_draft(public.request_type, text, numeric, text, jsonb, uuid) from public, anon;
 grant execute on function public.create_typed_draft(public.request_type, text, numeric, text, jsonb, uuid) to authenticated;
 
--- 4. Backfill region and is_waitlist on existing exhibition requests
+-- 5. Backfill region and waitlist flags on existing exhibition requests
 update public.requests r
 set region_id = p.region_id,
     region_name = reg.name

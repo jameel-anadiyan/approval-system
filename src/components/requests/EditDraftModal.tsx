@@ -94,6 +94,8 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       if (exhibitionQuota?.mustUseWaitlist) {
         exh.is_waitlist = true;
       }
+      (exh as any).region_id = request.region_id || user?.region_id || null;
+      (exh as any).region_name = request.region_name || user?.region?.name || null;
       return exh;
     }
     if (type === 'asset') return toAssetDetails(asset);

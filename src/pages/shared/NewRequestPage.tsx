@@ -20,6 +20,7 @@ import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, 
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
+import { useDirectory } from '../../lib/directory';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
@@ -31,8 +32,24 @@ const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
 
 export const NewRequestPage: React.FC = () => {
   const { user } = useAuth();
+  const dir = useDirectory();
   const { createDraft, submitRequest, threshold, requests } = useRequests();
   const navigate = useNavigate();
+
+  const activeProfile = dir.users.find((u) => u.id === user?.id) || user;
+  const effectiveRegionId =
+    activeProfile?.region_id ||
+    user?.region_id ||
+    (activeProfile?.regional_head_id
+      ? dir.users.find((u) => u.id === activeProfile.regional_head_id)?.region_id
+      : null) ||
+    null;
+
+  const effectiveRegionName =
+    activeProfile?.region?.name ||
+    dir.regions.find((r) => r.id === effectiveRegionId)?.name ||
+    user?.region?.name ||
+    null;
 
   const allowed = useMemo<RequestType[]>(
     () => REQUEST_TYPES.filter((t) => (user?.allowed_types ?? ['general']).includes(t)),
@@ -63,12 +80,12 @@ export const NewRequestPage: React.FC = () => {
     return checkExhibitionQuota({
       eventStart: exhibition.event_start,
       eventDates: exhibition.event_dates,
-      regionId: user?.region_id || null,
-      regionName: user?.region?.name || null,
+      regionId: effectiveRegionId,
+      regionName: effectiveRegionName,
       currentUser: user,
       allRequests: requests,
     });
-  }, [type, exhibition.event_start, exhibition.event_dates, user, requests]);
+  }, [type, exhibition.event_start, exhibition.event_dates, effectiveRegionId, effectiveRegionName, user, requests]);
 
   const baseAmount = parseFloat(amountStr) || 0;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
@@ -121,6 +138,8 @@ export const NewRequestPage: React.FC = () => {
       if (exhibitionQuota?.mustUseWaitlist) {
         exh.is_waitlist = true;
       }
+      (exh as any).region_id = effectiveRegionId;
+      (exh as any).region_name = effectiveRegionName;
       return exh;
     }
     if (type === 'asset') return toAssetDetails(asset);
