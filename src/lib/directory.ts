@@ -54,79 +54,84 @@ export function useDirectory() {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    if (isBackendConnected && user) {
-      const [d, s, p, c, rRes] = await Promise.all([
-        supabase.from('departments').select('*').order('name'),
-        supabase.from('shops').select('*').order('name'),
-        supabase
-          .from('profiles')
-          .select(
-            '*, department:departments(*), shop:shops(*), region:regions(*), rh_shops:regional_head_shops!regional_head_shops_regional_head_id_fkey(shop_id), clerk_cats:clerk_categories!clerk_categories_clerk_id_fkey(category_id), user_heads:user_heads!user_heads_user_id_fkey(head_id, is_default)'
-          )
-          .order('created_at', { ascending: false }),
-        supabase.from('work_categories').select('*').order('name'),
-        supabase.from('regions').select('*').order('name'),
-      ]);
-      setDepartments((d.data as Department[]) ?? []);
-      setShops((s.data as Shop[]) ?? []);
-      setRegions((rRes.data as Region[]) ?? MOCK_REGIONS);
-      if (p.error) {
-        console.warn('Profiles load with embeds failed, using multi-query fallback:', p.error.message);
-        try {
-          const profileQuery = rRes.error
-            ? supabase.from('profiles').select('*, department:departments(*), shop:shops(*)').order('created_at', { ascending: false })
-            : supabase.from('profiles').select('*, department:departments(*), shop:shops(*), region:regions(*)').order('created_at', { ascending: false });
-
-          const [basicRes, rhShopsRes, clerkCatsRes, userHeadsRes] = await Promise.all([
-            profileQuery,
-            supabase.from('regional_head_shops').select('regional_head_id, shop_id'),
-            supabase.from('clerk_categories').select('clerk_id, category_id'),
-            supabase.from('user_heads').select('user_id, head_id, is_default'),
-          ]);
-          const rhMap: Record<string, { shop_id: string }[]> = {};
-          (rhShopsRes.data || []).forEach((r: any) => {
-            if (!rhMap[r.regional_head_id]) rhMap[r.regional_head_id] = [];
-            rhMap[r.regional_head_id].push({ shop_id: r.shop_id });
-          });
-          const catMap: Record<string, { category_id: string }[]> = {};
-          (clerkCatsRes.data || []).forEach((c: any) => {
-            if (!catMap[c.clerk_id]) catMap[c.clerk_id] = [];
-            catMap[c.clerk_id].push({ category_id: c.category_id });
-          });
-          const headMap: Record<string, { head_id: string; is_default: boolean }[]> = {};
-          (userHeadsRes.data || []).forEach((h: any) => {
-            if (!headMap[h.user_id]) headMap[h.user_id] = [];
-            headMap[h.user_id].push({ head_id: h.head_id, is_default: !!h.is_default });
-          });
-          const merged = ((basicRes.data as Profile[]) ?? []).map((u) => {
-            const matchedRegion = (u.region_id && MOCK_REGIONS.find((rg) => rg.id === u.region_id)) || null;
-            return {
-              ...u,
-              region: u.region ?? matchedRegion,
-              rh_shops: rhMap[u.id] || [],
-              clerk_cats: catMap[u.id] || [],
-              user_heads: headMap[u.id] || [],
-            };
-          });
-          setUsers(merged);
-        } catch {
-          // Never lose the staff list
-          const basic = await supabase
+    try {
+      if (isBackendConnected && user) {
+        const [d, s, p, c, rRes] = await Promise.all([
+          supabase.from('departments').select('*').order('name'),
+          supabase.from('shops').select('*').order('name'),
+          supabase
             .from('profiles')
-            .select('*, department:departments(*), shop:shops(*)')
-            .order('created_at', { ascending: false });
-          setUsers((basic.data as Profile[]) ?? []);
+            .select(
+              '*, department:departments(*), shop:shops(*), region:regions(*), rh_shops:regional_head_shops!regional_head_shops_regional_head_id_fkey(shop_id), clerk_cats:clerk_categories!clerk_categories_clerk_id_fkey(category_id), user_heads:user_heads!user_heads_user_id_fkey(head_id, is_default)'
+            )
+            .order('created_at', { ascending: false }),
+          supabase.from('work_categories').select('*').order('name'),
+          supabase.from('regions').select('*').order('name'),
+        ]);
+        setDepartments((d.data as Department[]) ?? []);
+        setShops((s.data as Shop[]) ?? []);
+        setRegions((rRes.data as Region[]) ?? MOCK_REGIONS);
+        if (p.error) {
+          console.warn('Profiles load with embeds failed, using multi-query fallback:', p.error.message);
+          try {
+            const profileQuery = rRes.error
+              ? supabase.from('profiles').select('*, department:departments(*), shop:shops(*)').order('created_at', { ascending: false })
+              : supabase.from('profiles').select('*, department:departments(*), shop:shops(*), region:regions(*)').order('created_at', { ascending: false });
+
+            const [basicRes, rhShopsRes, clerkCatsRes, userHeadsRes] = await Promise.all([
+              profileQuery,
+              supabase.from('regional_head_shops').select('regional_head_id, shop_id'),
+              supabase.from('clerk_categories').select('clerk_id, category_id'),
+              supabase.from('user_heads').select('user_id, head_id, is_default'),
+            ]);
+            const rhMap: Record<string, { shop_id: string }[]> = {};
+            (rhShopsRes.data || []).forEach((r: any) => {
+              if (!rhMap[r.regional_head_id]) rhMap[r.regional_head_id] = [];
+              rhMap[r.regional_head_id].push({ shop_id: r.shop_id });
+            });
+            const catMap: Record<string, { category_id: string }[]> = {};
+            (clerkCatsRes.data || []).forEach((c: any) => {
+              if (!catMap[c.clerk_id]) catMap[c.clerk_id] = [];
+              catMap[c.clerk_id].push({ category_id: c.category_id });
+            });
+            const headMap: Record<string, { head_id: string; is_default: boolean }[]> = {};
+            (userHeadsRes.data || []).forEach((h: any) => {
+              if (!headMap[h.user_id]) headMap[h.user_id] = [];
+              headMap[h.user_id].push({ head_id: h.head_id, is_default: !!h.is_default });
+            });
+            const merged = ((basicRes.data as Profile[]) ?? []).map((u) => {
+              const matchedRegion = (u.region_id && MOCK_REGIONS.find((rg) => rg.id === u.region_id)) || null;
+              return {
+                ...u,
+                region: u.region ?? matchedRegion,
+                rh_shops: rhMap[u.id] || [],
+                clerk_cats: catMap[u.id] || [],
+                user_heads: headMap[u.id] || [],
+              };
+            });
+            setUsers(merged);
+          } catch {
+            // Never lose the staff list
+            const basic = await supabase
+              .from('profiles')
+              .select('*, department:departments(*), shop:shops(*)')
+              .order('created_at', { ascending: false });
+            setUsers((basic.data as Profile[]) ?? []);
+          }
+        } else {
+          setUsers((p.data as Profile[]) ?? []);
         }
+        setCategories((c.data as WorkCategory[]) ?? []);
       } else {
-        setUsers((p.data as Profile[]) ?? []);
+        setDepartments(MOCK_DEPARTMENTS);
+        setRegions(MOCK_REGIONS);
+        setUsers(MOCK_USERS);
       }
-      setCategories((c.data as WorkCategory[]) ?? []);
-    } else {
-      setDepartments(MOCK_DEPARTMENTS);
-      setRegions(MOCK_REGIONS);
-      setUsers(MOCK_USERS);
+    } catch (err) {
+      console.error('Error reloading directory data:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [isBackendConnected, user?.id]);
 
   useEffect(() => {
