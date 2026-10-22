@@ -168,8 +168,18 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
         : null) ||
       (r.requester_role === 'head' && r.requester ? r.requester : null);
 
+    const isWaitlist = Boolean(
+      r.is_waitlist ??
+      (r.details && 'is_waitlist' in r.details ? (r.details as any).is_waitlist : false)
+    );
+    const regionId = r.region_id ?? (r.details && 'region_id' in r.details ? (r.details as any).region_id : null);
+    const regionName = r.region_name ?? (r.details && 'region_name' in r.details ? (r.details as any).region_name : null);
+
     return {
       ...r,
+      is_waitlist: isWaitlist,
+      region_id: regionId,
+      region_name: regionName,
       amount: Number(r.amount),
       paid_amount: Number(r.paid_amount ?? 0),
       requester_photo_path: r.requester?.photo_path || r.requester_photo_path || null,
@@ -425,6 +435,22 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           });
           if (catErr) throw catErr;
         }
+
+        // Guarantee region and waitlist fields are saved on the request record
+        if (type === 'exhibition' && requestId) {
+          const isWaitlist = Boolean(data.details && 'is_waitlist' in data.details ? data.details.is_waitlist : false);
+          const regId = user.region_id || (data.details && 'region_id' in data.details ? (data.details as any).region_id : null);
+          const regName = user.region?.name || null;
+          await supabase
+            .from('requests')
+            .update({
+              region_id: regId || null,
+              region_name: regName,
+              is_waitlist: isWaitlist,
+            })
+            .eq('id', requestId);
+        }
+
         await uploadFiles(requestId, data.files || []);
         await loadRequests();
         return { success: true, id: requestId };
@@ -543,6 +569,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           await loadRequests();
           return { success: false, error: catErr.message };
         }
+      }
+      if (data.details && 'is_waitlist' in data.details) {
+        await supabase
+          .from('requests')
+          .update({ is_waitlist: Boolean(data.details.is_waitlist) })
+          .eq('id', id);
       }
       await loadRequests();
       return { success: true };

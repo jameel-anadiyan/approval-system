@@ -63,14 +63,16 @@ export function checkExhibitionQuota(params: {
     };
   }
 
-  // Active exhibition requests on this date in this region (excluding rejected, withdrawn, or the current editing request)
+  // Active exhibition requests on this date in this region:
+  // When a request is submitted/raised it counts immediately, not just once approved.
   const matchingRequests = allRequests.filter((r) => {
     if (r.id === excludeRequestId) return false;
     if (r.request_type !== 'exhibition') return false;
-    if (r.status === 'rejected' || r.status === 'withdrawn') return false;
+    if (r.status === 'draft' || r.status === 'rejected' || r.status === 'withdrawn' || r.status === 'cancelled') return false;
 
     // Check region match
-    const matchesRegion = r.region_id === regionId || (r.details as any)?.region_id === regionId;
+    const rRegId = r.region_id || (r.details as any)?.region_id;
+    const matchesRegion = rRegId ? rRegId === regionId : (r.region_name && regionName ? r.region_name === regionName : false);
     if (!matchesRegion) return false;
 
     // Check date match

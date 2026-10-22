@@ -49,11 +49,11 @@ export const ExhibitionCalendarPage: React.FC = () => {
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
   const gotoToday = () => setCurrentDate(new Date());
 
-  // Active exhibition requests
+  // Active exhibition requests (all requested exhibitions count, not just approved)
   const exhibitionRequests = useMemo(() => {
     return requests.filter((r) => {
       if (r.request_type !== 'exhibition') return false;
-      if (r.status === 'rejected' || r.status === 'withdrawn') return false;
+      if (r.status === 'draft' || r.status === 'rejected' || r.status === 'withdrawn' || r.status === 'cancelled') return false;
       return true;
     });
   }, [requests]);
@@ -450,6 +450,13 @@ export const ExhibitionCalendarPage: React.FC = () => {
                               Standard Slot
                             </span>
                           )}
+                          <span className={`inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            r.status === 'approved' || r.status === 'paid'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}>
+                            {r.status === 'approved' || r.status === 'paid' ? 'Approved' : 'Requested (Counts as Booked)'}
+                          </span>
                         </div>
 
                         <div className="mt-1 text-xs text-slate-600 space-y-0.5">
