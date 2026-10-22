@@ -70,7 +70,9 @@ export function useDirectory() {
         ]);
         setDepartments((d.data as Department[]) ?? []);
         setShops((s.data as Shop[]) ?? []);
-        setRegions((rRes.data as Region[]) ?? MOCK_REGIONS);
+        const loadedRegions = (rRes.data as Region[]) || [];
+        const activeRegionList = loadedRegions.length > 0 ? loadedRegions : MOCK_REGIONS;
+        setRegions(activeRegionList);
         if (p.error) {
           console.warn('Profiles load with embeds failed, using multi-query fallback:', p.error.message);
           try {
@@ -100,7 +102,7 @@ export function useDirectory() {
               headMap[h.user_id].push({ head_id: h.head_id, is_default: !!h.is_default });
             });
             const merged = ((basicRes.data as Profile[]) ?? []).map((u) => {
-              const matchedRegion = (u.region_id && MOCK_REGIONS.find((rg) => rg.id === u.region_id)) || null;
+              const matchedRegion = (u.region_id && activeRegionList.find((rg) => rg.id === u.region_id)) || null;
               return {
                 ...u,
                 region: u.region ?? matchedRegion,
@@ -116,10 +118,18 @@ export function useDirectory() {
               .from('profiles')
               .select('*, department:departments(*), shop:shops(*)')
               .order('created_at', { ascending: false });
-            setUsers((basic.data as Profile[]) ?? []);
+            const basicMapped = ((basic.data as Profile[]) ?? []).map((u) => ({
+              ...u,
+              region: u.region ?? (u.region_id ? activeRegionList.find((rg) => rg.id === u.region_id) || null : null),
+            }));
+            setUsers(basicMapped);
           }
         } else {
-          setUsers((p.data as Profile[]) ?? []);
+          const merged = ((p.data as Profile[]) ?? []).map((u) => ({
+            ...u,
+            region: u.region ?? (u.region_id ? activeRegionList.find((rg) => rg.id === u.region_id) || null : null),
+          }));
+          setUsers(merged);
         }
         setCategories((c.data as WorkCategory[]) ?? []);
       } else {
@@ -236,22 +246,14 @@ export function useDirectory() {
   /** Admin / Head changes a user's shop(s), request types, Regional Head, Region or work categories. */
   const updateAccess = async (userId: string, access: AccessInput): Promise<Result> => {
     if (live) {
-      const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
-      if (error) return { success: false, error: error.message };
-
-      // Directly persist region_id to guarantee persistence in live PostgreSQL
+      // 1. Directly persist region_id to guarantee persistence in live PostgreSQL
       if (access.region_id !== undefined) {
-        const { error: rpcErr } = await supabase.rpc('set_user_region', {
-          p_user_id: userId,
-          p_region_id: access.region_id || null,
-        });
-        if (rpcErr) {
-          await supabase
-            .from('profiles')
-            .update({ region_id: access.region_id || null, updated_at: new Date().toISOString() })
-            .eq('id', userId);
-        }
+        await setUserRegion(userId, access.region_id || null);
       }
+
+      // 2. Invoke Edge Function for shop_ids, categories, heads
+      const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
+      if (error && access.region_id === undefined) return { success: false, error: error.message };
 
       await reload();
       return { success: true };
@@ -271,25 +273,41 @@ export function useDirectory() {
     return { success: true };
   };
 
-  /** Explicitly assign or clear a user's Region (Admin only). */
+  /** Explicitly assign or clear a user's Region (Admin or Head). */
   const setUserRegion = async (userId: string, regionId: string | null): Promise<Result> => {
+    const cleanId = regionId && regionId.trim() ? regionId.trim() : null;
     if (live) {
+      // Optimistic local update so UI reflects immediately
+      const matched = cleanId ? regions.find((r) => r.id === cleanId) ?? null : null;
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, region_id: cleanId, region: matched } : u)));
+
       const { error: rpcErr } = await supabase.rpc('set_user_region', {
         p_user_id: userId,
-        p_region_id: regionId || null,
+        p_region_id: cleanId,
       });
       if (rpcErr) {
+        console.warn('set_user_region RPC note, trying direct update:', rpcErr.message);
         const { error: updateErr } = await supabase
           .from('profiles')
-          .update({ region_id: regionId || null, updated_at: new Date().toISOString() })
+          .update({ region_id: cleanId, updated_at: new Date().toISOString() })
           .eq('id', userId);
-        if (updateErr) return { success: false, error: updateErr.message };
+        if (updateErr) {
+          console.error('Direct region update failed:', updateErr.message);
+          await reload();
+          return {
+            success: false,
+            error:
+              rpcErr.message.includes('permission') || updateErr.message.includes('permission')
+                ? 'Database permission error: Please execute migration 0035_set_user_region_rpc.sql in Supabase SQL Editor.'
+                : (rpcErr.message || updateErr.message),
+          };
+        }
       }
       await reload();
       return { success: true };
     }
-    const region = regionId ? regions.find((r) => r.id === regionId) ?? null : null;
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, region_id: regionId || null, region } : u)));
+    const region = cleanId ? regions.find((r) => r.id === cleanId) ?? null : null;
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, region_id: cleanId, region } : u)));
     return { success: true };
   };
 

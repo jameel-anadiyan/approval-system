@@ -215,10 +215,39 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                 </div>
               )}
 
-              {(u.role === 'regional_head' || (u.role === 'head' && (u.region || u.region_id))) && (
-                <div className="flex items-center gap-1.5 text-xs text-indigo-800 bg-indigo-50/70 border border-indigo-200/80 rounded-xl px-2.5 py-1 w-fit">
-                  <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>Region: <strong>{u.region?.name || dir.regions.find((r) => r.id === u.region_id)?.name || 'Not assigned'}</strong></span>
+              {(u.role === 'regional_head' || u.role === 'head') && (
+                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-200/80">
+                  <div className="flex items-center gap-1.5 text-xs text-indigo-900 min-w-0">
+                    <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="truncate">
+                      Region: <strong>{u.region?.name || dir.regions.find((r) => r.id === u.region_id)?.name || 'Not assigned'}</strong>
+                    </span>
+                  </div>
+                  <select
+                    id={`quick-region-${u.id}`}
+                    value={u.region_id || ''}
+                    disabled={busyId === u.id}
+                    onChange={async (e) => {
+                      const newReg = e.target.value || null;
+                      setBusyId(u.id);
+                      const res = await dir.setUserRegion(u.id, newReg);
+                      setBusyId(null);
+                      show(
+                        res.success
+                          ? `Region updated for ${u.full_name}.`
+                          : res.error || 'Failed to update region',
+                        res.success
+                      );
+                    }}
+                    className="text-[11px] font-semibold py-1 px-2 rounded-lg border border-indigo-200 bg-white text-indigo-900 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 shadow-2xs cursor-pointer"
+                  >
+                    <option value="">{u.role === 'head' ? 'No Region' : 'Select Region…'}</option>
+                    {dir.regions.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} ({r.code})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 

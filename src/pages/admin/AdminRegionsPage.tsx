@@ -4,7 +4,7 @@ import { Modal } from '../../components/common/Modal';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { useDirectory } from '../../lib/directory';
 import { formatISTDate } from '../../lib/formatters';
-import type { Region } from '../../types/database';
+import type { Region, Profile } from '../../types/database';
 
 const RegionModal: React.FC<{
   region: Region | null;
@@ -97,10 +97,147 @@ const RegionModal: React.FC<{
   );
 };
 
+const AssignRegionalHeadsModal: React.FC<{
+  region: Region;
+  users: Profile[];
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (userId: string, regionId: string | null) => Promise<{ success: boolean; error?: string }>;
+}> = ({ region, users, isOpen, onClose, onSave }) => {
+  const staff = users.filter((u) => (u.role === 'regional_head' || u.role === 'head') && u.is_active);
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    staff.filter((u) => u.region_id === region.id).map((u) => u.id)
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    setSelectedIds(staff.filter((u) => u.region_id === region.id).map((u) => u.id));
+    setError(null);
+  }, [region.id]);
+
+  const toggle = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleSave = async () => {
+    setBusy(true);
+    setError(null);
+    for (const s of staff) {
+      const isSelected = selectedIds.includes(s.id);
+      const isCurrently = s.region_id === region.id;
+      if (isSelected && !isCurrently) {
+        const res = await onSave(s.id, region.id);
+        if (!res.success) {
+          setBusy(false);
+          return setError(res.error || `Failed to assign ${s.full_name}`);
+        }
+      } else if (!isSelected && isCurrently) {
+        const res = await onSave(s.id, null);
+        if (!res.success) {
+          setBusy(false);
+          return setError(res.error || `Failed to unassign ${s.full_name}`);
+        }
+      }
+    }
+    setBusy(false);
+    onClose();
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Assign Staff to ${region.name} (${region.code})`}
+      description="Select the Regional Heads and Department Heads that operate in this region to enforce the daily 2-request exhibition limits."
+      maxWidth="md"
+    >
+      <div className="space-y-4">
+        {error && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl">
+            {error}
+          </div>
+        )}
+
+        {staff.length === 0 ? (
+          <div className="p-6 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-500">
+            No active Regional Heads or Department Heads found in staff directory.
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+            {staff.map((s) => {
+              const isChecked = selectedIds.includes(s.id);
+              const otherReg = s.region_id && s.region_id !== region.id;
+              return (
+                <label
+                  key={s.id}
+                  className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${
+                    isChecked
+                      ? 'border-indigo-300 bg-indigo-50/70'
+                      : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggle(s.id)}
+                      className="w-4 h-4 accent-indigo-600 rounded-sm"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-900 truncate">{s.full_name}</span>
+                        <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                          s.role === 'regional_head' ? 'bg-cyan-100 text-cyan-800' : 'bg-indigo-100 text-indigo-800'
+                        }`}>
+                          {s.role === 'regional_head' ? 'Regional Head' : 'Dept Head'}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400 block truncate">
+                        @{s.username} {s.designation ? `· ${s.designation}` : ''}
+                      </span>
+                    </div>
+                  </div>
+                  {otherReg && !isChecked && (
+                    <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-medium shrink-0 ml-2">
+                      In other region
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={handleSave}
+            className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
+          >
+            {busy ? 'Saving…' : 'Save Assignments'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 export const AdminRegionsPage: React.FC = () => {
-  const { regions, users, loading, saveRegion, setRegionActive } = useDirectory();
+  const { regions, users, loading, saveRegion, setRegionActive, setUserRegion } = useDirectory();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Region | null>(null);
+  const [assignRegion, setAssignRegion] = useState<Region | null>(null);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
@@ -116,8 +253,8 @@ export const AdminRegionsPage: React.FC = () => {
       r.code.toLowerCase().includes(query.toLowerCase())
   );
 
-  const regionalHeadsByRegion = (regionId: string) => {
-    return users.filter((u) => u.role === 'regional_head' && u.region_id === regionId);
+  const assignedStaffByRegion = (regionId: string) => {
+    return users.filter((u) => (u.role === 'regional_head' || u.role === 'head') && u.region_id === regionId);
   };
 
   const handleToggle = async (r: Region) => {
@@ -157,7 +294,7 @@ export const AdminRegionsPage: React.FC = () => {
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Configure enterprise regions. When creating a Regional Head, their region is selected from here to manage daily exhibition request quotas (2 per day per regional head in a region).
+            Configure enterprise regions and assign Regional Heads / Department Heads. Daily exhibition limit is 2 per day for any 1 regional head in that region.
           </p>
         </div>
 
@@ -202,7 +339,7 @@ export const AdminRegionsPage: React.FC = () => {
       {/* Grid of Regions */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((region) => {
-          const assignedHeads = regionalHeadsByRegion(region.id);
+          const assignedStaff = assignedStaffByRegion(region.id);
           return (
             <div
               key={region.id}
@@ -231,21 +368,35 @@ export const AdminRegionsPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
-                  <Users className="w-3.5 h-3.5 text-slate-400" />
-                  <span>
-                    <strong>{assignedHeads.length}</strong> Regional Head{assignedHeads.length === 1 ? '' : 's'} assigned
-                  </span>
+                <div className="mt-3 flex items-center justify-between gap-1.5 text-xs text-slate-500">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">
+                      <strong>{assignedStaff.length}</strong> staff assigned
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAssignRegion(region)}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline shrink-0"
+                  >
+                    Assign Staff →
+                  </button>
                 </div>
 
-                {assignedHeads.length > 0 && (
+                {assignedStaff.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {assignedHeads.map((rh) => (
+                    {assignedStaff.map((s) => (
                       <span
-                        key={rh.id}
-                        className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-medium"
+                        key={s.id}
+                        className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-medium"
                       >
-                        {rh.full_name}
+                        <span>{s.full_name}</span>
+                        <span className={`text-[8px] uppercase font-bold px-1 rounded ${
+                          s.role === 'regional_head' ? 'bg-cyan-100 text-cyan-800' : 'bg-indigo-100 text-indigo-800'
+                        }`}>
+                          {s.role === 'regional_head' ? 'RH' : 'Head'}
+                        </span>
                       </span>
                     ))}
                   </div>
@@ -291,6 +442,22 @@ export const AdminRegionsPage: React.FC = () => {
         }}
         onSave={saveRegion}
       />
+
+      {assignRegion && (
+        <AssignRegionalHeadsModal
+          isOpen={true}
+          region={assignRegion}
+          users={users}
+          onClose={() => setAssignRegion(null)}
+          onSave={async (userId, regionId) => {
+            const res = await setUserRegion(userId, regionId);
+            if (res.success) {
+              showFlash('Staff assignment updated.');
+            }
+            return res;
+          }}
+        />
+      )}
     </div>
   );
 };
