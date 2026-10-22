@@ -4,8 +4,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase, invokeEdgeFunction } from './supabase';
 import { useAuth } from '../context/AuthContext';
-import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS } from './mockData';
-import type { AppRole, AuditLogEntry, Department, Profile, RequestType, Shop, WorkCategory } from '../types/database';
+import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS } from './mockData';
+import type { AppRole, AuditLogEntry, Department, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
 
 type Result = { success: boolean; error?: string };
 
@@ -21,6 +21,8 @@ export interface NewUserInput {
   photo?: string;
   /** Regional Head: shops they cover */
   shop_ids?: string[];
+  /** Regional Head: their assigned Region from Region Master */
+  region_id?: string | null;
   /** Clerk: work categories they handle */
   category_ids?: string[];
   /** Employee: their Regional Head */
@@ -34,6 +36,7 @@ export interface AccessInput {
   shop_id: string | null;
   allowed_types: RequestType[];
   shop_ids?: string[];
+  region_id?: string | null;
   category_ids?: string[];
   regional_head_id?: string | null;
   head_ids?: string[];
@@ -44,6 +47,7 @@ export function useDirectory() {
   const { isBackendConnected, user } = useAuth();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [shops, setShops] = useState<Shop[]>([]);
+  const [regions, setRegions] = useState<Region[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
   const [categories, setCategories] = useState<WorkCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,24 +55,30 @@ export function useDirectory() {
   const reload = useCallback(async () => {
     setLoading(true);
     if (isBackendConnected && user) {
-      const [d, s, p, c] = await Promise.all([
+      const [d, s, p, c, rRes] = await Promise.all([
         supabase.from('departments').select('*').order('name'),
         supabase.from('shops').select('*').order('name'),
         supabase
           .from('profiles')
           .select(
-            '*, department:departments(*), shop:shops(*), rh_shops:regional_head_shops!regional_head_shops_regional_head_id_fkey(shop_id), clerk_cats:clerk_categories!clerk_categories_clerk_id_fkey(category_id), user_heads:user_heads!user_heads_user_id_fkey(head_id, is_default)'
+            '*, department:departments(*), shop:shops(*), region:regions(*), rh_shops:regional_head_shops!regional_head_shops_regional_head_id_fkey(shop_id), clerk_cats:clerk_categories!clerk_categories_clerk_id_fkey(category_id), user_heads:user_heads!user_heads_user_id_fkey(head_id, is_default)'
           )
           .order('created_at', { ascending: false }),
         supabase.from('work_categories').select('*').order('name'),
+        supabase.from('regions').select('*').order('name'),
       ]);
       setDepartments((d.data as Department[]) ?? []);
       setShops((s.data as Shop[]) ?? []);
+      setRegions((rRes.data as Region[]) ?? MOCK_REGIONS);
       if (p.error) {
         console.warn('Profiles load with embeds failed, using multi-query fallback:', p.error.message);
         try {
+          const profileQuery = rRes.error
+            ? supabase.from('profiles').select('*, department:departments(*), shop:shops(*)').order('created_at', { ascending: false })
+            : supabase.from('profiles').select('*, department:departments(*), shop:shops(*), region:regions(*)').order('created_at', { ascending: false });
+
           const [basicRes, rhShopsRes, clerkCatsRes, userHeadsRes] = await Promise.all([
-            supabase.from('profiles').select('*, department:departments(*), shop:shops(*)').order('created_at', { ascending: false }),
+            profileQuery,
             supabase.from('regional_head_shops').select('regional_head_id, shop_id'),
             supabase.from('clerk_categories').select('clerk_id, category_id'),
             supabase.from('user_heads').select('user_id, head_id, is_default'),
@@ -88,12 +98,16 @@ export function useDirectory() {
             if (!headMap[h.user_id]) headMap[h.user_id] = [];
             headMap[h.user_id].push({ head_id: h.head_id, is_default: !!h.is_default });
           });
-          const merged = ((basicRes.data as Profile[]) ?? []).map((u) => ({
-            ...u,
-            rh_shops: rhMap[u.id] || [],
-            clerk_cats: catMap[u.id] || [],
-            user_heads: headMap[u.id] || [],
-          }));
+          const merged = ((basicRes.data as Profile[]) ?? []).map((u) => {
+            const matchedRegion = (u.region_id && MOCK_REGIONS.find((rg) => rg.id === u.region_id)) || null;
+            return {
+              ...u,
+              region: u.region ?? matchedRegion,
+              rh_shops: rhMap[u.id] || [],
+              clerk_cats: catMap[u.id] || [],
+              user_heads: headMap[u.id] || [],
+            };
+          });
           setUsers(merged);
         } catch {
           // Never lose the staff list
@@ -109,6 +123,7 @@ export function useDirectory() {
       setCategories((c.data as WorkCategory[]) ?? []);
     } else {
       setDepartments(MOCK_DEPARTMENTS);
+      setRegions(MOCK_REGIONS);
       setUsers(MOCK_USERS);
     }
     setLoading(false);
@@ -181,12 +196,15 @@ export function useDirectory() {
     }
     const dept = departments.find((d) => d.id === input.department_id);
     const shop = shops.find((s) => s.id === input.shop_id) ?? null;
+    const region = regions.find((r) => r.id === input.region_id) ?? null;
     setUsers((prev) => [{
       id: `user-${Date.now()}`, username: input.username, full_name: input.full_name,
       designation: input.designation ?? null, role: input.role, department_id: input.department_id ?? null,
       is_active: true, must_change_password: true, created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(), department: dept,
-      shop_id: input.shop_id ?? null, shop, allowed_types: input.allowed_types ?? ['general'],
+      shop_id: input.shop_id ?? null, shop,
+      region_id: input.region_id ?? null, region,
+      allowed_types: input.allowed_types ?? ['general'],
       photo_path: input.photo || null,
       rh_shops: (input.shop_ids || []).map((shop_id) => ({ shop_id })),
       clerk_cats: (input.category_ids || []).map((category_id) => ({ category_id })),
@@ -204,10 +222,13 @@ export function useDirectory() {
       return { success: true };
     }
     const shop = shops.find((s) => s.id === access.shop_id) ?? null;
+    const region = access.region_id ? regions.find((r) => r.id === access.region_id) ?? null : null;
     setUsers((prev) => prev.map((u) => (u.id === userId ? {
       ...u,
       ...access,
       shop,
+      region_id: access.region_id !== undefined ? access.region_id : u.region_id,
+      region: access.region_id !== undefined ? region : u.region,
       rh_shops: (access.shop_ids || []).map((shop_id) => ({ shop_id })),
       clerk_cats: (access.category_ids || []).map((category_id) => ({ category_id })),
       user_heads: (access.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === access.default_head_id })),
@@ -242,8 +263,90 @@ export function useDirectory() {
       await reload();
       return { success: true };
     }
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, can_view_discount_report: allowed } : u)));
+    setUsers((prev) => {
+      const next = prev.map((u) => (u.id === userId ? { ...u, can_view_discount_report: allowed } : u));
+      try {
+        const saved = localStorage.getItem('approval_app_sandbox_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.id === userId) {
+            parsed.can_view_discount_report = allowed;
+            localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
+            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
+          }
+        }
+      } catch {}
+      return next;
+    });
     return { success: true };
+  };
+
+  /** Admin grants / revokes a Head's access to the Special Waiting List Exhibition tab. */
+  const setExhibitionWaitlistAccess = async (userId: string, allowed: boolean): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('set_exhibition_waitlist_access', { p_user_id: userId, p_allowed: allowed });
+      if (error) {
+        return {
+          success: false,
+          error: error.message.includes('does not exist')
+            ? 'Database error: Please execute migration 0034_regions_and_exhibition_rules.sql in your Supabase SQL Editor.'
+            : error.message,
+        };
+      }
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) => {
+      const next = prev.map((u) => (u.id === userId ? { ...u, can_view_exhibition_waitlist: allowed } : u));
+      try {
+        const saved = localStorage.getItem('approval_app_sandbox_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.id === userId) {
+            parsed.can_view_exhibition_waitlist = allowed;
+            localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
+            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
+          }
+        }
+      } catch {}
+      return next;
+    });
+    return { success: true };
+  };
+
+  /** Admin adds / renames / (de)activates a region in Region Master (Head cannot manage this). */
+  const saveRegion = async (input: { id?: string; name: string; code: string; is_active?: boolean }): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('save_region', {
+        p_id: input.id ?? null,
+        p_name: input.name,
+        p_code: input.code,
+        p_is_active: input.is_active ?? true,
+      });
+      if (error) {
+        return {
+          success: false,
+          error: error.message.includes('does not exist')
+            ? 'Database error: Please execute migration 0034_regions_and_exhibition_rules.sql in your Supabase SQL Editor.'
+            : error.message,
+        };
+      }
+      await reload();
+      return { success: true };
+    }
+    setRegions((prev) =>
+      input.id
+        ? prev.map((r) => (r.id === input.id ? { ...r, ...input, is_active: input.is_active ?? r.is_active, updated_at: new Date().toISOString() } : r))
+        : [{ id: `reg-${Date.now()}`, name: input.name, code: input.code, is_active: input.is_active ?? true,
+             created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]
+    );
+    return { success: true };
+  };
+
+  const setRegionActive = async (id: string, active: boolean): Promise<Result> => {
+    const reg = regions.find((r) => r.id === id);
+    if (!reg) return { success: false, error: 'Region not found' };
+    return saveRegion({ ...reg, is_active: active });
   };
 
   const resetPassword = async (userId: string, password: string): Promise<Result> => {
@@ -316,8 +419,9 @@ export function useDirectory() {
   };
 
   return {
-    departments, shops, users, categories, loading, live, reload, saveDepartment, saveShop, createUser, updateAccess,
-    saveCategory, setDiscountReportAccess, resetPassword, setActive, uploadCredential, setPhoto, removePhoto,
+    departments, shops, regions, users, categories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
+    createUser, updateAccess, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
+    uploadCredential, setPhoto, removePhoto,
   };
 }
 

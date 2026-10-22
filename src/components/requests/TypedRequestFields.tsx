@@ -4,8 +4,9 @@
 import React from 'react';
 import { RequestDetails, ExhibitionProvide } from '../../types/database';
 import { formatINR, PROVIDE_LABELS } from '../../lib/formatters';
-import { Percent, CalendarDays, Megaphone, Target, IndianRupee } from 'lucide-react';
+import { Percent, CalendarDays, Megaphone, Target, IndianRupee, AlertOctagon, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
 import { GstSelector } from './GstSelector';
+import type { ExhibitionQuotaStatus } from '../../lib/exhibitionQuota';
 
 const inputCls =
   'w-full text-base sm:text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors bg-white';
@@ -161,6 +162,7 @@ export interface ExhibitionForm {
   other_costs: string;
   total_budget: string;
   purpose: string;
+  is_waitlist?: boolean;
 }
 
 export const emptyExhibition: ExhibitionForm = {
@@ -171,6 +173,7 @@ export const emptyExhibition: ExhibitionForm = {
   gst_rate: '18',
   provides: [], provides_other: '', voucher_1000_qty: '', voucher_500_qty: '', voucher_1000_min: '', voucher_500_min: '',
   voucher_validity: '', lucky_draw: '', winners_draw: '', other_costs: '', total_budget: '', purpose: '',
+  is_waitlist: false,
 };
 
 export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm => ({
@@ -188,6 +191,7 @@ export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm
   voucher_500_min: str(d?.voucher_500_min), voucher_validity: str(d?.voucher_validity),
   lucky_draw: str(d?.lucky_draw), winners_draw: str(d?.winners_draw), other_costs: str(d?.other_costs || ''),
   total_budget: str(d?.total_budget), purpose: str(d?.purpose),
+  is_waitlist: !!d?.is_waitlist,
 });
 
 export function exhibitionCalc(f: ExhibitionForm) {
@@ -234,6 +238,7 @@ export const toExhibitionDetails = (f: ExhibitionForm): RequestDetails => {
     voucher_validity: f.voucher_validity.trim() || null, lucky_draw: f.lucky_draw.trim() || null,
     winners_draw: f.winners_draw.trim() || null, other_costs: opt(f.other_costs),
     total_budget: c.budget, purpose: f.purpose.trim(),
+    is_waitlist: !!f.is_waitlist,
   };
 };
 
@@ -248,7 +253,11 @@ const Section: React.FC<{ n: string; title: string; icon: React.ReactNode; child
   </section>
 );
 
-export const ExhibitionFields: React.FC<{ value: ExhibitionForm; onChange: (v: ExhibitionForm) => void }> = ({ value, onChange }) => {
+export const ExhibitionFields: React.FC<{
+  value: ExhibitionForm;
+  onChange: (v: ExhibitionForm) => void;
+  quotaStatus?: ExhibitionQuotaStatus | null;
+}> = ({ value, onChange, quotaStatus }) => {
   const set = (k: keyof ExhibitionForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     onChange({ ...value, [k]: e.target.value });
   const c = exhibitionCalc(value);
@@ -280,6 +289,18 @@ export const ExhibitionFields: React.FC<{ value: ExhibitionForm; onChange: (v: E
         {field('event_name', 'Event Name', { required: true })}
         {field('organiser_contact', 'Organiser & Contact')}
         {field('venue', 'Venue', { required: true })}
+        <div className="sm:col-span-2 flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-slate-100">
+          <span className="text-xs font-bold text-slate-700">Event Window & Schedule</span>
+          <a
+            href="/calendar/exhibitions"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors"
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            <span>Check Exhibition Calendar (Booked Dates) ↗</span>
+          </a>
+        </div>
         <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="exh-event_start" className={labelCls}>
@@ -320,6 +341,42 @@ export const ExhibitionFields: React.FC<{ value: ExhibitionForm; onChange: (v: E
               Previously entered: “{value.event_dates}”. Please pick the dates above.
             </span>
           ) : null}
+
+          {quotaStatus && quotaStatus.eventDate && (
+            <div className="sm:col-span-2">
+              {quotaStatus.mustUseWaitlist ? (
+                <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-3 text-xs text-rose-950 shadow-xs">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-extrabold text-rose-900 tracking-wide uppercase text-[10px] bg-rose-200/80 px-2 py-0.5 rounded-full border border-rose-300">
+                        Special Waiting List Required
+                      </span>
+                      {quotaStatus.regionName && (
+                        <span className="text-[11px] font-semibold text-rose-700">
+                          Region: {quotaStatus.regionName}
+                        </span>
+                      )}
+                    </div>
+                    <p className="font-medium text-rose-900 leading-relaxed">
+                      {quotaStatus.message}
+                    </p>
+                    <div className="p-2 bg-white/70 border border-rose-200 rounded-lg text-[11px] text-rose-800">
+                      <strong>Note:</strong> Special Waiting List exhibitions have a lower chance of approval and require prior review & approval by the Department Head in their dedicated Waitlist tab.
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5 text-xs text-emerald-950">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-emerald-900">Standard Slot Available: </span>
+                    <span className="text-emerald-800">{quotaStatus.message}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {field('expected_footfall', 'Expected Footfall')}
         {field('stall_size_location', 'Stall Size & Location')}

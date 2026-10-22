@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
@@ -69,6 +69,18 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
     show(
       res.success
         ? `Discount Report ${u.can_view_discount_report ? 'access removed for' : 'opened to'} ${u.full_name}.`
+        : res.error!,
+      res.success
+    );
+  };
+
+  const toggleWaitlist = async (u: Profile) => {
+    setBusyId(u.id);
+    const res = await dir.setExhibitionWaitlistAccess(u.id, !u.can_view_exhibition_waitlist);
+    setBusyId(null);
+    show(
+      res.success
+        ? `Special Waiting List tab ${u.can_view_exhibition_waitlist ? 'access removed for' : 'opened to'} ${u.full_name}.`
         : res.error!,
       res.success
     );
@@ -203,6 +215,13 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                 </div>
               )}
 
+              {u.role === 'regional_head' && (
+                <div className="flex items-center gap-1.5 text-xs text-indigo-800 bg-indigo-50/70 border border-indigo-200/80 rounded-xl px-2.5 py-1 w-fit">
+                  <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Region: <strong>{u.region?.name || dir.regions.find((r) => r.id === u.region_id)?.name || 'Not assigned'}</strong></span>
+                </div>
+              )}
+
               {u.role === 'employee' && u.regional_head_id && (
                 <div className="flex items-center gap-1.5 text-xs text-cyan-800">
                   <UserCheck className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
@@ -260,27 +279,51 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
               )}
 
               {me?.role === 'admin' && u.role === 'head' && (
-                <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 cursor-pointer">
-                  <span className="flex items-center gap-2 text-xs text-slate-700">
-                    <Percent className="w-3.5 h-3.5 text-brand-600" />
-                    <span><strong>Discount Report</strong> access</span>
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    id={`report-access-${u.id}`}
-                    aria-checked={!!u.can_view_discount_report}
-                    disabled={busyId === u.id}
-                    onClick={() => toggleReport(u)}
-                    className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
-                      u.can_view_discount_report ? 'bg-brand-600' : 'bg-slate-300'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                      u.can_view_discount_report ? 'translate-x-4' : ''
-                    }`} />
-                  </button>
-                </label>
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 cursor-pointer">
+                    <span className="flex items-center gap-2 text-xs text-slate-700">
+                      <Percent className="w-3.5 h-3.5 text-brand-600" />
+                      <span><strong>Discount Report</strong> access</span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      id={`report-access-${u.id}`}
+                      aria-checked={!!u.can_view_discount_report}
+                      disabled={busyId === u.id}
+                      onClick={() => toggleReport(u)}
+                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
+                        u.can_view_discount_report ? 'bg-brand-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                        u.can_view_discount_report ? 'translate-x-4' : ''
+                      }`} />
+                    </button>
+                  </label>
+
+                  <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-rose-200/80 bg-rose-50/60 cursor-pointer">
+                    <span className="flex items-center gap-2 text-xs text-rose-800">
+                      <AlertOctagon className="w-3.5 h-3.5 text-rose-600" />
+                      <span><strong>Special Waiting List</strong> Exhibition tab</span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      id={`waitlist-access-${u.id}`}
+                      aria-checked={!!u.can_view_exhibition_waitlist}
+                      disabled={busyId === u.id}
+                      onClick={() => toggleWaitlist(u)}
+                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
+                        u.can_view_exhibition_waitlist ? 'bg-rose-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                        u.can_view_exhibition_waitlist ? 'translate-x-4' : ''
+                      }`} />
+                    </button>
+                  </label>
+                </div>
               )}
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
@@ -330,6 +373,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
           onClose={() => setCreateOpen(false)}
           departments={dir.departments.filter((d) => d.is_active)}
           shops={dir.shops}
+          regions={dir.regions}
           users={dir.users}
           categories={dir.categories}
           allowedRoles={roles}
@@ -345,6 +389,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
         <AccessModal
           target={accessTarget}
           shops={dir.shops}
+          regions={dir.regions}
           users={dir.users}
           categories={dir.categories}
           onClose={() => setAccessTarget(null)}

@@ -14,6 +14,9 @@ import {
   AlertTriangle,
   ArrowRight,
   FileSpreadsheet,
+  MapPin,
+  CalendarDays,
+  Globe,
 } from 'lucide-react';
 
 export const AdminDashboardPage: React.FC = () => {
@@ -21,6 +24,10 @@ export const AdminDashboardPage: React.FC = () => {
   const { requests, threshold } = useRequests();
   const { departments } = useDirectory();
   const navigate = useNavigate();
+
+  const waitlistCount = requests.filter(
+    (r) => r.is_waitlist && r.status !== 'draft' && !r.waitlist_approved_at && r.status !== 'rejected' && r.status !== 'withdrawn'
+  ).length;
 
   // Admin To-Approve: status === 'pending_admin_approval' (or stuck approving > 1m)
   const pendingApprovals = requests.filter(
@@ -58,6 +65,71 @@ export const AdminDashboardPage: React.FC = () => {
         >
           <FileSpreadsheet className="w-4 h-4" />
           <span>All Requests Table</span>
+        </button>
+      </div>
+
+      {/* Primary In-Page Tabs for Admin */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none border-b border-slate-200/90 pt-1">
+        <button
+          type="button"
+          onClick={() => navigate('/admin/approve')}
+          className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-900 text-white flex items-center gap-2 shadow-xs shrink-0"
+        >
+          <CheckCircle className="w-3.5 h-3.5" />
+          <span>Awaiting Sign</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-white text-[10px] font-bold">
+            {pendingApprovals.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/admin/regions')}
+          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 border border-slate-200 flex items-center gap-2 shrink-0 transition-colors"
+        >
+          <MapPin className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Regions Master</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/admin/regional-heads')}
+          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 border border-slate-200 flex items-center gap-2 shrink-0 transition-colors"
+        >
+          <Globe className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Regional Heads</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/head/exhibition-waitlist')}
+          className="px-4 py-2 text-xs font-extrabold rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border-2 border-rose-400 flex items-center gap-2 shrink-0 shadow-xs transition-all ring-2 ring-rose-200/50"
+        >
+          <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+          <span className="text-rose-900">Waitlist Exhibitions (Red Tab)</span>
+          {waitlistCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-bold">
+              {waitlistCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/calendar/exhibitions')}
+          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 border border-slate-200 flex items-center gap-2 shrink-0 transition-colors"
+        >
+          <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Exhibition Calendar</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/admin/requests')}
+          className="px-4 py-2 text-xs font-medium rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors"
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" />
+          <span>All Requests</span>
         </button>
       </div>
 
@@ -147,12 +219,65 @@ export const AdminDashboardPage: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4">
         <button
           type="button"
+          onClick={() => navigate('/admin/regions')}
+          className="p-4 rounded-xl border-2 border-indigo-200 bg-linear-to-br from-indigo-50/70 to-white hover:border-indigo-400 text-left transition-all group shadow-xs"
+        >
+          <MapPin className="w-5 h-5 text-indigo-600 mb-2 group-hover:scale-105 transition-transform" />
+          <div className="font-bold text-xs sm:text-sm text-slate-900 flex items-center justify-between">
+            <span>Regions Master</span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-700">Admin</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5">Quota regions &amp; 2-per-day exhibition limits</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/admin/regional-heads')}
+          className="p-4 rounded-xl border-2 border-indigo-200 bg-linear-to-br from-indigo-50/70 to-white hover:border-indigo-400 text-left transition-all group shadow-xs"
+        >
+          <Globe className="w-5 h-5 text-indigo-600 mb-2 group-hover:scale-105 transition-transform" />
+          <div className="font-bold text-xs sm:text-sm text-slate-900 flex items-center justify-between">
+            <span>Regional Heads</span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-700">Master</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5">Assign Region &amp; exhibition quotas</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/head/exhibition-waitlist')}
+          className="p-4 rounded-xl border-2 border-rose-300 bg-linear-to-br from-rose-50/70 to-white hover:border-rose-500 text-left transition-all group shadow-xs"
+        >
+          <AlertTriangle className="w-5 h-5 text-rose-600 mb-2 group-hover:scale-105 transition-transform" />
+          <div className="font-bold text-xs sm:text-sm text-rose-950 flex items-center justify-between">
+            <span>Waitlist Exhibitions</span>
+            {waitlistCount > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-600 text-white shadow-xs">
+                {waitlistCount}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-rose-700/80 mt-0.5">Special Waiting List approval queue</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/calendar/exhibitions')}
+          className="p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-left transition-all group shadow-xs"
+        >
+          <CalendarDays className="w-5 h-5 text-indigo-600 mb-2 group-hover:scale-105 transition-transform" />
+          <div className="font-bold text-xs sm:text-sm text-slate-900">Exhibition Calendar</div>
+          <p className="text-[11px] text-slate-400 mt-0.5">Live booked &amp; open dates by region</p>
+        </button>
+
+        <button
+          type="button"
           onClick={() => navigate('/admin/staff')}
           className="p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-left transition-all group"
         >
           <Users className="w-5 h-5 text-indigo-600 mb-2 group-hover:scale-105 transition-transform" />
           <div className="font-bold text-xs sm:text-sm text-slate-900">All Staff &amp; Photos</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">Manage employees &amp; photos</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Manage employees &amp; Regional Heads</p>
         </button>
 
         <button
@@ -162,7 +287,7 @@ export const AdminDashboardPage: React.FC = () => {
         >
           <Building2 className="w-5 h-5 text-teal-600 mb-2 group-hover:scale-105 transition-transform" />
           <div className="font-bold text-xs sm:text-sm text-slate-900">Dept Heads</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">Manage Head logins &amp; seals</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Manage Head logins, waitlist &amp; seals</p>
         </button>
 
         <button

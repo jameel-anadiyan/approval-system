@@ -60,6 +60,8 @@ import {
   UserCheck,
   HelpCircle,
   Ban,
+  AlertTriangle,
+  MapPin,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -83,6 +85,7 @@ export const RequestDetailPage: React.FC = () => {
     markAsPaid,
     cancelApprovedRequest,
     selectQuote,
+    decideExhibitionWaitlist,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
@@ -241,6 +244,13 @@ export const RequestDetailPage: React.FC = () => {
   // Clerk: only the clerk(s) of the request's work category route / return it.
   const canClerkAct = role === 'clerk' && isMyRoutingRequest(request, user);
 
+  const canDecideWaitlist =
+    request.is_waitlist &&
+    !request.waitlist_approved_at &&
+    request.status !== 'rejected' &&
+    request.status !== 'withdrawn' &&
+    (role === 'admin' || (role === 'head' && user?.can_view_exhibition_waitlist));
+
   const latestReturnAction = useMemo(() => {
     return (request.actions || [])
       .filter((a) => a.action === 'returned')
@@ -327,6 +337,26 @@ export const RequestDetailPage: React.FC = () => {
                   <span>Head: {request.owner_head_name}</span>
                 </span>
               )}
+              {request.is_waitlist && (
+                <span
+                  id="detail-waitlist-badge"
+                  className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-md bg-rose-100 text-rose-800 border border-rose-200 shadow-2xs"
+                  title="Special Waiting List Exhibition"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Special Waiting List</span>
+                </span>
+              )}
+              {request.region_name && (
+                <span
+                  id="detail-region-badge"
+                  className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-800 border border-slate-200 shadow-2xs"
+                  title="Region"
+                >
+                  <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                  <span>{request.region_name}</span>
+                </span>
+              )}
             </div>
             <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900 font-display mt-1">
               {request.title}
@@ -361,6 +391,80 @@ export const RequestDetailPage: React.FC = () => {
           <button type="button" onClick={() => setBanner(null)} className="font-bold opacity-60 hover:opacity-100" aria-label="Dismiss">
             ×
           </button>
+        </div>
+      )}
+
+      {request.is_waitlist && (
+        <div
+          id="waitlist-banner"
+          className="mb-4 p-4 sm:p-5 rounded-2xl bg-linear-to-r from-rose-50/90 via-red-50/60 to-white border-2 border-rose-300 shadow-xs flex items-start gap-3.5 animate-in fade-in"
+        >
+          <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <AlertTriangle className="w-5 h-5 text-white" />
+          </div>
+          <div className="text-xs space-y-2 min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-extrabold text-rose-950 font-display">
+                  Special Waiting List Exhibition
+                </p>
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-rose-200/80 text-rose-900 border border-rose-300">
+                  Low Chance of Approval
+                </span>
+              </div>
+              {request.region_name && (
+                <span className="text-[11px] font-semibold text-rose-800 bg-rose-100/70 border border-rose-200/80 px-2 py-0.5 rounded-md flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-rose-500" />
+                  Region: {request.region_name}
+                </span>
+              )}
+            </div>
+
+            <p className="text-rose-900 leading-relaxed font-medium">
+              This exhibition request was submitted outside the standard daily quota (daily regional slots claimed by another Regional Head).
+              {request.waitlist_approved_at ? (
+                <span className="block mt-1 text-emerald-800 font-bold flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" />
+                  Approved by Department Head on {formatISTDate(request.waitlist_approved_at)}.
+                </span>
+              ) : (
+                <span className="block mt-1 text-rose-800 font-semibold">
+                  Awaiting review and approval by an authorized Department Head before standard processing.
+                </span>
+              )}
+            </p>
+
+            {canDecideWaitlist && (
+              <div className="pt-2 flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    runInline(async () => {
+                      return await decideExhibitionWaitlist(request.id, 'approve', 'Special Waiting List Exhibition approved by Head');
+                    }, 'Special Waiting List Exhibition approved!')
+                  }
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Approve Special Waitlist</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    runInline(async () => {
+                      return await decideExhibitionWaitlist(request.id, 'reject', 'Special Waiting List Exhibition rejected');
+                    }, 'Special Waiting List Exhibition rejected.')
+                  }
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-700 font-semibold text-xs border border-rose-200 transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>Reject Special Waitlist</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

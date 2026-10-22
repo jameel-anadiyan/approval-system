@@ -16,6 +16,8 @@ import {
 } from './AssetQuotations';
 import { WorkCategoryField, useCategoryOptions } from './WorkCategoryField';
 import { TargetHeadField } from './TargetHeadField';
+import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
+import { useAuth } from '../../context/AuthContext';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -25,7 +27,8 @@ interface EditDraftModalProps {
 
 /** Requester edits a draft / returned request: details, add documents, remove attachments. */
 export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose, request }) => {
-  const { updateDraft, addFiles, removeFile, setQuote, threshold } = useRequests();
+  const { user } = useAuth();
+  const { updateDraft, addFiles, removeFile, setQuote, threshold, requests } = useRequests();
   const type = typeOf(request);
   const [title, setTitle] = useState(request.title);
   const [amountStr, setAmountStr] = useState(() => {
@@ -52,6 +55,16 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [error, setError] = useState<string | null>(null);
   const saveLockRef = useRef(false);
 
+  const exhibitionQuota = type === 'exhibition' ? checkExhibitionQuota({
+    eventStart: exhibition.event_start,
+    eventDates: exhibition.event_dates,
+    regionId: request.region_id || user?.region_id || null,
+    regionName: request.region_name || user?.region?.name || null,
+    currentUser: user,
+    allRequests: requests,
+    excludeRequestId: request.id,
+  }) : null;
+
   const baseAmount = parseFloat(amountStr) || 0;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
@@ -76,7 +89,13 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const getDetails = (): RequestDetails | null => {
     if (type === 'non_cash') return null;
     if (type === 'discount') return toDiscountDetails(discount);
-    if (type === 'exhibition') return toExhibitionDetails(exhibition);
+    if (type === 'exhibition') {
+      const exh = toExhibitionDetails(exhibition);
+      if (exhibitionQuota?.mustUseWaitlist) {
+        exh.is_waitlist = true;
+      }
+      return exh;
+    }
     if (type === 'asset') return toAssetDetails(asset);
     return {
       base_amount: baseAmount,
@@ -186,7 +205,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           </div>
         )}
         {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
-        {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} />}
+        {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
         {type === 'asset' && <AssetFields value={asset} onChange={setAsset} />}
         <div>
           <label htmlFor="edit-notes" className="text-xs font-bold text-slate-700 block mb-1">Purpose / Notes</label>

@@ -4,12 +4,34 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
-import { CheckCircle2, Clock, CheckCircle, PlusCircle, Building2, TrendingUp, Users, HelpCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock,
+  CheckCircle,
+  PlusCircle,
+  Building2,
+  TrendingUp,
+  Users,
+  HelpCircle,
+  AlertTriangle,
+  CalendarDays,
+  ArrowRight,
+} from 'lucide-react';
 
 export const HeadDashboardPage: React.FC = () => {
   const { user } = useAuth();
   const { requests } = useRequests();
   const navigate = useNavigate();
+
+  // Waitlist access & counts
+  const canViewWaitlist = Boolean(user?.role === 'admin' || user?.can_view_exhibition_waitlist);
+  const waitlistPendingCount = requests.filter(
+    (r) => r.is_waitlist && r.status !== 'draft' && !r.waitlist_approved_at && r.status !== 'rejected' && r.status !== 'withdrawn'
+  ).length;
+
+  const hasExhibitionAccess = Boolean(user) && (
+    user?.role === 'admin' || user?.role === 'head' || user?.role === 'regional_head' || Boolean(user?.allowed_types?.includes('exhibition'))
+  );
 
   // Department requests
   const deptRequests = requests.filter(
@@ -65,6 +87,107 @@ export const HeadDashboardPage: React.FC = () => {
           <span>Raise Own Request</span>
         </button>
       </div>
+
+      {/* Primary In-Page Tabs for Department Head */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none border-b border-slate-200/90 pt-1">
+        <button
+          type="button"
+          className="px-4 py-2 text-xs font-bold rounded-xl bg-purple-700 text-white flex items-center gap-2 shadow-xs shrink-0"
+        >
+          <CheckCircle className="w-3.5 h-3.5" />
+          <span>To Approve (Route B)</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-white text-[10px] font-bold">
+            {toApproveQueue.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/head/review')}
+          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors"
+        >
+          <Clock className="w-3.5 h-3.5 text-slate-400" />
+          <span>To Review (Route A)</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold">
+            {toReviewQueue.length}
+          </span>
+        </button>
+
+        {canViewWaitlist && (
+          <button
+            type="button"
+            onClick={() => navigate('/head/exhibition-waitlist')}
+            className="px-4 py-2 text-xs font-extrabold rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border-2 border-rose-400 flex items-center gap-2 shrink-0 shadow-xs transition-all ring-2 ring-rose-200/50"
+            title="Dedicated Special Waiting List Exhibition Tab"
+          >
+            <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping shrink-0" />
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+            <span className="text-rose-900">Waitlist Exhibitions (Red Tab)</span>
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black shadow-xs">
+              {waitlistPendingCount}
+            </span>
+          </button>
+        )}
+
+        {hasExhibitionAccess && (
+          <button
+            type="button"
+            onClick={() => navigate('/calendar/exhibitions')}
+            className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 border border-slate-200 flex items-center gap-2 shrink-0 transition-colors"
+          >
+            <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Exhibition Calendar</span>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => navigate('/head/consultations')}
+          className="px-4 py-2 text-xs font-medium rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors"
+        >
+          <Users className="w-3.5 h-3.5 text-slate-400" />
+          <span>Consultations</span>
+          {pendingConsultationsCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[10px] font-bold">
+              {pendingConsultationsCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Special Waitlist Exhibition Red Banner (When pending requests exist) */}
+      {canViewWaitlist && waitlistPendingCount > 0 && (
+        <div
+          onClick={() => navigate('/head/exhibition-waitlist')}
+          className="p-4 bg-linear-to-r from-rose-50 via-red-50 to-rose-100/80 border-2 border-rose-400/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:shadow-md transition-all shadow-xs"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-black text-rose-950 font-display flex items-center gap-2 flex-wrap">
+                <span className="uppercase tracking-wider px-2 py-0.5 rounded-md bg-rose-200 text-rose-900 border border-rose-300 text-[10px] font-extrabold">
+                  Special Waiting List
+                </span>
+                <span className="text-rose-900 font-extrabold">
+                  {waitlistPendingCount} Exhibition Exception Request{waitlistPendingCount > 1 ? 's' : ''} Awaiting Your Sign-off
+                </span>
+              </div>
+              <p className="text-[11px] text-rose-800 mt-1">
+                Regional quota is filled for these dates. Tap to open your dedicated Red Tab and review these special requests.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 shadow-sm transition-colors self-start sm:self-auto"
+          >
+            <span>Open Red Tab ({waitlistPendingCount})</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Pending Consultations Banner */}
       {pendingConsultationsCount > 0 && (
@@ -142,7 +265,7 @@ export const HeadDashboardPage: React.FC = () => {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className={`grid grid-cols-2 ${canViewWaitlist ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} gap-3 sm:gap-4`}>
         <div
           onClick={() => {}}
           className="bg-white p-4 sm:p-5 rounded-2xl border border-purple-200/90 shadow-xs cursor-pointer hover:border-purple-300 transition-all"
@@ -170,6 +293,31 @@ export const HeadDashboardPage: React.FC = () => {
           </div>
           <span className="text-[11px] text-slate-400 mt-1 block">To forward to Admin</span>
         </div>
+
+        {canViewWaitlist && (
+          <div
+            onClick={() => navigate('/head/exhibition-waitlist')}
+            className={`p-4 sm:p-5 rounded-2xl border-2 shadow-xs cursor-pointer transition-all ${
+              waitlistPendingCount > 0
+                ? 'bg-rose-50/70 border-rose-400 hover:border-rose-600 hover:bg-rose-100/70'
+                : 'bg-white border-rose-200 hover:border-rose-300'
+            }`}
+          >
+            <div className="flex items-center justify-between text-rose-600 mb-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider">Waitlist (Red Tab)</span>
+              <AlertTriangle className="w-4 h-4 text-rose-600" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-rose-950 font-display flex items-center gap-2">
+              <span>{waitlistPendingCount}</span>
+              {waitlistPendingCount > 0 && (
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping inline-block" />
+              )}
+            </div>
+            <span className="text-[11px] text-rose-700 font-semibold mt-1 block">
+              {waitlistPendingCount > 0 ? 'Sign-off required' : 'No pending waitlist'}
+            </span>
+          </div>
+        )}
 
         <div
           onClick={() => navigate('/head/consultations')}

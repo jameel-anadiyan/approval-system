@@ -38,12 +38,16 @@ const HeadConsultationsPage = page(() => import('./pages/head/HeadConsultationsP
 const AdminDepartmentsPage = page(() => import('./pages/admin/AdminDepartmentsPage'), 'AdminDepartmentsPage');
 const AdminShopsPage = page(() => import('./pages/admin/AdminShopsPage'), 'AdminShopsPage');
 const AdminHeadsPage = page(() => import('./pages/admin/AdminHeadsPage'), 'AdminHeadsPage');
+const AdminRegionalHeadsPage = page(() => import('./pages/admin/AdminRegionalHeadsPage'), 'AdminRegionalHeadsPage');
 const AdminStaffPage = page(() => import('./pages/admin/AdminStaffPage'), 'AdminStaffPage');
 const AdminDisbursementPage = page(() => import('./pages/admin/AdminDisbursementPage'), 'AdminDisbursementPage');
 const AdminSettingsPage = page(() => import('./pages/admin/AdminSettingsPage'), 'AdminSettingsPage');
 const AdminAuditLogPage = page(() => import('./pages/admin/AdminAuditLogPage'), 'AdminAuditLogPage');
 const DisbursementVerifyPage = page(() => import('./pages/disbursement/DisbursementVerifyPage'), 'DisbursementVerifyPage');
 const DiscountReportPage = page(() => import('./pages/reports/DiscountReportPage'), 'DiscountReportPage');
+const AdminRegionsPage = page(() => import('./pages/admin/AdminRegionsPage'), 'AdminRegionsPage');
+const HeadExhibitionWaitlistPage = page(() => import('./pages/head/HeadExhibitionWaitlistPage'), 'HeadExhibitionWaitlistPage');
+const ExhibitionCalendarPage = page(() => import('./pages/shared/ExhibitionCalendarPage'), 'ExhibitionCalendarPage');
 
 const PageSpinner: React.FC = () => (
   <div className="min-h-[50vh] flex items-center justify-center">
@@ -62,6 +66,28 @@ const RequireRole: React.FC<{ roles: AppRole[] }> = ({ roles }) => {
 const RequireDiscountReport: React.FC = () => {
   const { user } = useAuth();
   if (!canViewDiscountReport(user)) return <RoleRedirect />;
+  return <Outlet />;
+};
+
+/** Admin, or Head granted waitlist tab access. */
+const RequireExhibitionWaitlist: React.FC = () => {
+  const { user, role } = useAuth();
+  if (!user || !(role === 'admin' || (role === 'head' && user.can_view_exhibition_waitlist))) {
+    return <RoleRedirect />;
+  }
+  return <Outlet />;
+};
+
+/** User who has access to exhibition requests. */
+const RequireExhibitionAccess: React.FC = () => {
+  const { user, role } = useAuth();
+  const allowed =
+    Boolean(user) &&
+    (role === 'admin' ||
+      role === 'head' ||
+      role === 'regional_head' ||
+      Boolean(user?.allowed_types?.includes('exhibition')));
+  if (!allowed) return <RoleRedirect />;
   return <Outlet />;
 };
 
@@ -154,6 +180,16 @@ export const App: React.FC = () => {
                   <Route path="reports/discounts" element={<DiscountReportPage />} />
                 </Route>
 
+                {/* Special Waiting List for Exhibitions (Admin + Heads with access) */}
+                <Route element={<RequireExhibitionWaitlist />}>
+                  <Route path="head/exhibition-waitlist" element={<HeadExhibitionWaitlistPage />} />
+                </Route>
+
+                {/* Exhibition Calendar (Users with exhibition request right) */}
+                <Route element={<RequireExhibitionAccess />}>
+                  <Route path="calendar/exhibitions" element={<ExhibitionCalendarPage />} />
+                </Route>
+
                 {/* Roles that can raise requests */}
                 <Route element={<RequireRole roles={['employee', 'clerk', 'head', 'regional_head']} />}>
                   <Route path="my" element={<MyRequestsPage />} />
@@ -188,6 +224,8 @@ export const App: React.FC = () => {
                   <Route path="admin" element={<AdminDashboardPage />} />
                   <Route path="admin/approve" element={<AdminApprovePage />} />
                   <Route path="admin/requests" element={<AdminAllRequestsPage />} />
+                  <Route path="admin/regions" element={<AdminRegionsPage />} />
+                  <Route path="admin/regional-heads" element={<AdminRegionalHeadsPage />} />
                   <Route path="admin/departments" element={<AdminDepartmentsPage />} />
                   <Route path="admin/shops" element={<AdminShopsPage />} />
                   <Route path="admin/staff" element={<AdminStaffPage />} />

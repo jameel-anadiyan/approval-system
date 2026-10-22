@@ -64,19 +64,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const saved = localStorage.getItem(SANDBOX_USER_KEY);
         if (saved) {
           try {
-            if (mounted) setUser(JSON.parse(saved));
+            const parsed = JSON.parse(saved) as Profile;
+            const matched = MOCK_USERS.find((u) => u.id === parsed.id || u.username === parsed.username);
+            const fresh: Profile = matched
+              ? {
+                  ...matched,
+                  ...parsed,
+                  can_view_exhibition_waitlist:
+                    parsed.can_view_exhibition_waitlist !== undefined
+                      ? parsed.can_view_exhibition_waitlist
+                      : matched.can_view_exhibition_waitlist,
+                  can_view_discount_report:
+                    parsed.can_view_discount_report !== undefined
+                      ? parsed.can_view_discount_report
+                      : matched.can_view_discount_report,
+                  region_id: parsed.region_id ?? matched.region_id,
+                  allowed_types: parsed.allowed_types ?? matched.allowed_types,
+                }
+              : parsed;
+
+            if (fresh.role === 'admin') {
+              fresh.can_view_exhibition_waitlist = true;
+              fresh.can_view_discount_report = true;
+            }
+            if (fresh.username === 'head_fin' && fresh.can_view_exhibition_waitlist === undefined) {
+              fresh.can_view_exhibition_waitlist = true;
+            }
+            if (mounted) setUser(fresh);
+            localStorage.setItem(SANDBOX_USER_KEY, JSON.stringify(fresh));
           } catch {
             localStorage.removeItem(SANDBOX_USER_KEY);
           }
         }
       }
-      if (mounted) setIsLoading(false);
-    })();
+      const onSync = (e: Event) => {
+        const custom = e as CustomEvent<Profile>;
+        if (custom.detail && mounted) {
+          setUser(custom.detail);
+        }
+      };
+      window.addEventListener('approval_app_user_sync', onSync);
 
-    return () => {
-      mounted = false;
-      unsubscribe?.();
-    };
+      return () => {
+        mounted = false;
+        unsubscribe?.();
+        window.removeEventListener('approval_app_user_sync', onSync);
+      };
+    })();
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -132,7 +166,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const switchMockRole = (role: AppRole) => {
     if (isBackendConnected) return;
     const found = MOCK_USERS.find((u) => u.role === role);
-    if (found) setSandboxUser(found);
+    if (found) {
+      const fresh: Profile = { ...found };
+      if (fresh.role === 'admin') {
+        fresh.can_view_exhibition_waitlist = true;
+        fresh.can_view_discount_report = true;
+      }
+      setSandboxUser(fresh);
+    }
   };
 
   const updatePassword = async (newPassword: string) => {

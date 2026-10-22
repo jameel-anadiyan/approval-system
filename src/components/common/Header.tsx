@@ -19,12 +19,13 @@ export const Header: React.FC = () => {
     navigate('/login');
   };
 
-  const roles: { role: AppRole; label: string }[] = [
-    { role: 'admin', label: 'Admin (Approver)' },
-    { role: 'head', label: 'Head (Approver)' },
-    { role: 'clerk', label: 'Clerk (Router)' },
-    { role: 'employee', label: 'Employee (Requester)' },
-    { role: 'disbursement', label: 'Disbursement (Cashier)' },
+  const roles: { role: AppRole; label: string; short: string }[] = [
+    { role: 'admin', label: 'Admin (Approver)', short: 'ADMIN' },
+    { role: 'head', label: 'Head (Approver)', short: 'HEAD' },
+    { role: 'regional_head', label: 'Regional Head (South)', short: 'REGIONAL' },
+    { role: 'clerk', label: 'Clerk (Router)', short: 'CLERK' },
+    { role: 'employee', label: 'Employee (Requester)', short: 'EMPLOYEE' },
+    { role: 'disbursement', label: 'Disbursement (Cashier)', short: 'DISB' },
   ];
 
   const getRoleRoute = (r: AppRole): string => {
@@ -89,7 +90,7 @@ export const Header: React.FC = () => {
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
               }`}
             >
-              {r.role.toUpperCase()}
+              {r.short}
             </button>
           ))}
         </div>

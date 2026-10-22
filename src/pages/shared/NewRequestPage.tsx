@@ -16,9 +16,10 @@ import {
   quoteSummary, validateQuotes, newQuoteFiles,
 } from '../../components/requests/AssetQuotations';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays } from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
+import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
@@ -30,7 +31,7 @@ const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
 
 export const NewRequestPage: React.FC = () => {
   const { user } = useAuth();
-  const { createDraft, submitRequest, threshold } = useRequests();
+  const { createDraft, submitRequest, threshold, requests } = useRequests();
   const navigate = useNavigate();
 
   const allowed = useMemo<RequestType[]>(
@@ -56,6 +57,18 @@ export const NewRequestPage: React.FC = () => {
   const [targetHeadId, setTargetHeadId] = useState('');
   const categoryOptions = useCategoryOptions(targetHeadId || null);
   const [categoryId, setCategoryId] = useState('');
+
+  const exhibitionQuota = useMemo(() => {
+    if (type !== 'exhibition') return null;
+    return checkExhibitionQuota({
+      eventStart: exhibition.event_start,
+      eventDates: exhibition.event_dates,
+      regionId: user?.region_id || null,
+      regionName: user?.region?.name || null,
+      currentUser: user,
+      allRequests: requests,
+    });
+  }, [type, exhibition.event_start, exhibition.event_dates, user, requests]);
 
   const baseAmount = parseFloat(amountStr) || 0;
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
@@ -103,7 +116,13 @@ export const NewRequestPage: React.FC = () => {
   const details = (): RequestDetails | null => {
     if (type === 'non_cash') return null;
     if (type === 'discount') return toDiscountDetails(discount);
-    if (type === 'exhibition') return toExhibitionDetails(exhibition);
+    if (type === 'exhibition') {
+      const exh = toExhibitionDetails(exhibition);
+      if (exhibitionQuota?.mustUseWaitlist) {
+        exh.is_waitlist = true;
+      }
+      return exh;
+    }
     if (type === 'asset') return toAssetDetails(asset);
     return {
       base_amount: baseAmount,
@@ -249,9 +268,22 @@ export const NewRequestPage: React.FC = () => {
 
         {/* Main details */}
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-800 font-display border-b border-slate-100 pb-2">
-            {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
-          </h2>
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
+            <h2 className="text-sm font-bold text-slate-800 font-display">
+              {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
+            </h2>
+            {type === 'exhibition' && (
+              <a
+                href="/calendar/exhibitions"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs border border-indigo-200 transition-colors"
+              >
+                <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />
+                <span>View Exhibition Calendar ↗</span>
+              </a>
+            )}
+          </div>
 
           <TargetHeadField
             value={targetHeadId}
@@ -329,7 +361,7 @@ export const NewRequestPage: React.FC = () => {
           )}
 
           {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
-          {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} />}
+          {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
           {type === 'asset' && <AssetFields value={asset} onChange={setAsset} />}
 
           {isHighValue && (

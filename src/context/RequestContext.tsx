@@ -13,7 +13,7 @@ import {
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
-import { MOCK_REQUESTS, MOCK_USERS } from '../lib/mockData';
+import { MOCK_REQUESTS, MOCK_USERS, MOCK_REGIONS } from '../lib/mockData';
 import { loadThreshold } from '../lib/directory';
 
 type Result = { success: boolean; error?: string; warning?: string };
@@ -128,6 +128,12 @@ interface RequestContextType {
   setQuote: (fileId: string, vendor: string, amount: number, preferred: boolean) => Promise<Result>;
   /** Asset buying: Head (or Admin) picks the best quotation; returns the new status. */
   selectQuote: (requestId: string, fileId: string, remarks?: string) => Promise<Result & { status?: string }>;
+  /** Special Waiting List exhibition approval / rejection by Head (or Admin) */
+  decideExhibitionWaitlist: (
+    id: string,
+    action: 'approve' | 'reject',
+    remarks?: string
+  ) => Promise<Result>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -436,6 +442,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? user
         : MOCK_USERS.find((u) => u.role === 'head' && u.department_id === (user.department_id || 'dept-fin-001'));
 
+    const isWaitlist = Boolean(data.details && 'is_waitlist' in data.details ? data.details.is_waitlist : false);
+    const regId = user.region_id || (data.details && 'region_id' in data.details ? (data.details as any).region_id : null);
+    const regName = user.region?.name || (regId ? MOCK_REGIONS.find((r) => r.id === regId)?.name : null);
+
     const newRecord: RequestRecord = {
       id: newId,
       request_no: null,
@@ -453,6 +463,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             photo_path: mockDeptHead.photo_path ?? null,
           }
         : null,
+      region_id: regId,
+      region_name: regName,
+      is_waitlist: isWaitlist,
+      waitlist_approved_by: null,
+      waitlist_approved_at: null,
       title: data.title,
       notes: data.notes || null,
       amount: data.amount,
@@ -533,11 +548,19 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: true };
     }
     updateLocalRequests((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, title: data.title, amount: data.amount, notes: data.notes || null, details: data.details ?? r.details, updated_at: new Date().toISOString() }
-          : r
-      )
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        const isWaitlist = data.details && 'is_waitlist' in data.details ? Boolean(data.details.is_waitlist) : r.is_waitlist;
+        return {
+          ...r,
+          title: data.title,
+          amount: data.amount,
+          notes: data.notes || null,
+          details: data.details !== undefined ? data.details : r.details,
+          is_waitlist: isWaitlist,
+          updated_at: new Date().toISOString(),
+        };
+      })
     );
     return { success: true };
   };
@@ -1581,6 +1604,74 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true, status: (data as { status?: string } | null)?.status };
   };
 
+  const decideExhibitionWaitlist = async (
+    id: string,
+    action: 'approve' | 'reject',
+    remarks?: string
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!['admin', 'head'].includes(user.role)) {
+      return { success: false, error: 'Only Head or Admin can decide exhibition waitlists' };
+    }
+
+    if (isBackendConnected) {
+      const { error } = await supabase.rpc('decide_exhibition_waitlist', {
+        p_request_id: id,
+        p_action: action,
+        p_remarks: remarks || null,
+      });
+      if (error) return { success: false, error: error.message };
+      await loadRequests(true);
+      return { success: true };
+    }
+
+    // Mock implementation
+    const current = getRequestById(id);
+    if (!current) return { success: false, error: 'Request not found' };
+
+    const now = new Date().toISOString();
+    const actionRecord: RequestAction = {
+      id: `act-${Date.now()}`,
+      request_id: id,
+      actor_id: user.id,
+      actor_name: user.full_name,
+      actor_role: user.role,
+      action: action === 'approve' ? 'forwarded' : 'rejected',
+      from_status: current.status,
+      to_status: action === 'approve' ? current.status : 'rejected',
+      remarks: remarks || (action === 'approve' ? 'Special Waiting List Exhibition approved by Head' : 'Special Waiting List Exhibition rejected'),
+      visible_to_requester: true,
+      created_at: now,
+    };
+
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        if (action === 'approve') {
+          return {
+            ...r,
+            waitlist_approved_by: user.id,
+            waitlist_approved_at: now,
+            updated_at: now,
+            actions: [actionRecord, ...(r.actions || [])],
+          };
+        } else {
+          return {
+            ...r,
+            status: 'rejected',
+            decided_by: user.id,
+            decided_at: now,
+            approver_role: user.role,
+            updated_at: now,
+            actions: [actionRecord, ...(r.actions || [])],
+          };
+        }
+      })
+    );
+
+    return { success: true };
+  };
+
   return (
     <RequestContext.Provider
       value={{
@@ -1615,6 +1706,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         signClarificationFiles,
         setQuote,
         selectQuote,
+        decideExhibitionWaitlist,
       }}
     >
       {children}

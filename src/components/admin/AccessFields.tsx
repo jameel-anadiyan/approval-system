@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import type { AppRole, Profile, RequestType, Shop, WorkCategory } from '../../types/database';
+import type { AppRole, Profile, Region, RequestType, Shop, WorkCategory } from '../../types/database';
 import { REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
 import { Modal } from '../common/Modal';
-import { KeyRound, UserCheck, Tags, Users } from 'lucide-react';
+import { KeyRound, UserCheck, Tags, Users, Globe } from 'lucide-react';
 
 export const rolesWithTypes: AppRole[] = ['employee', 'clerk', 'head', 'regional_head'];
 
@@ -20,6 +20,7 @@ export function coveringRegionalHeads(users: Profile[], departmentId: string | n
 
 export interface ExtraAccess {
   shopIds: string[];
+  regionId: string;
   regionalHeadId: string;
   categoryIds: string[];
   headIds: string[];
@@ -29,6 +30,7 @@ export interface ExtraAccess {
 interface AccessFieldsProps {
   role: AppRole;
   shops: Shop[];
+  regions?: Region[];
   shopId: string;
   onShopChange: (id: string) => void;
   types: RequestType[];
@@ -43,6 +45,7 @@ interface AccessFieldsProps {
 
 const EMPTY_EXTRA: ExtraAccess = {
   shopIds: [],
+  regionId: '',
   regionalHeadId: '',
   categoryIds: [],
   headIds: [],
@@ -51,7 +54,7 @@ const EMPTY_EXTRA: ExtraAccess = {
 
 /** Shop picker(s), Regional Head / work categories, Department Heads, and "may raise these request types" checkboxes. */
 export const AccessFields: React.FC<AccessFieldsProps> = ({
-  role, shops, shopId, onShopChange, types, onTypesChange,
+  role, shops, regions = [], shopId, onShopChange, types, onTypesChange,
   departmentId, users = [], categories = [], extra = EMPTY_EXTRA, onExtraChange,
 }) => {
   if (!rolesWithTypes.includes(role)) return null;
@@ -71,44 +74,70 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
   return (
     <div className="space-y-4">
       {isRegional ? (
-        <fieldset>
-          <legend className="text-xs font-bold text-slate-700 mb-1.5">
-            Shops under this Regional Head <span className="text-rose-500">*</span>
-          </legend>
-          {activeShops.length === 0 ? (
-            <span className="text-[11px] text-amber-700 block">No shops yet. Admin can add them under Shops.</span>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
-              {activeShops.map((s) => {
-                const on = extra.shopIds.includes(s.id);
-                return (
-                  <label
-                    key={s.id}
-                    className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer text-xs transition-colors ${
-                      on ? 'border-cyan-300 bg-cyan-50/70' : 'border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      id={`access-rh-shop-${s.id}`}
-                      checked={on}
-                      onChange={() =>
-                        setExtra({ shopIds: on ? extra.shopIds.filter((x) => x !== s.id) : [...extra.shopIds, s.id] })
-                      }
-                      className="w-4 h-4 accent-cyan-600"
-                    />
-                    <span className="truncate">
-                      <strong className="text-slate-800">{s.name}</strong> <span className="text-slate-400">({s.code})</span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          )}
-          <span className="text-[10px] text-slate-400 mt-1 block">
-            Employees of these shops send their requests through this Regional Head.
-          </span>
-        </fieldset>
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="access-region" className="text-xs font-bold text-slate-700 block mb-1">
+              Region of Regional Head <span className="text-rose-500">*</span>
+            </label>
+            <select
+              id="access-region"
+              value={extra.regionId || ''}
+              onChange={(e) => setExtra({ regionId: e.target.value })}
+              className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-hidden bg-white"
+            >
+              <option value="">Select Region (Admin Region Master)…</option>
+              {regions
+                .filter((r) => r.is_active || r.id === extra.regionId)
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.code})
+                  </option>
+                ))}
+            </select>
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              The Region Master is configured in Admin. Controls the 2-per-day exhibition booking quota for this region.
+            </span>
+          </div>
+
+          <fieldset>
+            <legend className="text-xs font-bold text-slate-700 mb-1.5">
+              Shops under this Regional Head <span className="text-rose-500">*</span>
+            </legend>
+            {activeShops.length === 0 ? (
+              <span className="text-[11px] text-amber-700 block">No shops yet. Admin can add them under Shops.</span>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                {activeShops.map((s) => {
+                  const on = extra.shopIds.includes(s.id);
+                  return (
+                    <label
+                      key={s.id}
+                      className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer text-xs transition-colors ${
+                        on ? 'border-cyan-300 bg-cyan-50/70' : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        id={`access-rh-shop-${s.id}`}
+                        checked={on}
+                        onChange={() =>
+                          setExtra({ shopIds: on ? extra.shopIds.filter((x) => x !== s.id) : [...extra.shopIds, s.id] })
+                        }
+                        className="w-4 h-4 accent-cyan-600"
+                      />
+                      <span className="truncate">
+                        <strong className="text-slate-800">{s.name}</strong> <span className="text-slate-400">({s.code})</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              Employees of these shops send their requests through this Regional Head.
+            </span>
+          </fieldset>
+        </div>
       ) : (
         <div>
           <label htmlFor="access-shop" className="text-xs font-bold text-slate-700 block mb-1">
@@ -330,6 +359,7 @@ export function validateAccess(
 ): string | null {
   if (!rolesWithTypes.includes(role)) return null;
   if (role === 'employee' && !shopId) return "Select the employee's shop.";
+  if (role === 'regional_head' && !extra?.regionId) return 'Select a region for the Regional Head from Region Master.';
   if (role === 'regional_head' && !(extra?.shopIds.length)) return 'Select at least one shop for the Regional Head.';
   if (role === 'employee' && (extra?.coveringCount ?? 0) > 0 && !extra?.regionalHeadId) {
     return "Select the employee's Regional Head.";
@@ -345,6 +375,7 @@ export function validateAccess(
 export const AccessModal: React.FC<{
   target: Profile;
   shops: Shop[];
+  regions?: Region[];
   users?: Profile[];
   categories?: WorkCategory[];
   onClose: () => void;
@@ -352,12 +383,13 @@ export const AccessModal: React.FC<{
     shop_id: string | null;
     allowed_types: RequestType[];
     shop_ids?: string[];
+    region_id?: string | null;
     category_ids?: string[];
     regional_head_id?: string | null;
     head_ids?: string[];
     default_head_id?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
-}> = ({ target, shops, users = [], categories = [], onClose, onSave }) => {
+}> = ({ target, shops, regions = [], users = [], categories = [], onClose, onSave }) => {
   const [shopId, setShopId] = useState(target.shop_id ?? '');
   const [types, setTypes] = useState<RequestType[]>(target.allowed_types?.length ? target.allowed_types : ['general']);
 
@@ -376,6 +408,7 @@ export const AccessModal: React.FC<{
 
   const [extra, setExtra] = useState<ExtraAccess>({
     shopIds: (target.rh_shops || []).map((s) => s.shop_id),
+    regionId: target.region_id ?? '',
     regionalHeadId: target.regional_head_id ?? '',
     categoryIds: (target.clerk_cats || []).map((c) => c.category_id),
     headIds: resolvedHeadIds,
@@ -396,7 +429,7 @@ export const AccessModal: React.FC<{
     const res = await onSave({
       shop_id: target.role === 'regional_head' ? null : shopId || null,
       allowed_types: types,
-      ...(target.role === 'regional_head' ? { shop_ids: extra.shopIds } : {}),
+      ...(target.role === 'regional_head' ? { shop_ids: extra.shopIds, region_id: extra.regionId || null } : {}),
       ...(target.role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
       ...(target.role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
       ...(target.role === 'employee' || target.role === 'regional_head'
@@ -415,7 +448,7 @@ export const AccessModal: React.FC<{
       title={`Access · ${target.full_name}`}
       description={
         target.role === 'regional_head'
-          ? 'Shops covered, assigned Heads, and request types this Regional Head can raise.'
+          ? 'Region, shops covered, assigned Heads, and request types this Regional Head can raise.'
           : target.role === 'clerk'
             ? 'Work categories and request types this clerk can raise.'
             : 'Shop, Regional Head, assigned Heads, and request types this user can raise.'
@@ -427,6 +460,7 @@ export const AccessModal: React.FC<{
         <AccessFields
           role={target.role}
           shops={shops}
+          regions={regions}
           shopId={shopId}
           onShopChange={setShopId}
           types={types}

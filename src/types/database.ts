@@ -87,6 +87,7 @@ export interface ExhibitionDetails {
   other_costs?: number | null;
   total_budget?: number | null;
   purpose?: string | null;
+  is_waitlist?: boolean;
 }
 
 export interface GeneralDetails {
@@ -116,6 +117,15 @@ export interface Department {
   updated_at: string;
 }
 
+export interface Region {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Profile {
   id: string;
   username: string;
@@ -134,7 +144,12 @@ export interface Profile {
   shop?: Shop | null;
   /** Head only — granted by Admin to open the Discount Report */
   can_view_discount_report?: boolean;
+  /** Head only — granted by Admin to view and decide the Special Waiting List tab */
+  can_view_exhibition_waitlist?: boolean;
   photo_path?: string | null;
+  /** Regional Head only — assigned region from Region Master */
+  region_id?: string | null;
+  region?: Region | null;
   /** Employee only — the Regional Head their requests go through */
   regional_head_id?: string | null;
   /** Regional Head only — shops they cover */
@@ -234,6 +249,13 @@ export interface RequestRecord {
   regional_forwarded_at?: string | null;
   /** Computed: clerks who may route / return this request */
   routing_clerk_ids?: string[] | null;
+  /** Regional Head's region */
+  region_id?: string | null;
+  region_name?: string | null;
+  /** Special Waiting List Exhibition flag */
+  is_waitlist?: boolean;
+  waitlist_approved_by?: string | null;
+  waitlist_approved_at?: string | null;
 }
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';

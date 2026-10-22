@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { AppRole, Department, Profile, RequestType, Shop, WorkCategory } from '../../types/database';
+import { AppRole, Department, Profile, Region, RequestType, Shop, WorkCategory } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
 import { UserPlus, ShieldAlert, Camera, Trash2 } from 'lucide-react';
 import { AccessFields, ExtraAccess, coveringRegionalHeads, rolesWithTypes, validateAccess } from './AccessFields';
@@ -12,6 +12,7 @@ interface UserModalProps {
   onClose: () => void;
   departments: Department[];
   shops?: Shop[];
+  regions?: Region[];
   /** Existing users (to list Regional Heads for a new employee) */
   users?: Profile[];
   categories?: WorkCategory[];
@@ -27,6 +28,7 @@ interface UserModalProps {
     allowed_types?: RequestType[];
     photo?: string;
     shop_ids?: string[];
+    region_id?: string | null;
     category_ids?: string[];
     regional_head_id?: string | null;
     head_ids?: string[];
@@ -39,6 +41,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   onClose,
   departments,
   shops = [],
+  regions = [],
   users = [],
   categories = [],
   allowedRoles = ['head', 'clerk', 'employee', 'disbursement'],
@@ -64,6 +67,7 @@ export const UserModal: React.FC<UserModalProps> = ({
 
   const [extra, setExtra] = useState<ExtraAccess>({
     shopIds: [],
+    regionId: '',
     regionalHeadId: '',
     categoryIds: [],
     headIds: initialHeadId ? [initialHeadId] : [],
@@ -128,7 +132,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         shop_id: withTypes && role !== 'regional_head' ? shopId || null : null,
         allowed_types: withTypes ? types : undefined,
         photo: photo || undefined,
-        ...(role === 'regional_head' ? { shop_ids: extra.shopIds } : {}),
+        ...(role === 'regional_head' ? { shop_ids: extra.shopIds, region_id: extra.regionId || null } : {}),
         ...(role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
         ...(role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
         ...(role === 'employee' || role === 'regional_head'
@@ -144,6 +148,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         setTypes(['general']);
         setExtra({
           shopIds: [],
+          regionId: '',
           regionalHeadId: '',
           categoryIds: [],
           headIds: initialHeadId ? [initialHeadId] : [],
@@ -314,6 +319,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         <AccessFields
           role={role}
           shops={shops}
+          regions={regions}
           shopId={shopId}
           onShopChange={setShopId}
           types={types}
