@@ -30,6 +30,13 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    setFullName(user.full_name || '');
+    setUsername(user.username || '');
+    setDesignation(user.designation || '');
+    setError(null);
+  }, [user.id, user.full_name, user.username, user.designation]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);

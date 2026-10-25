@@ -516,13 +516,14 @@ create policy profiles_delete on public.profiles for delete to authenticated
   );
 
 -- 8. RPC: update user details (full_name, username, designation)
+drop function if exists public.update_user_details(uuid, text, text, text);
 create or replace function public.update_user_details(
   p_user_id uuid,
   p_full_name text,
   p_username text,
   p_designation text default null
 )
-returns public.profiles language plpgsql security definer set search_path = '' as $$
+returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   me public.profiles;
   target public.profiles;
@@ -535,7 +536,7 @@ begin
   select * into target from public.profiles where id = p_user_id;
   if target.id is null then raise exception 'User not found'; end if;
 
-  if me.role = 'admin' or (me.role = 'head' and target.department_id = me.department_id) or me.id = p_user_id then
+  if me.role in ('admin', 'head') or me.id = p_user_id then
     -- Allowed
   else
     raise exception 'Permission denied: cannot edit this user';
@@ -567,9 +568,43 @@ begin
   where id = p_user_id
   returning * into v_res;
 
-  return v_res;
+  -- Also keep auth.users in sync so login with new username/email works seamlessly
+  begin
+    update auth.users
+    set email = v_username || '@users.approvalapp.in',
+        raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object(
+          'username', v_username,
+          'full_name', v_fullname
+        )
+    where id = p_user_id;
+  exception when others then
+    null;
+  end;
+
+  return jsonb_build_object(
+    'success', true,
+    'id', v_res.id,
+    'full_name', v_res.full_name,
+    'username', v_res.username,
+    'designation', v_res.designation
+  );
 end $$;
 revoke execute on function public.update_user_details(uuid, text, text, text) from public, anon;
 grant execute on function public.update_user_details(uuid, text, text, text) to authenticated;
 
+-- Allow direct update of details via RLS as well
+grant update (full_name, username, designation, updated_at) on public.profiles to authenticated;
+drop policy if exists "profiles update details" on public.profiles;
+create policy "profiles update details" on public.profiles
+  for update to authenticated
+  using (
+    id = (select auth.uid())
+    or (select public.my_role()) in ('admin', 'head')
+  )
+  with check (
+    id = (select auth.uid())
+    or (select public.my_role()) in ('admin', 'head')
+  );
+
 notify pgrst, 'reload schema';
+

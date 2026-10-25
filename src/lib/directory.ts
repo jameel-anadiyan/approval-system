@@ -541,52 +541,116 @@ export function useDirectory() {
     userId: string,
     data: { full_name: string; username: string; designation?: string | null }
   ): Promise<Result> => {
+    const cleanFullName = data.full_name.trim();
+    const cleanUsername = data.username.trim().toLowerCase();
+    const cleanDesignation = data.designation?.trim() || null;
+
+    if (!cleanFullName) {
+      return { success: false, error: 'Please enter the full name.' };
+    }
+    if (!/^[a-z0-9._-]{3,30}$/.test(cleanUsername)) {
+      return { success: false, error: 'Username must be 3–30 characters using lowercase letters, numbers, dot, dash, or underscore.' };
+    }
+
     if (live) {
-      // 1. Try edge function
-      const { error: fnErr } = await invokeEdgeFunction('admin-users', {
-        action: 'update',
-        user_id: userId,
-        full_name: data.full_name,
-        username: data.username,
-        designation: data.designation ?? null,
+      // 1. Try RPC update_user_details first (most reliable, handles auth.users and RLS)
+      const { error: rpcErr } = await supabase.rpc('update_user_details', {
+        p_user_id: userId,
+        p_full_name: cleanFullName,
+        p_username: cleanUsername,
+        p_designation: cleanDesignation,
       });
-      if (fnErr) {
-        // Fallback to RPC or direct update
-        const { error: rpcErr } = await supabase.rpc('update_user_details', {
-          p_user_id: userId,
-          p_full_name: data.full_name,
-          p_username: data.username,
-          p_designation: data.designation || null,
-        });
-        if (rpcErr) {
-          const { error: pErr } = await supabase
-            .from('profiles')
-            .update({
-              full_name: data.full_name,
-              username: data.username.toLowerCase(),
-              designation: data.designation || null,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', userId);
-          if (pErr) return { success: false, error: pErr.message };
+
+      if (rpcErr) {
+        console.warn('update_user_details RPC returned an error, attempting direct profiles update:', rpcErr);
+
+        // 2. Direct profiles table update fallback
+        const { error: pErr } = await supabase
+          .from('profiles')
+          .update({
+            full_name: cleanFullName,
+            username: cleanUsername,
+            designation: cleanDesignation,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId);
+
+        if (pErr) {
+          console.warn('Direct profiles update returned an error, attempting edge function fallback:', pErr);
+
+          // 3. Edge function fallback
+          const { error: fnErr } = await invokeEdgeFunction('admin-users', {
+            action: 'update',
+            user_id: userId,
+            full_name: cleanFullName,
+            username: cleanUsername,
+            designation: cleanDesignation,
+          });
+
+          if (fnErr) {
+            return {
+              success: false,
+              error: pErr.message || rpcErr.message || fnErr.message || 'Failed to save user details.',
+            };
+          }
         }
       }
+
+      // Optimistically update users in state so changes appear on screen immediately
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                full_name: cleanFullName,
+                username: cleanUsername,
+                designation: cleanDesignation,
+                updated_at: new Date().toISOString(),
+              }
+            : u
+        )
+      );
+
+      // If updating the currently logged-in user, sync auth state across app
+      const targetUser = users.find((u) => u.id === userId);
+      if (targetUser) {
+        const synced = {
+          ...targetUser,
+          full_name: cleanFullName,
+          username: cleanUsername,
+          designation: cleanDesignation,
+        };
+        window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: synced }));
+      }
+
       await reload();
       return { success: true };
     }
+
+    // Mock / Sandbox mode
     setUsers((prev) =>
       prev.map((u) =>
         u.id === userId
           ? {
               ...u,
-              full_name: data.full_name,
-              username: data.username.toLowerCase(),
-              designation: data.designation ?? null,
+              full_name: cleanFullName,
+              username: cleanUsername,
+              designation: cleanDesignation,
               updated_at: new Date().toISOString(),
             }
           : u
       )
     );
+    const targetUser = users.find((u) => u.id === userId);
+    if (targetUser) {
+      const synced = {
+        ...targetUser,
+        full_name: cleanFullName,
+        username: cleanUsername,
+        designation: cleanDesignation,
+      };
+      window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: synced }));
+    }
     return { success: true };
   };
 
