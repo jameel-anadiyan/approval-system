@@ -71,15 +71,17 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     setDeleting(true);
-    const res = await dir.deleteUser(deleteTarget.id);
+    const res = await dir.deleteUser(target.id);
     setDeleting(false);
     if (res.success) {
-      show(`User @${deleteTarget.username} has been permanently deleted.`);
+      show(`User @${target.username} has been permanently deleted.`);
       setDeleteTarget(null);
       setDeleteBlockReason(null);
     } else {
       show(res.error || 'Failed to delete user.', false);
+      setDeleteBlockReason(res.error || 'Failed to delete user.');
     }
   };
 

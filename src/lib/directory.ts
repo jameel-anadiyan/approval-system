@@ -646,13 +646,19 @@ export function useDirectory() {
 
   /** Permanently delete user if no associated requests exist */
   const deleteUser = async (userId: string): Promise<Result> => {
+    // Optimistically remove from state so the card immediately vanishes
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+
     if (live) {
       // 1. Try RPC delete_user_account first
       const { error: rpcErr } = await supabase.rpc('delete_user_account', { p_user_id: userId });
       if (!rpcErr) {
         await reload();
+        setUsers((prev) => prev.filter((u) => u.id !== userId));
         return { success: true };
       }
+
+      console.warn('delete_user_account RPC error:', rpcErr);
 
       // 2. Try Edge function
       const { error: fnErr } = await invokeEdgeFunction('admin-users', {
@@ -661,8 +667,11 @@ export function useDirectory() {
       });
       if (!fnErr) {
         await reload();
+        setUsers((prev) => prev.filter((u) => u.id !== userId));
         return { success: true };
       }
+
+      console.warn('admin-users edge function error:', fnErr);
 
       // 3. Fallback: clean up relational rows and delete from profiles
       try {
@@ -680,18 +689,21 @@ export function useDirectory() {
         const { error: pErr } = await supabase.from('profiles').delete().eq('id', userId);
         if (!pErr) {
           await reload();
+          setUsers((prev) => prev.filter((u) => u.id !== userId));
           return { success: true };
         }
-      } catch {
-        // ignore
+        console.warn('Direct profile delete error:', pErr);
+      } catch (e) {
+        console.warn('Fallback direct delete exception:', e);
       }
 
+      // If backend deletion completely failed, reload to restore the actual state
+      await reload();
       return {
         success: false,
-        error: rpcErr?.message || fnErr?.message || 'Failed to delete user. Please ensure migration 0038 is run.',
+        error: rpcErr?.message || fnErr?.message || 'Database error: Please run migration 0038 in Supabase SQL Editor.',
       };
     }
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
     return { success: true };
   };
 

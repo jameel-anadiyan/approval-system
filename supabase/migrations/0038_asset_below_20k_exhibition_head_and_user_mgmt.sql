@@ -506,6 +506,15 @@ end $$;
 revoke execute on function public.delete_user_account(uuid) from public, anon;
 grant execute on function public.delete_user_account(uuid) to authenticated;
 
+-- Allow Admin and Head to delete profiles via RLS
+grant delete on public.profiles to authenticated;
+drop policy if exists profiles_delete on public.profiles;
+create policy profiles_delete on public.profiles for delete to authenticated
+  using (
+    (select public.my_role()) = 'admin'
+    or ((select public.my_role()) = 'head' and department_id = (select public.my_department()))
+  );
+
 -- 8. RPC: update user details (full_name, username, designation)
 create or replace function public.update_user_details(
   p_user_id uuid,
