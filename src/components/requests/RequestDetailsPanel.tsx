@@ -80,7 +80,7 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
     );
   }
 
-  if (t === 'asset') {
+  if (t === 'asset' || t === 'asset_below_20k') {
     return (
       <div className="bg-white rounded-2xl border border-teal-200 p-5 sm:p-6 shadow-xs">
         <h3 className="text-sm font-bold text-slate-900 font-display mb-4 flex items-center gap-2">

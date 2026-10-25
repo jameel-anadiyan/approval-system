@@ -11,7 +11,7 @@ import {
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
 
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
-const REQUEST_TYPES = ["general", "discount", "exhibition", "asset", "non_cash"] as const;
+const REQUEST_TYPES = ["general", "discount", "exhibition", "asset", "asset_below_20k", "non_cash"] as const;
 
 const DEPT_ROLES: Role[] = ["head", "clerk", "employee", "regional_head"];
 
@@ -269,8 +269,89 @@ Deno.serve(handle(async (req) => {
       const full_name = requireString(body.full_name, "Full name", { max: 100 });
       const designation = typeof body.designation === "string" && body.designation.trim()
         ? body.designation.trim().slice(0, 100) : null;
-      await admin.from("profiles").update({ full_name, designation, updated_at: new Date().toISOString() }).eq("id", userId);
-      await audit(admin, me, "user_updated", "user", userId, { username: target.username, full_name, designation });
+      let username = target.username;
+      if (body.username && typeof body.username === "string" && body.username.trim()) {
+        const u = body.username.trim().toLowerCase();
+        if (!USERNAME_RE.test(u)) {
+          throw new HttpError(400, "bad_request", "Username: 3–30 characters, lowercase letters, digits, dot, dash or underscore.");
+        }
+        if (u !== target.username) {
+          const { data: taken } = await admin.from("profiles").select("id").eq("username", u).neq("id", userId).maybeSingle();
+          if (taken) throw new HttpError(409, "username_taken", "That username is already taken.");
+          try {
+            await admin.auth.admin.updateUserById(userId, {
+              email: `${u}@${LOGIN_DOMAIN}`,
+              user_metadata: { username: u, full_name },
+            });
+          } catch (_) {
+            // Proceed even if auth user update fails
+          }
+          username = u;
+        }
+      }
+      const { error: pErr } = await admin.from("profiles").update({
+        username, full_name, designation, updated_at: new Date().toISOString()
+      }).eq("id", userId);
+      if (pErr) throw new HttpError(400, "profile_error", pErr.message);
+      await audit(admin, me, "user_updated", "user", userId, { username, full_name, designation });
+      return json({ ok: true, username, full_name, designation });
+    }
+
+    case "delete": {
+      const userId = requireUuid(body.user_id, "User");
+      if (userId === me.id) throw new HttpError(400, "bad_request", "You cannot delete your own account.");
+      const target = await loadTarget(admin, me, userId);
+
+      // Verify no requests are associated with this user
+      const { data: reqs } = await admin.from("requests").select("id").or(
+        `requester_id.eq.${userId},owner_head_id.eq.${userId},routed_by.eq.${userId},reviewed_by.eq.${userId},approved_by.eq.${userId},quote_selected_by.eq.${userId},regional_head_id.eq.${userId}`
+      ).limit(1);
+      if (reqs && reqs.length > 0) {
+        throw new HttpError(400, "has_requests", "Cannot delete user: request records are associated with this user. Deactivate the user instead.");
+      }
+
+      const { data: acts } = await admin.from("request_actions").select("id").eq("actor_id", userId).limit(1);
+      if (acts && acts.length > 0) {
+        throw new HttpError(400, "has_requests", "Cannot delete user: workflow actions are associated with this user. Deactivate the user instead.");
+      }
+
+      const { data: files } = await admin.from("request_files").select("id").eq("added_by", userId).limit(1);
+      if (files && files.length > 0) {
+        throw new HttpError(400, "has_requests", "Cannot delete user: request attachments are associated with this user. Deactivate the user instead.");
+      }
+
+      const { data: hcs } = await admin.from("head_consultations").select("id").eq("head_id", userId).limit(1);
+      if (hcs && hcs.length > 0) {
+        throw new HttpError(400, "has_requests", "Cannot delete user: head consultations are associated with this user. Deactivate the user instead.");
+      }
+
+      const { data: pays } = await admin.from("request_payments").select("id").or(`recorded_by.eq.${userId},cancelled_by.eq.${userId}`).limit(1);
+      if (pays && pays.length > 0) {
+        throw new HttpError(400, "has_requests", "Cannot delete user: payment records are associated with this user. Deactivate the user instead.");
+      }
+
+      // Safe to delete! Clean up non-request ancillary records first
+      await admin.from("regional_head_shops").delete().eq("regional_head_id", userId);
+      await admin.from("clerk_categories").delete().eq("clerk_id", userId);
+      await admin.from("user_heads").delete().or(`user_id.eq.${userId},head_id.eq.${userId}`);
+      await admin.from("approver_credentials").delete().eq("user_id", userId);
+      await admin.from("profiles").update({ default_head_id: null }).eq("default_head_id", userId);
+      await admin.from("profiles").update({ regional_head_id: null }).eq("regional_head_id", userId);
+
+      if (target.photo_path) {
+        try { await admin.storage.from("profile-photos").remove([target.photo_path]); } catch (_) {}
+      }
+
+      const { error: pErr } = await admin.from("profiles").delete().eq("id", userId);
+      if (pErr) throw new HttpError(400, "profile_error", pErr.message);
+
+      try {
+        await admin.auth.admin.deleteUser(userId);
+      } catch (e) {
+        console.warn("Could not remove auth user:", e);
+      }
+
+      await audit(admin, me, "user_deleted", "user", userId, { username: target.username });
       return json({ ok: true });
     }
 

@@ -10,7 +10,7 @@ import { formatINR, formatINRWhole, formatISTDate } from '../../lib/formatters';
 import { useSignedUrl } from '../../lib/files';
 import { useAuth } from '../../context/AuthContext';
 
-export const MIN_QUOTES = 3;
+export const MIN_QUOTES = 2;
 export const MAX_QUOTES = 10;
 
 const inputCls =
@@ -88,9 +88,9 @@ export interface QuoteRow {
 const newKey = () => `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 export const blankQuote = (): QuoteRow => ({ key: newKey(), vendor: '', amount: '', preferred: false, file: null });
-export const initialQuotes = (): QuoteRow[] => Array.from({ length: MIN_QUOTES }, blankQuote);
+export const initialQuotes = (min: number = MIN_QUOTES): QuoteRow[] => Array.from({ length: min }, blankQuote);
 
-export const quotesFromFiles = (files: RequestFile[] = []): QuoteRow[] => {
+export const quotesFromFiles = (files: RequestFile[] = [], min: number = MIN_QUOTES): QuoteRow[] => {
   const rows: QuoteRow[] = files
     .filter((f) => f.kind === 'document' && !f.added_by && !f.clarification_id)
     .map((f) => ({
@@ -101,7 +101,7 @@ export const quotesFromFiles = (files: RequestFile[] = []): QuoteRow[] => {
       file: null,
       existing: f,
     }));
-  while (rows.length < MIN_QUOTES) rows.push(blankQuote());
+  while (rows.length < min) rows.push(blankQuote());
   return rows;
 };
 
@@ -122,16 +122,29 @@ export function quoteSummary(rows: QuoteRow[]) {
   return { complete: complete.length, lowest, amount: pref ? amt(pref.amount) : lowest };
 }
 
-export function validateQuotes(rows: QuoteRow[], forDraft: boolean): string | null {
+export function validateQuotes(
+  rows: QuoteRow[],
+  forDraft: boolean,
+  minQuotes: number = MIN_QUOTES,
+  maxAmount?: number
+): string | null {
   for (const [i, r] of rows.entries()) {
     const touched = rowHasDoc(r) || r.vendor.trim() || r.amount.trim();
     if (!touched) continue;
-    if (!rowHasDoc(r)) return `Quotation ${i + 1}: attach the quotation document.`;
-    if (!r.vendor.trim()) return `Quotation ${i + 1}: enter the vendor name.`;
-    if (amt(r.amount) <= 0) return `Quotation ${i + 1}: enter the quoted amount.`;
+    if (!rowHasDoc(r)) return `Bill / Quote ${i + 1}: attach the document.`;
+    if (!r.vendor.trim()) return `Bill / Quote ${i + 1}: enter the vendor / supplier name.`;
+    if (amt(r.amount) <= 0) return `Bill / Quote ${i + 1}: enter the quoted amount.`;
   }
   const n = rows.filter(isCompleteQuote).length;
-  if (!forDraft && n < MIN_QUOTES) return `Attach at least ${MIN_QUOTES} quotations with vendor and amount (${n} so far).`;
+  if (!forDraft && n < minQuotes) {
+    return `Attach at least ${minQuotes} ${minQuotes === 1 ? 'bill or quotation' : 'bills or quotations'} with vendor and amount (${n} so far).`;
+  }
+  if (maxAmount) {
+    const summary = quoteSummary(rows);
+    if (summary.amount > maxAmount) {
+      return `Amount cannot exceed ₹${maxAmount.toLocaleString('en-IN')} for Asset Buying Below 20k. (Current: ₹${summary.amount.toLocaleString('en-IN')})`;
+    }
+  }
   return null;
 }
 
@@ -149,7 +162,7 @@ export const newQuoteFiles = (rows: QuoteRow[]): RequestFile[] =>
 const pickFile = (file: File): RequestFile | null => {
   if (file.size > 15 * 1024 * 1024) { alert(`${file.name} is too large. Maximum size is 15 MB.`); return null; }
   if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)) {
-    alert('Quotations must be PDF, JPG or PNG.');
+    alert('Quotations and bills must be PDF, JPG or PNG.');
     return null;
   }
   return {
@@ -166,7 +179,9 @@ export const QuotationsEditor: React.FC<{
   /** Called when an already-uploaded quote row is removed (edit draft) */
   onRemoveExisting?: (file: RequestFile) => void;
   disabled?: boolean;
-}> = ({ rows, onChange, onRemoveExisting, disabled }) => {
+  minQuotes?: number;
+  maxAmount?: number;
+}> = ({ rows, onChange, onRemoveExisting, disabled, minQuotes = MIN_QUOTES, maxAmount }) => {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const { complete, lowest, amount } = quoteSummary(rows);
 
@@ -176,7 +191,7 @@ export const QuotationsEditor: React.FC<{
   const remove = (r: QuoteRow) => {
     if (r.existing && onRemoveExisting) onRemoveExisting(r.existing);
     const next = rows.filter((x) => x.key !== r.key);
-    while (next.length < MIN_QUOTES) next.push(blankQuote());
+    while (next.length < minQuotes) next.push(blankQuote());
     onChange(next);
   };
 
@@ -185,8 +200,12 @@ export const QuotationsEditor: React.FC<{
       <div className="flex items-start gap-2.5 p-3 rounded-xl bg-teal-50 border border-teal-200 text-[11px] text-teal-900 leading-relaxed">
         <Award className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
         <span>
-          Attach <b>at least {MIN_QUOTES} quotations</b> and type the vendor and amount shown on each document.
-          You may mark the one you prefer — your Head sees it, but the <b>Head selects the final quotation</b>.
+          Attach <b>at least {minQuotes} {minQuotes === 1 ? 'bill or quotation' : 'bills or quotations'}</b> and type the vendor and amount shown on each document.
+          {minQuotes > 1 ? (
+            <> You may mark the one you prefer — your Head sees it, but the <b>Head selects the final quotation</b>.</>
+          ) : (
+            <> Type the vendor and amount — your Head reviews and approves.</>
+          )}
         </span>
       </div>
 
@@ -207,15 +226,17 @@ export const QuotationsEditor: React.FC<{
                 )}
               </div>
               <div className="flex items-center gap-1">
-                <button type="button" disabled={disabled} id={`quote-pref-${i}`}
-                  onClick={() => update(r.key, { preferred: !r.preferred })}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
-                    r.preferred ? 'bg-amber-400 border-amber-400 text-white' : 'border-slate-200 text-slate-500 hover:border-amber-300 hover:text-amber-700'}`}
-                  title="Mark as my preferred quotation">
-                  <Star className={`w-3.5 h-3.5 ${r.preferred ? 'fill-white' : ''}`} /> My preferred
-                </button>
-                {(rows.length > MIN_QUOTES || doc || r.vendor || r.amount) && (
-                  <button type="button" disabled={disabled} onClick={() => remove(r)} title="Remove quotation"
+                {minQuotes > 1 && (
+                  <button type="button" disabled={disabled} id={`quote-pref-${i}`}
+                    onClick={() => update(r.key, { preferred: !r.preferred })}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+                      r.preferred ? 'bg-amber-400 border-amber-400 text-white' : 'border-slate-200 text-slate-500 hover:border-amber-300 hover:text-amber-700'}`}
+                    title="Mark as my preferred quotation">
+                    <Star className={`w-3.5 h-3.5 ${r.preferred ? 'fill-white' : ''}`} /> My preferred
+                  </button>
+                )}
+                {(rows.length > minQuotes || doc || r.vendor || r.amount) && (
+                  <button type="button" disabled={disabled} onClick={() => remove(r)} title="Remove item"
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -258,7 +279,7 @@ export const QuotationsEditor: React.FC<{
             ) : (
               <button type="button" disabled={disabled} id={`quote-file-${i}`} onClick={() => inputs.current[r.key]?.click()}
                 className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/40 hover:bg-indigo-50 text-xs font-bold text-indigo-700 transition-colors">
-                <UploadCloud className="w-4 h-4" /> Attach quotation (PDF / photo)
+                <UploadCloud className="w-4 h-4" /> Attach bill or quote (PDF / photo)
               </button>
             )}
           </div>
@@ -269,12 +290,15 @@ export const QuotationsEditor: React.FC<{
         {rows.length < MAX_QUOTES && (
           <button type="button" disabled={disabled} id="add-quote" onClick={() => onChange([...rows, blankQuote()])}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50">
-            <Plus className="w-4 h-4" /> Add another quotation
+            <Plus className="w-4 h-4" /> Add another bill or quote
           </button>
         )}
         <div className="text-[11px] text-slate-500">
-          {complete}/{MIN_QUOTES} min. complete
-          {amount > 0 && <> · Request amount <b className="text-slate-800">{formatINR(amount)}</b> (final = Head's choice)</>}
+          {complete}/{minQuotes} min. complete
+          {amount > 0 && <> · Request amount <b className="text-slate-800">{formatINR(amount)}</b></>}
+          {maxAmount && amount > maxAmount && (
+            <span className="text-rose-600 font-bold ml-1">· Exceeds max limit of ₹{maxAmount.toLocaleString('en-IN')}</span>
+          )}
         </div>
       </div>
     </div>
@@ -308,7 +332,7 @@ export const QuotationsPanel: React.FC<{
   onSelect: (fileId: string, remarks: string) => Promise<{ success: boolean; error?: string }>;
 }> = ({ request, canSelect, selectorRole, threshold, onSelect }) => {
   const quotes = useMemo(() => quoteFiles(request), [request]);
-  const [choice, setChoice] = useState<string | null>(request.selected_quote_id ?? null);
+  const [choice, setChoice] = useState<string | null>(request.selected_quote_id ?? (quotes.length === 1 ? quotes[0].id : null));
   const [remarks, setRemarks] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -317,7 +341,7 @@ export const QuotationsPanel: React.FC<{
   const lowest = Math.min(...quotes.map((q) => Number(q.quote_amount)));
   const chosen = quotes.find((q) => q.id === choice);
   const decided = !!request.selected_quote_id;
-  const changed = choice && choice !== request.selected_quote_id;
+  const changed = choice && (choice !== request.selected_quote_id || !request.selected_quote_id);
 
   const confirm = async () => {
     if (!choice) return;
@@ -333,7 +357,7 @@ export const QuotationsPanel: React.FC<{
     <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-bold text-slate-800 font-display flex items-center gap-2">
-          <Award className="w-4 h-4 text-teal-600" /> Quotations ({quotes.length})
+          <Award className="w-4 h-4 text-teal-600" /> Bills / Quotations ({quotes.length})
         </h3>
         {decided ? (
           <span className="text-[11px] text-slate-500">
@@ -408,7 +432,7 @@ export const QuotationsPanel: React.FC<{
           <button type="button" id="confirm-quote" disabled={!changed || busy} onClick={confirm}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold shadow-md shadow-teal-100 disabled:opacity-50">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            {decided ? 'Change selection' : 'Confirm selected quotation'}
+            {decided ? 'Change selection' : quotes.length === 1 ? 'Confirm quotation' : 'Confirm selected quotation'}
           </button>
         </div>
       )}

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase, invokeEdgeFunction } from './supabase';
 import { useAuth } from '../context/AuthContext';
-import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS } from './mockData';
+import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS, MOCK_REQUESTS } from './mockData';
 import type { AppRole, AuditLogEntry, Department, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
 
 type Result = { success: boolean; error?: string };
@@ -536,10 +536,135 @@ export function useDirectory() {
     return { success: true };
   };
 
+  /** Update user name, username and designation */
+  const updateUserDetails = async (
+    userId: string,
+    data: { full_name: string; username: string; designation?: string | null }
+  ): Promise<Result> => {
+    if (live) {
+      // 1. Try edge function
+      const { error: fnErr } = await invokeEdgeFunction('admin-users', {
+        action: 'update',
+        user_id: userId,
+        full_name: data.full_name,
+        username: data.username,
+        designation: data.designation ?? null,
+      });
+      if (fnErr) {
+        // Fallback to RPC or direct update
+        const { error: rpcErr } = await supabase.rpc('update_user_details', {
+          p_user_id: userId,
+          p_full_name: data.full_name,
+          p_username: data.username,
+          p_designation: data.designation || null,
+        });
+        if (rpcErr) {
+          const { error: pErr } = await supabase
+            .from('profiles')
+            .update({
+              full_name: data.full_name,
+              username: data.username.toLowerCase(),
+              designation: data.designation || null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId);
+          if (pErr) return { success: false, error: pErr.message };
+        }
+      }
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === userId
+          ? {
+              ...u,
+              full_name: data.full_name,
+              username: data.username.toLowerCase(),
+              designation: data.designation ?? null,
+              updated_at: new Date().toISOString(),
+            }
+          : u
+      )
+    );
+    return { success: true };
+  };
+
+  /** Checks if a user has any associated requests or workflow actions */
+  const checkCanDeleteUser = async (
+    userId: string
+  ): Promise<{ canDelete: boolean; reason: string; requestCount: number }> => {
+    if (live) {
+      const { data, error } = await supabase.rpc('can_delete_user', { p_user_id: userId });
+      if (!error && data) {
+        return {
+          canDelete: Boolean(data.can_delete),
+          reason: data.reason || '',
+          requestCount: Number(data.request_count || 0),
+        };
+      }
+      // Fallback: direct table queries
+      try {
+        const [r1, r2, r3, r4] = await Promise.all([
+          supabase
+            .from('requests')
+            .select('id', { count: 'exact', head: true })
+            .or(
+              `requester_id.eq.${userId},owner_head_id.eq.${userId},routed_by.eq.${userId},reviewed_by.eq.${userId},approved_by.eq.${userId},quote_selected_by.eq.${userId},regional_head_id.eq.${userId}`
+            ),
+          supabase.from('request_actions').select('id', { count: 'exact', head: true }).eq('actor_id', userId),
+          supabase.from('request_files').select('id', { count: 'exact', head: true }).eq('added_by', userId),
+          supabase.from('head_consultations').select('id', { count: 'exact', head: true }).eq('head_id', userId),
+        ]);
+        const total = (r1.count || 0) + (r2.count || 0) + (r3.count || 0) + (r4.count || 0);
+        if (total > 0) {
+          return { canDelete: false, requestCount: total, reason: `User has ${total} associated request(s) or workflow action(s).` };
+        }
+        return { canDelete: true, requestCount: 0, reason: 'No associated requests.' };
+      } catch (err: any) {
+        return { canDelete: false, requestCount: 1, reason: err?.message || 'Error checking associated requests' };
+      }
+    }
+    // Mock mode: check MOCK_REQUESTS
+    const count = MOCK_REQUESTS.filter(
+      (r) =>
+        r.requester_id === userId ||
+        r.owner_head_id === userId ||
+        r.routed_by === userId ||
+        r.decided_by === userId ||
+        r.paid_by === userId ||
+        r.cancelled_by === userId ||
+        (r.actions || []).some((a) => a.actor_id === userId)
+    ).length;
+    return {
+      canDelete: count === 0,
+      requestCount: count,
+      reason: count > 0 ? `User has ${count} associated mock request(s).` : 'No associated requests.',
+    };
+  };
+
+  /** Permanently delete user if no associated requests exist */
+  const deleteUser = async (userId: string): Promise<Result> => {
+    if (live) {
+      const { error: fnErr } = await invokeEdgeFunction('admin-users', {
+        action: 'delete',
+        user_id: userId,
+      });
+      if (fnErr) {
+        const { error: rpcErr } = await supabase.rpc('delete_user_account', { p_user_id: userId });
+        if (rpcErr) return { success: false, error: rpcErr.message };
+      }
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    return { success: true };
+  };
+
   return {
     departments, shops, regions, users, categories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
     createUser, updateAccess, setUserRegion, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
-    uploadCredential, setPhoto, removePhoto,
+    uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
   };
 }
 

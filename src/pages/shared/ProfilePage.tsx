@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_LABELS, ROLE_BADGES, formatISTDate } from '../../lib/formatters';
-import { User, KeyRound, Building2, ShieldCheck, Check, LogOut, ShieldAlert, Camera } from 'lucide-react';
+import { User, KeyRound, Building2, ShieldCheck, Check, LogOut, ShieldAlert, Camera, Pencil } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { UserAvatar } from '../../components/common/UserAvatar';
 import { PhotoUploadModal } from '../../components/admin/PhotoUploadModal';
+import { EditUserModal } from '../../components/admin/EditUserModal';
 import { useDirectory } from '../../lib/directory';
 
 export const ProfilePage: React.FC = () => {
@@ -13,6 +14,7 @@ export const ProfilePage: React.FC = () => {
   const navigate = useNavigate();
 
   const [photoModalOpen, setPhotoModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -67,52 +69,62 @@ export const ProfilePage: React.FC = () => {
 
       {/* User Info Card */}
       <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs">
-        <div className="flex items-center gap-4 border-b border-slate-100 pb-5">
-          <div className="relative group shrink-0">
-            <UserAvatar
-              photoPath={user?.photo_path}
-              name={user?.full_name || 'User'}
-              size="xl"
-              previewable
-              className="shadow-sm"
-            />
-            <button
-              type="button"
-              onClick={() => setPhotoModalOpen(true)}
-              className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center shadow-md border-2 border-white transition-transform active:scale-95"
-              title="Change profile photo"
-            >
-              <Camera className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-lg font-bold text-slate-900 font-display">{user?.full_name}</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div className="flex items-center gap-4">
+            <div className="relative group shrink-0">
+              <UserAvatar
+                photoPath={user?.photo_path}
+                name={user?.full_name || 'User'}
+                size="xl"
+                previewable
+                className="shadow-sm"
+              />
               <button
                 type="button"
                 onClick={() => setPhotoModalOpen(true)}
-                className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold underline ml-1"
+                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center shadow-md border-2 border-white transition-transform active:scale-95"
+                title="Change profile photo"
               >
-                Change photo
+                <Camera className="w-3.5 h-3.5" />
               </button>
             </div>
-            <p className="text-xs text-slate-500 font-mono">@{user?.username}</p>
-            <div className="flex items-center gap-2 mt-2">
-              {role && (
-                <span
-                  className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${ROLE_BADGES[role]}`}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-slate-900 font-display">{user?.full_name}</h2>
+                <button
+                  type="button"
+                  onClick={() => setPhotoModalOpen(true)}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold underline ml-1"
                 >
-                  {ROLE_LABELS[role]}
-                </span>
-              )}
-              {user?.department && (
-                <span className="text-xs text-slate-600 font-medium flex items-center gap-1">
-                  <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                  {user.department.name} ({user.department.code})
-                </span>
-              )}
+                  Change photo
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 font-mono">@{user?.username}</p>
+              <div className="flex items-center gap-2 mt-2">
+                {role && (
+                  <span
+                    className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${ROLE_BADGES[role]}`}
+                  >
+                    {ROLE_LABELS[role]}
+                  </span>
+                )}
+                {user?.department && (
+                  <span className="text-xs text-slate-600 font-medium flex items-center gap-1">
+                    <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                    {user.department.name} ({user.department.code})
+                  </span>
+                )}
+              </div>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setEditModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs self-start sm:self-auto shadow-2xs"
+          >
+            <Pencil className="w-3.5 h-3.5 text-slate-400" />
+            <span>Edit Profile</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-4 text-xs">
@@ -241,6 +253,23 @@ export const ProfilePage: React.FC = () => {
             if (res.success) {
               await refreshProfile();
               setMessage({ text: 'Profile photo removed.', type: 'success' });
+            }
+            return res;
+          }}
+        />
+      )}
+
+      {editModalOpen && user && (
+        <EditUserModal
+          isOpen
+          user={user}
+          onClose={() => setEditModalOpen(false)}
+          onSave={async (input) => {
+            const res = await dir.updateUserDetails(user.id, input);
+            if (res.success) {
+              await refreshProfile();
+              setMessage({ text: 'Profile details updated successfully!', type: 'success' });
+              setEditModalOpen(false);
             }
             return res;
           }}

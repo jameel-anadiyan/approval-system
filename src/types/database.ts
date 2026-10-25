@@ -22,7 +22,7 @@ export type HeadConsultationStatus = 'pending' | 'agreed' | 'disagreed';
 
 export type FileKind = 'document' | 'voice_note';
 
-export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'non_cash';
+export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'asset_below_20k' | 'non_cash';
 
 export type QuoteStatus = 'pending' | 'selected' | 'rejected';
 

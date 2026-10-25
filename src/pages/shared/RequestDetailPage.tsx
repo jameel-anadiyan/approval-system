@@ -195,7 +195,7 @@ export const RequestDetailPage: React.FC = () => {
 
   const rType = typeOf(request);
   const isHighValue = rType === 'general' && request.amount > threshold;
-  const isAsset = rType === 'asset';
+  const isAsset = rType === 'asset' || rType === 'asset_below_20k';
   // Asset buying: the owning Head (or Admin when it reached Admin directly) selects the best quotation.
   const quoteSelectorRole: 'head' | 'admin' | null = !isAsset ? null
     : isOwningHead && (request.status === 'pending_head_review' || request.status === 'pending_head_approval') ? 'head'

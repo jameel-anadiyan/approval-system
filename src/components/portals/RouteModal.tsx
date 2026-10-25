@@ -26,7 +26,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { threshold } = useRequests();
-  const isAsset = type === 'asset';
+  const isAsset = type === 'asset' || type === 'asset_below_20k';
   const isHighValue = type === 'general' && request.amount > threshold;
   const limit = formatINRWhole(threshold);
   const isRequesterHead = request.requester_role === 'head';

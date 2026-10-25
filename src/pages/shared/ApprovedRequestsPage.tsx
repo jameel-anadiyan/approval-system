@@ -129,6 +129,7 @@ export const ApprovedRequestsPage: React.FC = () => {
               <option value="discount">Discount Approval</option>
               <option value="exhibition">Exhibition / Event</option>
               <option value="asset">Asset Buying</option>
+              <option value="asset_below_20k">Asset Buying Below 20k</option>
               <option value="non_cash">Non Cash</option>
             </select>
 

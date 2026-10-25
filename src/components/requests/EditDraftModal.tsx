@@ -30,6 +30,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const { user } = useAuth();
   const { updateDraft, addFiles, removeFile, setQuote, threshold, requests } = useRequests();
   const type = typeOf(request);
+  const isAsset = type === 'asset' || type === 'asset_below_20k';
   const [title, setTitle] = useState(request.title);
   const [amountStr, setAmountStr] = useState(() => {
     const gBase = request.details?.base_amount;
@@ -45,10 +46,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [discount, setDiscount] = useState(() => discountFromDetails(request.details));
   const [exhibition, setExhibition] = useState(() => exhibitionFromDetails(request.details));
   const [asset, setAsset] = useState(() => assetFromDetails(request.details));
-  const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files));
+  const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files, type === 'asset_below_20k' ? 1 : 2));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
   const [targetHeadId, setTargetHeadId] = useState<string>(request.owner_head_id ?? '');
-  const categoryOptions = useCategoryOptions(targetHeadId || null);
+  const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -73,10 +74,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     type === 'non_cash' ? 0
       : type === 'discount' ? discountCalc(discount).value
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
-      : type === 'asset' ? quoteSummary(quotes).amount || request.amount
+      : isAsset ? quoteSummary(quotes).amount || request.amount
       : generalTotal;
   // Asset quotation documents are edited in the quotation editor; only voice notes are listed here.
-  const existing = (request.files || []).filter((f) => type !== 'asset' || f.kind !== 'document');
+  const existing = (request.files || []).filter((f) => !isAsset || f.kind !== 'document');
 
   const handleRemoveExisting = async (fileId: string) => {
     setError(null);
@@ -98,7 +99,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       (exh as any).region_name = request.region_name || user?.region?.name || null;
       return exh;
     }
-    if (type === 'asset') return toAssetDetails(asset);
+    if (isAsset) return toAssetDetails(asset);
     return {
       base_amount: baseAmount,
       has_gst: hasGst,
@@ -115,7 +116,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     if (!title.trim()) return setError('Please enter a title.');
     if (baseAmount <= 0 && type === 'general') return setError('Amount must be more than zero.');
     const v = type === 'discount' ? validateDiscount(discount) : type === 'exhibition' ? validateExhibition(exhibition)
-      : type === 'asset' ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true)) : null;
+      : isAsset ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined)) : null;
     if (v) return setError(v);
     if (categoryOptions.required && !categoryOptions.categories.some((c) => c.id === categoryId)) {
       return setError('Please select the work category.');
@@ -129,10 +130,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         notes: notes.trim() || undefined,
         details: getDetails(),
         category_id: categoryOptions.required ? categoryId || null : undefined,
-        target_head_id: targetHeadId || undefined,
+        target_head_id: type === 'exhibition' ? null : (targetHeadId || undefined),
       });
       if (!upd.success) throw new Error(upd.error);
-      if (type === 'asset') {
+      if (isAsset) {
         // Update typed vendor / amount / preference on already-uploaded quotations that changed.
         for (const q of quotes) {
           const f = q.existing;
@@ -144,11 +145,11 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           if (!res.success) throw new Error(res.error);
         }
       }
-      const toAdd = type === 'asset' ? newQuoteFiles(quotes) : newFiles;
+      const toAdd = isAsset ? newQuoteFiles(quotes) : newFiles;
       if (toAdd.length) {
         const add = await addFiles(request.id, toAdd);
         if (!add.success) throw new Error(add.error);
-      } else if (type === 'asset') {
+      } else if (isAsset) {
         await addFiles(request.id, []); // refresh list after quote edits
       }
       onClose();
@@ -168,15 +169,17 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
             className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
-        <TargetHeadField
-          value={targetHeadId}
-          onChange={(newHeadId) => {
-            if (newHeadId !== targetHeadId) {
-              setTargetHeadId(newHeadId);
-              setCategoryId('');
-            }
-          }}
-        />
+        {type !== 'exhibition' && (
+          <TargetHeadField
+            value={targetHeadId}
+            onChange={(newHeadId) => {
+              if (newHeadId !== targetHeadId) {
+                setTargetHeadId(newHeadId);
+                setCategoryId('');
+              }
+            }}
+          />
+        )}
         <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
           currentName={request.category_name} />
         {type === 'general' && (
@@ -208,7 +211,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         )}
         {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
         {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
-        {type === 'asset' && <AssetFields value={asset} onChange={setAsset} />}
+        {isAsset && <AssetFields value={asset} onChange={setAsset} />}
         <div>
           <label htmlFor="edit-notes" className="text-xs font-bold text-slate-700 block mb-1">Purpose / Notes</label>
           <textarea id="edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
@@ -236,11 +239,19 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           </div>
         )}
 
-        {type === 'asset' ? (
+        {isAsset ? (
           <div>
-            <span className="text-xs font-bold text-slate-700 block mb-1.5">Quotations</span>
-            <QuotationsEditor rows={quotes} onChange={setQuotes} disabled={busy}
-              onRemoveExisting={(f) => handleRemoveExisting(f.id)} />
+            <span className="text-xs font-bold text-slate-700 block mb-1.5">
+              {type === 'asset_below_20k' ? 'Bill or Quote' : 'Bills / Quotations'}
+            </span>
+            <QuotationsEditor
+              rows={quotes}
+              onChange={setQuotes}
+              disabled={busy}
+              minQuotes={type === 'asset_below_20k' ? 1 : 2}
+              maxAmount={type === 'asset_below_20k' ? 20000 : undefined}
+              onRemoveExisting={(f) => handleRemoveExisting(f.id)}
+            />
           </div>
         ) : (
         <div>

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
 import type { AppRole, Profile } from '../../types/database';
 import { UserModal } from './UserModal';
+import { EditUserModal } from './EditUserModal';
 import { AccessModal, coveringRegionalHeads, rolesWithTypes } from './AccessFields';
 import { WorkCategoriesPanel } from './WorkCategoriesPanel';
 import { CredentialsModal } from './CredentialsModal';
@@ -32,6 +33,11 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const { user: me } = useAuth();
   const dir = useDirectory();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Profile | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
+  const [deleteBlockReason, setDeleteBlockReason] = useState<string | null>(null);
+  const [checkingDelete, setCheckingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [credTarget, setCredTarget] = useState<Profile | null>(null);
   const [photoTarget, setPhotoTarget] = useState<Profile | null>(null);
   const [resetTarget, setResetTarget] = useState<Profile | null>(null);
@@ -43,6 +49,38 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const show = (text: string, ok = true) => {
     setFlash({ text, ok });
     setTimeout(() => setFlash(null), 5000);
+  };
+
+  const handleDeleteClick = async (u: Profile) => {
+    setCheckingDelete(true);
+    setBusyId(u.id);
+    const res = await dir.checkCanDeleteUser(u.id);
+    setBusyId(null);
+    setCheckingDelete(false);
+    if (!res.canDelete) {
+      setDeleteBlockReason(
+        res.reason ||
+          'This user cannot be deleted because they have associated requests or activity. You can deactivate their account instead.'
+      );
+      setDeleteTarget(u);
+    } else {
+      setDeleteBlockReason(null);
+      setDeleteTarget(u);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res = await dir.deleteUser(deleteTarget.id);
+    setDeleting(false);
+    if (res.success) {
+      show(`User @${deleteTarget.username} has been permanently deleted.`);
+      setDeleteTarget(null);
+      setDeleteBlockReason(null);
+    } else {
+      show(res.error || 'Failed to delete user.', false);
+    }
   };
 
   const listed = dir.users.filter(
@@ -365,6 +403,15 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                   <button
                     type="button"
+                    onClick={() => setEditTarget(u)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs"
+                    title="Edit name, username, or designation"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setPhotoTarget(u)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs"
                   >
@@ -389,6 +436,18 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     }`}>
                     {u.is_active ? 'Deactivate' : 'Activate'}
                   </button>
+                  {u.id !== me?.id && (
+                    <button
+                      type="button"
+                      disabled={busyId === u.id || checkingDelete || deleting}
+                      onClick={() => handleDeleteClick(u)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-700 font-semibold text-xs disabled:opacity-50"
+                      title="Delete user if no requests associated"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Delete</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -484,6 +543,96 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
               <button type="submit" className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-xs">Set password</button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {editTarget && (
+        <EditUserModal
+          isOpen
+          user={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSave={async (input) => {
+            const res = await dir.updateUserDetails(editTarget.id, input);
+            if (res.success) {
+              show(`User details updated for @${input.username}.`);
+              setEditTarget(null);
+            }
+            return res;
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <Modal
+          isOpen
+          onClose={() => { setDeleteTarget(null); setDeleteBlockReason(null); }}
+          title={deleteBlockReason ? "Cannot Delete User" : "Delete User Account"}
+          description={
+            deleteBlockReason
+              ? "Deletion is not permitted due to existing request records."
+              : `Permanently delete @${deleteTarget.username} (${deleteTarget.full_name})?`
+          }
+        >
+          {deleteBlockReason ? (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs leading-relaxed flex items-start gap-2.5">
+                <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>{deleteBlockReason}</span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Users who have created requests, approved/returned requests, uploaded files, or had payments recorded cannot be removed to preserve complete audit trails. You can <strong>Deactivate</strong> their account instead to revoke login access.
+              </p>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setDeleteTarget(null); setDeleteBlockReason(null); }}
+                  className="px-4 py-2.5 rounded-xl bg-slate-900 text-white font-semibold text-xs hover:bg-slate-800"
+                >
+                  Understood
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs leading-relaxed flex items-start gap-2.5">
+                <Trash2 className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-rose-950">This action cannot be undone.</p>
+                  <p className="mt-1 text-rose-800">
+                    Since this user has <strong>0 associated requests</strong>, their account profile, login credentials, and assigned role access will be permanently deleted.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => { setDeleteTarget(null); setDeleteBlockReason(null); }}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={confirmDelete}
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 text-white font-semibold text-xs hover:bg-rose-700 flex items-center gap-2"
+                >
+                  {deleting ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      <span>Deleting…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>Delete User</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </Modal>
       )}
     </div>

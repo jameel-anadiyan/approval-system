@@ -234,13 +234,14 @@ export const ACTION_LABELS: Record<string, string> = {
   regional_forwarded: 'Regional Head checked and forwarded to Clerk',
 };
 
-export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'non_cash'];
+export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash'];
 
 export const TYPE_LABELS: Record<RequestType, string> = {
   general: 'General',
   discount: 'Discount Approval',
   exhibition: 'Exhibition / Event',
   asset: 'Asset Buying',
+  asset_below_20k: 'Asset Buying Below 20k',
   non_cash: 'Non Cash',
 };
 
@@ -248,7 +249,8 @@ export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
   general: 'Money request with invoices or bills. Clerk routes to Head (B) or Admin (A).',
   discount: 'Customer discount. Head approval (B-level). No payment step.',
   exhibition: 'Event sponsorship & promotion. Admin approval (A-level), then paid.',
-  asset: 'Min. 3 quotations. Head picks the best — up to ₹10,000 Head approves, above goes to Admin.',
+  asset: 'Min. 2 bills or quotes. Head picks the best — up to ₹10,000 Head approves, above goes to Admin.',
+  asset_below_20k: 'Asset purchases up to ₹20,000. 1 bill or quote mandatory.',
   non_cash: 'Operational or administrative request without cash involved (no disbursement needed).',
 };
 
@@ -257,6 +259,7 @@ export const TYPE_BADGES: Record<RequestType, string> = {
   discount: 'bg-amber-50 text-amber-800 border-amber-200',
   exhibition: 'bg-indigo-50 text-indigo-700 border-indigo-200',
   asset: 'bg-teal-50 text-teal-700 border-teal-200',
+  asset_below_20k: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   non_cash: 'bg-emerald-50 text-emerald-800 border-emerald-200',
 };
 
@@ -265,7 +268,7 @@ export const typeOf = (r: { request_type?: RequestType | null }): RequestType =>
 /** Status label that knows Discount and Non-Cash approvals have no payment step. */
 export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null }): string {
   if (r.status === 'approved' && (typeOf(r) === 'discount' || typeOf(r) === 'non_cash')) return 'Approved';
-  if (r.status === 'pending_head_review' && typeOf(r) === 'asset') return 'Head: select quotation';
+  if (r.status === 'pending_head_review' && (typeOf(r) === 'asset' || typeOf(r) === 'asset_below_20k')) return 'Head: select quotation';
   return STATUS_META[r.status]?.label ?? r.status;
 }
 

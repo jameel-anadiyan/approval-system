@@ -27,6 +27,7 @@ const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   discount: <BadgePercent className="w-5 h-5" />,
   exhibition: <Store className="w-5 h-5" />,
   asset: <Package className="w-5 h-5" />,
+  asset_below_20k: <Package className="w-5 h-5" />,
   non_cash: <FileCheck className="w-5 h-5" />,
 };
 
@@ -51,11 +52,19 @@ export const NewRequestPage: React.FC = () => {
     user?.region?.name ||
     null;
 
-  const allowed = useMemo<RequestType[]>(
-    () => REQUEST_TYPES.filter((t) => (user?.allowed_types ?? ['general']).includes(t)),
-    [user?.allowed_types]
-  );
+  const allowed = useMemo<RequestType[]>(() => {
+    const raw = user?.allowed_types ?? ['general'];
+    const list = new Set<RequestType>(raw);
+    if (list.has('asset')) {
+      list.add('asset_below_20k');
+    }
+    if (user?.role === 'admin' || user?.role === 'head') {
+      return REQUEST_TYPES;
+    }
+    return REQUEST_TYPES.filter((t) => list.has(t));
+  }, [user?.allowed_types, user?.role]);
   const [type, setType] = useState<RequestType>(allowed[0] ?? 'general');
+  const isAsset = type === 'asset' || type === 'asset_below_20k';
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [hasGst, setHasGst] = useState<boolean>(true);
@@ -64,7 +73,7 @@ export const NewRequestPage: React.FC = () => {
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
   const [exhibition, setExhibition] = useState<ExhibitionForm>(emptyExhibition);
   const [asset, setAsset] = useState<AssetForm>(emptyAsset);
-  const [quotes, setQuotes] = useState<QuoteRow[]>(initialQuotes);
+  const [quotes, setQuotes] = useState<QuoteRow[]>(() => initialQuotes(type === 'asset_below_20k' ? 1 : 2));
   const [files, setFiles] = useState<RequestFile[]>([]);
   const [voiceFile, setVoiceFile] = useState<RequestFile | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -72,7 +81,7 @@ export const NewRequestPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef<boolean>(false);
   const [targetHeadId, setTargetHeadId] = useState('');
-  const categoryOptions = useCategoryOptions(targetHeadId || null);
+  const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState('');
 
   const exhibitionQuota = useMemo(() => {
@@ -96,13 +105,13 @@ export const NewRequestPage: React.FC = () => {
     type === 'non_cash' ? 0
       : type === 'discount' ? discountCalc(discount).value
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
-      : type === 'asset' ? quoteInfo.amount
+      : isAsset ? quoteInfo.amount
       : generalTotal;
   const isHighValue = type === 'general' && amount > threshold;
   const docsRequired = type === 'general' || type === 'discount';
   const hasPdf = files.some((f) => f.mime_type === 'application/pdf');
 
-  const allFiles = type === 'asset'
+  const allFiles = isAsset
     ? [...newQuoteFiles(quotes), ...(voiceFile ? [voiceFile] : [])]
     : voiceFile ? [...files, voiceFile] : files;
 
@@ -128,7 +137,7 @@ export const NewRequestPage: React.FC = () => {
   const effectiveTitle = () =>
     title.trim()
     || (type === 'exhibition' && exhibition.event_name.trim() ? `Exhibition: ${exhibition.event_name.trim()}` : '')
-    || (type === 'asset' && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '');
+    || (isAsset && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '');
 
   const details = (): RequestDetails | null => {
     if (type === 'non_cash') return null;
@@ -142,7 +151,7 @@ export const NewRequestPage: React.FC = () => {
       (exh as any).region_name = effectiveRegionName;
       return exh;
     }
-    if (type === 'asset') return toAssetDetails(asset);
+    if (isAsset) return toAssetDetails(asset);
     return {
       base_amount: baseAmount,
       has_gst: hasGst,
@@ -154,9 +163,9 @@ export const NewRequestPage: React.FC = () => {
 
   const validate = (forDraft: boolean): string | null => {
     if (!forDraft && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
-    if (type === 'asset') {
+    if (isAsset) {
       if (!asset.asset_name.trim()) return 'Enter the asset you want to buy.';
-      return validateQuotes(quotes, forDraft);
+      return validateQuotes(quotes, forDraft, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined);
     }
     if (!effectiveTitle()) return type === 'exhibition' ? 'Enter the event name.' : 'Please enter a request title.';
     if (type === 'general') {
@@ -187,12 +196,12 @@ export const NewRequestPage: React.FC = () => {
       const draftRes = await createDraft({
         type,
         title: effectiveTitle(),
-        amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal || 1 : type === 'asset' ? amount || 1 : amount),
+        amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal || 1 : isAsset ? amount || 1 : amount),
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
         category_id: categoryOptions.required ? categoryId || null : null,
-        target_head_id: targetHeadId || null,
+        target_head_id: type === 'exhibition' ? null : (targetHeadId || null),
       });
       if (!draftRes.success || !draftRes.id) {
         if (draftRes.id) {
@@ -263,13 +272,21 @@ export const NewRequestPage: React.FC = () => {
         )}
 
         {/* Request type */}
-        <div className={`grid gap-3 ${allowed.length === 1 ? 'grid-cols-1' : allowed.length === 2 ? 'grid-cols-2' : allowed.length === 4 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-3'}`}>
+        <div className={`grid gap-3 ${allowed.length === 1 ? 'grid-cols-1' : allowed.length === 2 ? 'grid-cols-2' : allowed.length === 4 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
           {allowed.map((t) => (
             <button
               key={t}
               type="button"
               id={`type-${t}`}
-              onClick={() => { setType(t); setError(null); }}
+              onClick={() => {
+                setType(t);
+                setError(null);
+                if (t === 'asset_below_20k') {
+                  if (quotes.length < 1) setQuotes(initialQuotes(1));
+                } else if (t === 'asset') {
+                  if (quotes.length < 2) setQuotes(initialQuotes(2));
+                }
+              }}
               className={`text-left p-4 rounded-2xl border-2 transition-all ${
                 type === t
                   ? 'border-indigo-600 bg-indigo-50 shadow-md shadow-indigo-100'
@@ -289,7 +306,7 @@ export const NewRequestPage: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
             <h2 className="text-sm font-bold text-slate-800 font-display">
-              {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'asset' ? 'Asset Purchase Details' : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
+              {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : isAsset ? (type === 'asset_below_20k' ? 'Asset Purchase Details (< ₹20k)' : 'Asset Purchase Details') : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
             </h2>
             {type === 'exhibition' && (
               <a
@@ -304,21 +321,28 @@ export const NewRequestPage: React.FC = () => {
             )}
           </div>
 
-          <TargetHeadField
-            value={targetHeadId}
-            onChange={(newHeadId) => {
-              if (newHeadId !== targetHeadId) {
-                setTargetHeadId(newHeadId);
-                setCategoryId('');
-              }
-            }}
-          />
+          {type !== 'exhibition' ? (
+            <TargetHeadField
+              value={targetHeadId}
+              onChange={(newHeadId) => {
+                if (newHeadId !== targetHeadId) {
+                  setTargetHeadId(newHeadId);
+                  setCategoryId('');
+                }
+              }}
+            />
+          ) : (
+            <div className="p-3.5 bg-indigo-50/70 border border-indigo-200/80 rounded-xl text-xs text-indigo-900 flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>Exhibition requests are submitted directly to your <strong>Main Department Head</strong> for review.</span>
+            </div>
+          )}
 
           <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && type !== 'asset' && <span className="text-rose-500">*</span>}
+              {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && !isAsset && <span className="text-rose-500">*</span>}
             </label>
             <input
               id="request-title"
@@ -328,7 +352,7 @@ export const NewRequestPage: React.FC = () => {
               placeholder={
                 type === 'discount' ? 'e.g. Discount for bridal set – Mrs. Fathima'
                   : type === 'exhibition' ? 'Optional – event name is used if empty'
-                  : type === 'asset' ? 'Optional – asset name is used if empty'
+                  : isAsset ? 'Optional – asset name is used if empty'
                   : 'e.g. Vendor invoice for showroom lighting'
               }
               className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
@@ -381,7 +405,7 @@ export const NewRequestPage: React.FC = () => {
 
           {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
           {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
-          {type === 'asset' && <AssetFields value={asset} onChange={setAsset} />}
+          {isAsset && <AssetFields value={asset} onChange={setAsset} />}
 
           {isHighValue && (
             <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900 animate-in fade-in">
@@ -412,15 +436,23 @@ export const NewRequestPage: React.FC = () => {
         </div>
 
         {/* Attachments */}
-        {type === 'asset' ? (
+        {isAsset ? (
           <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h2 className="text-sm font-bold text-slate-800 font-display">
-                Quotations <span className="text-rose-500">*</span>
+                {type === 'asset_below_20k' ? 'Bill or Quote' : 'Bills / Quotations'} <span className="text-rose-500">*</span>
               </h2>
-              <span className="text-[11px] text-slate-400">Min. 3 · PDF, JPG, PNG</span>
+              <span className="text-[11px] text-slate-400">
+                {type === 'asset_below_20k' ? 'Min. 1 (Mandatory) · Max ₹20,000' : 'Min. 2 (Mandatory)'} · PDF, JPG, PNG
+              </span>
             </div>
-            <QuotationsEditor rows={quotes} onChange={setQuotes} disabled={isSubmitting || isSavingDraft} />
+            <QuotationsEditor
+              rows={quotes}
+              onChange={setQuotes}
+              disabled={isSubmitting || isSavingDraft}
+              minQuotes={type === 'asset_below_20k' ? 1 : 2}
+              maxAmount={type === 'asset_below_20k' ? 20000 : undefined}
+            />
           </div>
         ) : (
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
