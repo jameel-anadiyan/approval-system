@@ -399,7 +399,7 @@ begin
   return jsonb_build_object('selected_quote_id', f.id, 'amount', f.quote_amount, 'status', next_status, 'route', v_route);
 end $$;
 
--- 6. Helper: check if a user can be deleted
+-- 6. Check if user can be deleted
 create or replace function public.can_delete_user(p_user_id uuid)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -411,9 +411,11 @@ begin
         or owner_head_id = p_user_id
         or routed_by = p_user_id
         or reviewed_by = p_user_id
-        or approved_by = p_user_id
+        or decided_by = p_user_id
         or quote_selected_by = p_user_id
         or regional_head_id = p_user_id
+        or paid_by = p_user_id
+        or cancelled_by = p_user_id
     union all
     select id from public.request_actions where actor_id = p_user_id
     union all
@@ -435,7 +437,7 @@ end $$;
 revoke execute on function public.can_delete_user(uuid) from public, anon;
 grant execute on function public.can_delete_user(uuid) to authenticated;
 
--- 7. RPC: permanently delete a user account (only if no requests associated)
+-- 7. Permanently delete user if 0 requests associated
 create or replace function public.delete_user_account(p_user_id uuid)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -461,9 +463,11 @@ begin
         or owner_head_id = p_user_id
         or routed_by = p_user_id
         or reviewed_by = p_user_id
-        or approved_by = p_user_id
+        or decided_by = p_user_id
         or quote_selected_by = p_user_id
         or regional_head_id = p_user_id
+        or paid_by = p_user_id
+        or cancelled_by = p_user_id
     union all
     select id from public.request_actions where actor_id = p_user_id
     union all
@@ -485,8 +489,17 @@ begin
   delete from public.approver_credentials where user_id = p_user_id;
   update public.profiles set default_head_id = null where default_head_id = p_user_id;
   update public.profiles set regional_head_id = null where regional_head_id = p_user_id;
+  update public.profiles set created_by = null where created_by = p_user_id;
+  update public.audit_log set actor_id = null where actor_id = p_user_id;
+  update public.app_settings set updated_by = null where updated_by = p_user_id;
 
   delete from public.profiles where id = p_user_id;
+
+  begin
+    delete from auth.users where id = p_user_id;
+  exception when others then
+    -- ignore if direct auth deletion is restricted
+  end;
 
   return jsonb_build_object('success', true, 'deleted_id', p_user_id, 'username', target.username);
 end $$;

@@ -304,7 +304,7 @@ Deno.serve(handle(async (req) => {
 
       // Verify no requests are associated with this user
       const { data: reqs } = await admin.from("requests").select("id").or(
-        `requester_id.eq.${userId},owner_head_id.eq.${userId},routed_by.eq.${userId},reviewed_by.eq.${userId},approved_by.eq.${userId},quote_selected_by.eq.${userId},regional_head_id.eq.${userId}`
+        `requester_id.eq.${userId},owner_head_id.eq.${userId},routed_by.eq.${userId},reviewed_by.eq.${userId},decided_by.eq.${userId},paid_by.eq.${userId},cancelled_by.eq.${userId},quote_selected_by.eq.${userId},regional_head_id.eq.${userId}`
       ).limit(1);
       if (reqs && reqs.length > 0) {
         throw new HttpError(400, "has_requests", "Cannot delete user: request records are associated with this user. Deactivate the user instead.");
@@ -337,6 +337,9 @@ Deno.serve(handle(async (req) => {
       await admin.from("approver_credentials").delete().eq("user_id", userId);
       await admin.from("profiles").update({ default_head_id: null }).eq("default_head_id", userId);
       await admin.from("profiles").update({ regional_head_id: null }).eq("regional_head_id", userId);
+      await admin.from("profiles").update({ created_by: null }).eq("created_by", userId);
+      await admin.from("audit_log").update({ actor_id: null }).eq("actor_id", userId);
+      await admin.from("app_settings").update({ updated_by: null }).eq("updated_by", userId);
 
       if (target.photo_path) {
         try { await admin.storage.from("profile-photos").remove([target.photo_path]); } catch (_) {}
