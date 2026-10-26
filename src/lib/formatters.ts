@@ -151,12 +151,12 @@ export const STATUS_META: Record<RequestStatus, StatusMeta> = {
     description: 'Stamping seal, signature, and approval number onto documents.',
   },
   approved: {
-    label: 'Approved (Awaiting Disbursement)',
+    label: 'Approved',
     badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-300 ring-1 ring-emerald-200 font-semibold',
     bgLight: 'bg-emerald-50',
     textColor: 'text-emerald-700',
     borderColor: 'border-emerald-200',
-    description: 'Approved and signed. Stamped PDF ready; awaiting payment.',
+    description: 'Approved and signed. Stamped PDF ready.',
   },
   paid: {
     label: 'Paid & Closed',
@@ -273,7 +273,11 @@ export const typeOf = (r: { request_type?: RequestType | null }): RequestType =>
 
 /** Status label that knows Discount, Non-Cash, and Stock Transfer approvals have no payment step. */
 export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null }): string {
-  if (r.status === 'approved' && (typeOf(r) === 'discount' || typeOf(r) === 'non_cash' || typeOf(r) === 'stock_transfer')) return 'Approved';
+  if (r.status === 'approved') {
+    const t = typeOf(r);
+    if (t === 'discount' || t === 'non_cash' || t === 'stock_transfer') return 'Approved';
+    return 'Approved (Awaiting Disbursement)';
+  }
   if (r.status === 'pending_head_review' && (typeOf(r) === 'asset' || typeOf(r) === 'asset_below_20k')) return 'Head: select quotation';
   return STATUS_META[r.status]?.label ?? r.status;
 }

@@ -348,8 +348,10 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
               Request Approved!
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              {rType === 'discount'
-                ? 'Discount approved. No disbursement is needed for this request.'
+              {rType === 'stock_transfer'
+                ? 'Stock transfer approved and signed. Internal movement complete (no disbursement).'
+                : rType === 'discount' || rType === 'non_cash'
+                ? 'Request approved and signed. No disbursement is needed for this request.'
                 : 'All documents stamped and ready for disbursement.'}
             </p>
           </div>

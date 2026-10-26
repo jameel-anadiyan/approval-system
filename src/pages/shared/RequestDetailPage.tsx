@@ -260,7 +260,7 @@ export const RequestDetailPage: React.FC = () => {
   const approveBlockReason = isConsultationBlocked ? consultationBlockReason
     : needsQuote ? 'Select the best quotation first' : undefined;
   const amountLabel =
-    rType === 'discount' ? 'Discount Value' : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)'
+    rType === 'discount' ? 'Discount Value' : rType === 'stock_transfer' ? 'Total MRP Value' : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)'
       : isAsset ? (request.selected_quote_id ? 'Selected Quotation Amount' : 'Indicative Amount (Head selects final)')
       : 'Total Requested Amount';
   const voiceNotes = (request.files || []).filter((f) => {
@@ -548,7 +548,7 @@ export const RequestDetailPage: React.FC = () => {
               Cancelled by <strong>{request.cancelled_by_name || 'Head'}</strong>
               {request.cancelled_at && <> on {formatISTDate(request.cancelled_at)}</>}. Signed documents for{' '}
               {request.approval_no || 'this approval'} are void.
-              {rType !== 'discount' && rType !== 'non_cash' && pay.paid > 0 && (
+              {rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && pay.paid > 0 && (
                 <> {formatINR(pay.paid)} was paid before cancellation; the balance {formatINR(pay.balance)} will not be paid.</>
               )}
             </p>
@@ -859,7 +859,7 @@ export const RequestDetailPage: React.FC = () => {
             </div>
           )}
 
-          {rType !== 'discount' && rType !== 'non_cash' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && (pay.paid > 0 || (request.disbursement_entries?.length || 0) > 0))) && (
+          {rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && (pay.paid > 0 || (request.disbursement_entries?.length || 0) > 0))) && (
             <div className="bg-white rounded-2xl border border-teal-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 font-bold text-teal-800 text-sm">
@@ -1492,7 +1492,7 @@ export const RequestDetailPage: React.FC = () => {
             )}
 
             {/* Disbursement Action */}
-            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && rType !== 'non_cash' && (
+            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && (
               <>
                 <button
                   type="button"

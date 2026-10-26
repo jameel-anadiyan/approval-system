@@ -21,7 +21,7 @@ export const CancelApprovalModal: React.FC<CancelApprovalModalProps> = ({ isOpen
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pay = paymentSummary(request);
-  const isDiscount = request.request_type === 'discount';
+  const isNoPayment = request.request_type === 'discount' || request.request_type === 'stock_transfer' || request.request_type === 'non_cash';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,12 +55,12 @@ export const CancelApprovalModal: React.FC<CancelApprovalModalProps> = ({ isOpen
           </p>
           <ul className="list-disc pl-5 space-y-0.5 text-rose-800">
             <li>The approval {request.approval_no ? <strong>{request.approval_no}</strong> : null} and its signed documents become void.</li>
-            {!isDiscount && <li>Disbursement can no longer record payments against it.</li>}
-            <li>The requester{!isDiscount ? ', Disbursement' : ''} and your department are notified.</li>
+            {!isNoPayment && <li>Disbursement can no longer record payments against it.</li>}
+            <li>The requester{!isNoPayment ? ', Disbursement' : ''} and your department are notified.</li>
           </ul>
         </div>
 
-        {!isDiscount && pay.paid > 0 && (
+        {!isNoPayment && pay.paid > 0 && (
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
               <p className="text-[10px] uppercase text-slate-500">Approved</p>

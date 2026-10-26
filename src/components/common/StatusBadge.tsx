@@ -21,9 +21,29 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
     description: '',
   };
+  const isNoDisbursement =
+    requestType === 'discount' ||
+    requestType === 'non_cash' ||
+    requestType === 'stock_transfer';
+
   const meta =
-    status === 'approved' && requestType === 'discount'
-      ? { ...base, label: 'Approved', description: 'Discount approved and signed. No payment step.' }
+    status === 'approved'
+      ? isNoDisbursement
+        ? {
+            ...base,
+            label: 'Approved',
+            description:
+              requestType === 'stock_transfer'
+                ? 'Stock transfer approved and signed. Internal movement complete.'
+                : requestType === 'non_cash'
+                ? 'Non-cash request approved. No disbursement needed.'
+                : 'Discount approved and signed. No payment step.',
+          }
+        : {
+            ...base,
+            label: 'Approved (Awaiting Disbursement)',
+            description: 'Approved and signed. Stamped PDF ready; awaiting payment.',
+          }
       : base;
 
   const sizeClasses = {
