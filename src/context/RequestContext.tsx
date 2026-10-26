@@ -148,6 +148,8 @@ interface RequestContextType {
     action: 'approve' | 'reject',
     remarks?: string
   ) => Promise<Result>;
+  /** Permanently delete all requests, related data, and reset counters (Admin only) */
+  deleteAllRequests: () => Promise<{ success: boolean; error?: string }>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -1908,6 +1910,26 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const deleteAllRequests = async (): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (user.role !== 'admin') return { success: false, error: 'Only administrators can delete all requests' };
+
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('delete_all_requests');
+        if (error) throw error;
+        await loadRequests();
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    localStorage.setItem(LOCAL_STORAGE_REQ_KEY, JSON.stringify([]));
+    setRequests([]);
+    return { success: true };
+  };
+
   return (
     <RequestContext.Provider
       value={{
@@ -1946,6 +1968,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setQuote,
         selectQuote,
         decideExhibitionWaitlist,
+        deleteAllRequests,
       }}
     >
       {children}

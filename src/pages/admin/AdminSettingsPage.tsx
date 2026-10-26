@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings, Check, Save, ShieldAlert } from 'lucide-react';
+import { Settings, Check, Save, ShieldAlert, Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { loadThreshold, saveThreshold } from '../../lib/directory';
 import { formatINR } from '../../lib/formatters';
@@ -7,9 +7,10 @@ import { useRequests } from '../../context/RequestContext';
 
 export const AdminSettingsPage: React.FC = () => {
   const { isBackendConnected } = useAuth();
-  const { reloadThreshold } = useRequests();
+  const { reloadThreshold, deleteAllRequests } = useRequests();
   const [threshold, setThreshold] = useState<number>(10000);
   const [saving, setSaving] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
 
   useEffect(() => {
@@ -23,6 +24,26 @@ export const AdminSettingsPage: React.FC = () => {
     if (res.success) await reloadThreshold();
     setSaving(false);
     setFlash(res.success ? { text: 'Threshold saved and recorded in the audit log.', ok: true } : { text: res.error!, ok: false });
+    setTimeout(() => setFlash(null), 5000);
+  };
+
+  const handleDeleteAllRequests = async () => {
+    if (!confirm('Are you ABSOLUTELY sure you want to DELETE ALL REQUESTS? This action is permanent and cannot be undone.')) {
+      return;
+    }
+    const check = prompt('Type DELETE to permanently erase all requests and reset counters:');
+    if (check !== 'DELETE') {
+      alert('Deletion cancelled: confirmation word did not match.');
+      return;
+    }
+    setDeletingAll(true);
+    const res = await deleteAllRequests();
+    setDeletingAll(false);
+    if (res.success) {
+      setFlash({ text: 'All requests deleted successfully. Sequence numbers reset to 000001.', ok: true });
+    } else {
+      setFlash({ text: res.error || 'Failed to delete requests', ok: false });
+    }
     setTimeout(() => setFlash(null), 5000);
   };
 
@@ -64,6 +85,33 @@ export const AdminSettingsPage: React.FC = () => {
           <Save className="w-4 h-4" /><span>{saving ? 'Saving…' : 'Save threshold'}</span>
         </button>
       </form>
+
+      {/* Danger Zone: Delete All Requests */}
+      <div className="bg-rose-50/70 border border-rose-200/80 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="border-b border-rose-200/60 pb-3 flex items-start gap-3">
+          <div className="p-2 rounded-xl bg-rose-100 text-rose-600 shrink-0">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-rose-950">Danger Zone: Delete All Requests</h3>
+            <p className="text-xs text-rose-700 mt-0.5 leading-relaxed">
+              Permanently erase all operational requests, quotations, disbursement entries, approvals, and actions.
+              Numbering counters will restart fresh at <span className="font-semibold font-mono">REQ-2026-000001</span>.
+              Your user accounts, departments, and shops will remain safe and untouched.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          disabled={deletingAll}
+          onClick={handleDeleteAllRequests}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs shadow-md shadow-rose-200 disabled:opacity-50 transition-colors"
+        >
+          {deletingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          <span>{deletingAll ? 'Deleting All Requests…' : 'Delete All Requests'}</span>
+        </button>
+      </div>
     </div>
   );
 };
