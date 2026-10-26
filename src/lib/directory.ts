@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase, invokeEdgeFunction } from './supabase';
 import { useAuth } from '../context/AuthContext';
 import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS, MOCK_REQUESTS } from './mockData';
-import type { AppRole, AuditLogEntry, Department, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
+import type { AppRole, AuditLogEntry, Department, DisbursementAccountType, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
 
 type Result = { success: boolean; error?: string };
 
@@ -30,6 +30,8 @@ export interface NewUserInput {
   /** Employee & Regional Head: heads they can submit requests to */
   head_ids?: string[];
   default_head_id?: string | null;
+  /** Disbursement: Entry Only vs Payment Only */
+  disbursement_type?: DisbursementAccountType | null;
 }
 
 export interface AccessInput {
@@ -41,6 +43,7 @@ export interface AccessInput {
   regional_head_id?: string | null;
   head_ids?: string[];
   default_head_id?: string | null;
+  disbursement_type?: DisbursementAccountType | null;
 }
 
 export function useDirectory() {
@@ -214,6 +217,13 @@ export function useDirectory() {
         }
       }
 
+      if (input.role === 'disbursement' && input.disbursement_type && data?.id) {
+        await supabase.rpc('set_user_disbursement_type', {
+          p_user_id: data.id,
+          p_type: input.disbursement_type,
+        });
+      }
+
       if (input.photo && data?.id) {
         await invokeEdgeFunction('admin-users', {
           action: 'set_photo',
@@ -236,6 +246,7 @@ export function useDirectory() {
       region_id: input.region_id ?? null, region,
       allowed_types: input.allowed_types ?? ['general'],
       photo_path: input.photo || null,
+      disbursement_type: input.role === 'disbursement' ? (input.disbursement_type || 'entry_only') : null,
       rh_shops: (input.shop_ids || []).map((shop_id) => ({ shop_id })),
       clerk_cats: (input.category_ids || []).map((category_id) => ({ category_id })),
       user_heads: (input.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === input.default_head_id })),
@@ -251,9 +262,14 @@ export function useDirectory() {
         await setUserRegion(userId, access.region_id || null);
       }
 
-      // 2. Invoke Edge Function for shop_ids, categories, heads
+      // 2. Persist disbursement_type if provided
+      if (access.disbursement_type !== undefined && access.disbursement_type !== null) {
+        await setDisbursementType(userId, access.disbursement_type);
+      }
+
+      // 3. Invoke Edge Function for shop_ids, categories, heads
       const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
-      if (error && access.region_id === undefined) return { success: false, error: error.message };
+      if (error && access.region_id === undefined && access.disbursement_type === undefined) return { success: false, error: error.message };
 
       await reload();
       return { success: true };
@@ -266,6 +282,7 @@ export function useDirectory() {
       shop,
       region_id: access.region_id !== undefined ? (access.region_id || null) : u.region_id,
       region: access.region_id !== undefined ? region : u.region,
+      disbursement_type: access.disbursement_type !== undefined ? access.disbursement_type : u.disbursement_type,
       rh_shops: (access.shop_ids || []).map((shop_id) => ({ shop_id })),
       clerk_cats: (access.category_ids || []).map((category_id) => ({ category_id })),
       user_heads: (access.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === access.default_head_id })),
@@ -308,6 +325,33 @@ export function useDirectory() {
     }
     const region = cleanId ? regions.find((r) => r.id === cleanId) ?? null : null;
     setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, region_id: cleanId, region } : u)));
+    return { success: true };
+  };
+
+  /** Admin assigns a disbursement user's account type (Entry Only vs Payment Only). */
+  const setDisbursementType = async (userId: string, type: DisbursementAccountType): Promise<Result> => {
+    if (live) {
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, disbursement_type: type } : u)));
+      const { error: rpcErr } = await supabase.rpc('set_user_disbursement_type', {
+        p_user_id: userId,
+        p_type: type,
+      });
+      if (rpcErr) {
+        console.warn('set_user_disbursement_type RPC note, trying direct update:', rpcErr.message);
+        const { error: updateErr } = await supabase
+          .from('profiles')
+          .update({ disbursement_type: type, updated_at: new Date().toISOString() })
+          .eq('id', userId);
+        if (updateErr) {
+          console.error('Direct disbursement_type update failed:', updateErr.message);
+          await reload();
+          return { success: false, error: rpcErr.message || updateErr.message };
+        }
+      }
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, disbursement_type: type } : u)));
     return { success: true };
   };
 
@@ -773,7 +817,7 @@ export function useDirectory() {
 
   return {
     departments, shops, regions, users, categories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
-    createUser, updateAccess, setUserRegion, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
+    createUser, updateAccess, setUserRegion, setDisbursementType, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
   };
 }

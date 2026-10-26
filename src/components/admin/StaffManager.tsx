@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2 } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
@@ -213,6 +213,15 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${ROLE_BADGES[u.role]}`}>
                         {ROLE_LABELS[u.role]}
                       </span>
+                      {u.role === 'disbursement' && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          u.disbursement_type === 'payment_only'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                            : 'bg-sky-50 text-sky-800 border-sky-300'
+                        }`}>
+                          {u.disbursement_type === 'payment_only' ? 'Payment Only' : 'Entry Only'}
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs text-slate-500 font-mono block truncate">
                       @{u.username}{u.designation ? ` • ${u.designation}` : ''}
@@ -344,6 +353,58 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       {categoryName(c.category_id)}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {u.role === 'disbursement' && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border border-sky-200/80 bg-sky-50/60">
+                  <div className="min-w-0">
+                    <span className="flex items-center gap-2 text-xs text-sky-950 font-bold">
+                      <Wallet className="w-4 h-4 text-sky-600 shrink-0" />
+                      <span>Account Type: <strong className={u.disbursement_type === 'payment_only' ? 'text-emerald-700' : 'text-sky-700'}>{u.disbursement_type === 'payment_only' ? 'Payment Only' : 'Entry Only'}</strong></span>
+                    </span>
+                    <p className="text-[11px] text-sky-800/80 mt-0.5">
+                      {u.disbursement_type === 'payment_only'
+                        ? 'Can pay amount against each entry (max = entry amount). Cannot create entries.'
+                        : 'Can create entries with automatic numbering (1, 2...) & TDS status. Cannot pay.'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      disabled={busyId === u.id || u.disbursement_type === 'entry_only' || !u.disbursement_type}
+                      onClick={async () => {
+                        setBusyId(u.id);
+                        const res = await dir.setDisbursementType(u.id, 'entry_only');
+                        setBusyId(null);
+                        show(res.success ? `Updated to Entry Only for ${u.full_name}.` : (res.error || 'Failed to update account type'), res.success);
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                        u.disbursement_type === 'entry_only' || !u.disbursement_type
+                          ? 'bg-sky-600 text-white shadow-xs'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Entry Only
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === u.id || u.disbursement_type === 'payment_only'}
+                      onClick={async () => {
+                        setBusyId(u.id);
+                        const res = await dir.setDisbursementType(u.id, 'payment_only');
+                        setBusyId(null);
+                        show(res.success ? `Updated to Payment Only for ${u.full_name}.` : (res.error || 'Failed to update account type'), res.success);
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                        u.disbursement_type === 'payment_only'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Payment Only
+                    </button>
+                  </div>
                 </div>
               )}
 

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { AppRole, Department, Profile, Region, RequestType, Shop, WorkCategory } from '../../types/database';
+import { AppRole, Department, DisbursementAccountType, Profile, Region, RequestType, Shop, WorkCategory } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
-import { UserPlus, ShieldAlert, Camera, Trash2 } from 'lucide-react';
+import { UserPlus, ShieldAlert, Camera, Trash2, Wallet } from 'lucide-react';
 import { AccessFields, ExtraAccess, coveringRegionalHeads, rolesWithTypes, validateAccess } from './AccessFields';
 import { compressAvatar } from '../../lib/imageUtils';
 import { ROLE_LABELS } from '../../lib/formatters';
@@ -33,6 +33,7 @@ interface UserModalProps {
     regional_head_id?: string | null;
     head_ids?: string[];
     default_head_id?: string | null;
+    disbursement_type?: DisbursementAccountType | null;
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -52,6 +53,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [fullName, setFullName] = useState('');
   const [designation, setDesignation] = useState('');
   const [role, setRole] = useState<AppRole>(allowedRoles[0] || 'employee');
+  const [disbursementType, setDisbursementType] = useState<DisbursementAccountType>('entry_only');
   const [departmentId, setDepartmentId] = useState<string>(
     user?.department_id || departments[0]?.id || ''
   );
@@ -139,6 +141,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         ...(role === 'employee' || role === 'regional_head'
           ? { head_ids: extra.headIds, default_head_id: defaultHead }
           : {}),
+        ...(role === 'disbursement' ? { disbursement_type: disbursementType } : {}),
       });
 
       if (res.success) {
@@ -314,6 +317,59 @@ export const UserModal: React.FC<UserModalProps> = ({
                 </option>
               ))}
             </select>
+          </div>
+        )}
+
+        {role === 'disbursement' && (
+          <div className="p-3.5 rounded-xl border border-sky-200 bg-sky-50/50 space-y-2">
+            <label className="text-xs font-bold text-sky-900 flex items-center gap-1.5">
+              <Wallet className="w-3.5 h-3.5 text-sky-600" />
+              <span>Disbursement Account Type</span>
+              <span className="text-rose-500">*</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                disbursementType === 'entry_only'
+                  ? 'bg-sky-600/10 border-sky-500 ring-1 ring-sky-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}>
+                <input
+                  type="radio"
+                  name="disbursement_type"
+                  value="entry_only"
+                  checked={disbursementType === 'entry_only'}
+                  onChange={() => setDisbursementType('entry_only')}
+                  className="mt-0.5 text-sky-600 focus:ring-sky-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">Entry Only</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Creates payment entries with automatic numbering (Entry #1, #2...) and TDS status. Cannot record payment.
+                  </span>
+                </div>
+              </label>
+
+              <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                disbursementType === 'payment_only'
+                  ? 'bg-emerald-600/10 border-emerald-500 ring-1 ring-emerald-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}>
+                <input
+                  type="radio"
+                  name="disbursement_type"
+                  value="payment_only"
+                  checked={disbursementType === 'payment_only'}
+                  onChange={() => setDisbursementType('payment_only')}
+                  className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">Payment Only</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Pays amount strictly against approved entries (max = entry amount). Cannot create entries.
+                  </span>
+                </div>
+              </label>
+            </div>
           </div>
         )}
 

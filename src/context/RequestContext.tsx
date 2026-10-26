@@ -9,6 +9,7 @@ import {
   RequestDetails,
   Profile,
   DisbursementClarification,
+  DisbursementEntry,
   UserTargetHead,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
@@ -49,6 +50,7 @@ export interface PaymentInput {
   payment_ref?: string;
   payment_remarks?: string;
   payment_date?: string;
+  entry_id?: string;
 }
 
 interface RequestContextType {
@@ -93,6 +95,18 @@ interface RequestContextType {
   ) => Promise<{ success: boolean; approval_no?: string; error?: string }>;
   /** Records a payment. `amount` omitted = pay the whole remaining balance. */
   markAsPaid: (id: string, details: PaymentInput) => Promise<{ success: boolean; error?: string; fully_paid?: boolean }>;
+  /** Disbursement entry operations (Entry-Only / Payment-Only) */
+  addDisbursementEntry: (
+    requestId: string,
+    amount: number,
+    tdsCut: boolean,
+    notes?: string
+  ) => Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number }>;
+  cancelDisbursementEntry: (entryId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
+  payDisbursementEntry: (
+    entryId: string,
+    details: PaymentInput
+  ) => Promise<{ success: boolean; error?: string; fully_paid?: boolean }>;
   /** Inter-department head consultations */
   requestHeadConsultations: (
     requestId: string,
@@ -280,6 +294,27 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         } catch {
           // Table not yet migrated; gracefully ignored so requests still display!
+        }
+
+        // Safe standalone fetch for disbursement entries
+        try {
+          const { data: entries, error: entryErr } = await supabase
+            .from('disbursement_entries')
+            .select('*')
+            .order('entry_no', { ascending: true });
+          if (!entryErr && entries && entries.length > 0) {
+            const entryMap = new Map<string, any[]>();
+            entries.forEach((e: any) => {
+              const list = entryMap.get(e.request_id) || [];
+              list.push(e);
+              entryMap.set(e.request_id, list);
+            });
+            data.forEach((r: any) => {
+              r.disbursement_entries = entryMap.get(r.id) || [];
+            });
+          }
+        } catch {
+          // Gracefully ignored
         }
       }
 
@@ -1126,6 +1161,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (isBackendConnected) {
       try {
+        if (details.entry_id) {
+          const { data, error } = await supabase.rpc('pay_disbursement_entry', {
+            p_entry_id: details.entry_id,
+            p_amount: details.amount ?? null,
+            p_payment_date: details.payment_date || null,
+            p_payment_mode: details.payment_mode || null,
+            p_payment_ref: details.payment_ref || null,
+            p_remarks: details.payment_remarks || null,
+          });
+          if (error) throw error;
+          await loadRequests();
+          return { success: true, fully_paid: !!(data as { fully_paid?: boolean } | null)?.fully_paid };
+        }
+
         const { data, error } = await supabase.rpc('add_payment', {
           p_request_id: id,
           p_amount: details.amount ?? null,
@@ -1142,15 +1191,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    // Offline sandbox mirrors the add_payment rules
-    const current = getRequestById(id);
+    // Offline sandbox mirrors the add_payment / pay_disbursement_entry rules
+    const current = id ? getRequestById(id) : requests.find((r) => (r.disbursement_entries || []).some((e) => e.id === details.entry_id));
     if (!current) return { success: false, error: 'Request not found' };
     if (current.status === 'paid') return { success: false, error: 'This request is already fully paid.' };
-    const already = Number(current.paid_amount ?? 0);
-    const balance = Math.round((current.amount - already) * 100) / 100;
-    const amt = Math.round((details.amount ?? balance) * 100) / 100;
+
+    const entry = details.entry_id ? (current.disbursement_entries || []).find((e) => e.id === details.entry_id) : null;
+    const maxPayable = entry ? entry.amount : Math.max(0, current.amount - Number(current.paid_amount ?? 0));
+    const amt = Math.round((details.amount ?? maxPayable) * 100) / 100;
     if (amt <= 0) return { success: false, error: 'Payment amount must be more than zero.' };
-    if (amt > balance) return { success: false, error: `Payment is more than the balance of ₹${balance.toFixed(2)}.` };
+    if (amt > maxPayable) {
+      return { success: false, error: entry ? `Payment cannot exceed Entry #${entry.entry_no} amount of ₹${entry.amount.toFixed(2)}.` : `Payment is more than the balance of ₹${maxPayable.toFixed(2)}.` };
+    }
+
+    const already = Number(current.paid_amount ?? 0);
     const paid = already + amt;
     const full = paid >= current.amount;
     const now = new Date().toISOString();
@@ -1158,14 +1212,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const action: RequestAction = {
       id: `act-${Date.now()}`,
-      request_id: id,
+      request_id: current.id,
       actor_id: user.id,
       actor_name: user.full_name,
       actor_role: user.role,
       action: full ? 'paid' : 'partial_payment',
       from_status: current.status,
       to_status: full ? 'paid' : current.status,
-      remarks: full
+      remarks: entry
+        ? `Entry #${entry.entry_no} settled ₹${amt.toFixed(2)} via ${details.payment_mode || 'Payment'}${entry.tds_cut ? ' (TDS Cut)' : ' (TDS Not Cut)'}`
+        : full
         ? `Paid via ${details.payment_mode || 'Direct Transfer'}. Ref: ${details.payment_ref || 'N/A'}. ${details.payment_remarks || ''}`
         : `Paid ₹${amt.toFixed(2)} · balance ₹${(current.amount - paid).toFixed(2)}`,
       visible_to_requester: true,
@@ -1174,7 +1230,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     updateLocalRequests((prev) =>
       prev.map((r) =>
-        r.id === id
+        r.id === current.id
           ? {
               ...r,
               status: full ? 'paid' : r.status,
@@ -1185,12 +1241,18 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               payment_ref: full ? details.payment_ref || null : r.payment_ref,
               payment_remarks: full ? details.payment_remarks || null : r.payment_remarks,
               updated_at: now,
+              disbursement_entries: (r.disbursement_entries || []).map((e) =>
+                e.id === details.entry_id
+                  ? { ...e, status: 'paid', paid_at: now, paid_by: user.id, paid_by_name: user.full_name }
+                  : e
+              ),
               payments: [
                 ...(r.payments || []),
                 {
-                  id: `pay-${Date.now()}`, request_id: id, amount: amt, payment_date: date,
+                  id: `pay-${Date.now()}`, request_id: current.id, amount: amt, payment_date: date,
                   payment_mode: details.payment_mode || null, payment_ref: details.payment_ref || null,
                   remarks: details.payment_remarks || null, paid_by: user.id, paid_by_name: user.full_name, created_at: now,
+                  entry_id: details.entry_id || null,
                 },
               ],
               actions: [action, ...(r.actions || [])],
@@ -1200,6 +1262,94 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
 
     return { success: true, fully_paid: full };
+  };
+
+  const addDisbursementEntry = async (
+    requestId: string,
+    amount: number,
+    tdsCut: boolean,
+    notes?: string
+  ): Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+
+    if (isBackendConnected) {
+      try {
+        const { data, error } = await supabase.rpc('add_disbursement_entry', {
+          p_request_id: requestId,
+          p_amount: amount,
+          p_tds_cut: tdsCut,
+          p_notes: notes?.trim() || null,
+        });
+        if (error) throw error;
+        await loadRequests();
+        const res = data as any;
+        return { success: true, entry_id: res?.entry_id, entry_no: res?.entry_no };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    // Mock
+    const req = getRequestById(requestId);
+    if (!req) return { success: false, error: 'Request not found' };
+    const existing = req.disbursement_entries || [];
+    const nextNo = existing.length > 0 ? Math.max(...existing.map((e) => e.entry_no)) + 1 : 1;
+    const newEntry: DisbursementEntry = {
+      id: `entry-${Date.now()}`,
+      request_id: requestId,
+      entry_no: nextNo,
+      amount,
+      tds_cut: tdsCut,
+      status: 'pending',
+      notes: notes?.trim() || null,
+      created_by: user.id,
+      created_by_name: user.full_name,
+      created_at: new Date().toISOString(),
+    };
+    updateLocalRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? { ...r, disbursement_entries: [...(r.disbursement_entries || []), newEntry] }
+          : r
+      )
+    );
+    return { success: true, entry_id: newEntry.id, entry_no: nextNo };
+  };
+
+  const cancelDisbursementEntry = async (
+    entryId: string,
+    reason?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('cancel_disbursement_entry', {
+          p_entry_id: entryId,
+          p_reason: reason?.trim() || null,
+        });
+        if (error) throw error;
+        await loadRequests();
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    // Mock
+    updateLocalRequests((prev) =>
+      prev.map((r) => ({
+        ...r,
+        disbursement_entries: (r.disbursement_entries || []).filter((e) => e.id !== entryId),
+      }))
+    );
+    return { success: true };
+  };
+
+  const payDisbursementEntry = async (
+    entryId: string,
+    details: PaymentInput
+  ): Promise<{ success: boolean; error?: string; fully_paid?: boolean }> => {
+    return markAsPaid('', { ...details, entry_id: entryId });
   };
 
   const requestHeadConsultations = async (
@@ -1740,6 +1890,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         rejectRequest,
         approveRequest,
         markAsPaid,
+        addDisbursementEntry,
+        cancelDisbursementEntry,
+        payDisbursementEntry,
         requestHeadConsultations,
         respondHeadConsultation,
         loadConsultableHeads,

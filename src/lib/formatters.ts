@@ -232,6 +232,9 @@ export const ACTION_LABELS: Record<string, string> = {
   sent_for_quote_selection: 'Sent to Head for quotation selection',
   quote_selected: 'Best quotation selected',
   regional_forwarded: 'Regional Head checked and forwarded to Clerk',
+  disbursement_entry_created: 'Disbursement: Payment entry created',
+  disbursement_entry_paid: 'Disbursement: Payment entry settled',
+  disbursement_entry_cancelled: 'Disbursement: Payment entry cancelled',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash'];

@@ -160,7 +160,11 @@ export interface Profile {
   default_head_id?: string | null;
   /** Heads assigned to this employee / regional head */
   user_heads?: { head_id: string; is_default: boolean }[];
+  /** Disbursement role only: Entry Only vs Payment Only */
+  disbursement_type?: DisbursementAccountType | null;
 }
+
+export type DisbursementAccountType = 'entry_only' | 'payment_only';
 
 export interface UserTargetHead {
   head_id: string;
@@ -256,6 +260,25 @@ export interface RequestRecord {
   is_waitlist?: boolean;
   waitlist_approved_by?: string | null;
   waitlist_approved_at?: string | null;
+  /** Disbursement entries (for entry-only / payment-only accounts) */
+  disbursement_entries?: DisbursementEntry[];
+}
+
+export interface DisbursementEntry {
+  id: string;
+  request_id: string;
+  entry_no: number;
+  amount: number;
+  tds_cut: boolean;
+  status: 'pending' | 'paid' | 'cancelled';
+  notes?: string | null;
+  created_by?: string | null;
+  created_by_name?: string | null;
+  created_at: string;
+  paid_at?: string | null;
+  paid_by?: string | null;
+  paid_by_name?: string | null;
+  payment_id?: string | null;
 }
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
@@ -314,6 +337,7 @@ export interface RequestPayment {
   paid_by: string | null;
   paid_by_name: string | null;
   created_at: string;
+  entry_id?: string | null;
 }
 
 /** Paid so far, balance left, and whether some (but not all) has been paid. */

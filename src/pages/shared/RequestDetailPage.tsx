@@ -793,20 +793,22 @@ export const RequestDetailPage: React.FC = () => {
             </div>
           )}
 
-          {rType !== 'discount' && rType !== 'non_cash' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && pay.paid > 0)) && (
+          {rType !== 'discount' && rType !== 'non_cash' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && (pay.paid > 0 || (request.disbursement_entries?.length || 0) > 0))) && (
             <div className="bg-white rounded-2xl border border-teal-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 font-bold text-teal-800 text-sm">
-                  <Banknote className="w-4 h-4" /> Payments
+                  <Banknote className="w-4 h-4" /> Payments &amp; Disbursement Entries
                 </div>
                 <span
                   className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
-                    pay.balance > 0
+                    pay.paid === 0
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : pay.balance > 0
                       ? 'bg-sky-50 text-sky-700 border-sky-200'
                       : 'bg-teal-50 text-teal-700 border-teal-200'
                   }`}
                 >
-                  {pay.balance > 0 ? 'Partially paid' : 'Paid in full'}
+                  {pay.paid === 0 ? 'Awaiting Payment' : pay.balance > 0 ? 'Partially paid' : 'Paid in full'}
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-2">
@@ -823,36 +825,91 @@ export const RequestDetailPage: React.FC = () => {
                   <p className="font-bold text-amber-800 truncate">{formatINR(pay.balance)}</p>
                 </div>
               </div>
-              {payments.length > 0 ? (
-                <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl">
-                  {payments.map((p, i) => (
-                    <li key={p.id || i} className="p-2.5 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-800">
-                          #{i + 1} · {formatISTDate(p.payment_date, false)}
-                        </p>
-                        <p className="text-[11px] text-slate-500 truncate">
-                          {[p.payment_mode, p.payment_ref, p.paid_by_name].filter(Boolean).join(' · ') || '—'}
-                        </p>
-                        {p.remarks && <p className="text-[11px] text-slate-500 italic break-words">{p.remarks}</p>}
+
+              {/* Disbursement Entries List if any */}
+              {(request.disbursement_entries || []).length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <span className="font-bold text-slate-700 text-xs block mb-1">
+                    Disbursement Entries ({(request.disbursement_entries || []).length})
+                  </span>
+                  {(request.disbursement_entries || []).map((ent) => (
+                    <div
+                      key={ent.id}
+                      className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap min-w-0">
+                        <span className="font-mono font-bold text-sky-900 bg-sky-100 px-2 py-0.5 rounded-md text-[11px]">
+                          Entry #{ent.entry_no}
+                        </span>
+                        <span className="font-bold text-slate-900 font-mono">
+                          {formatINR(ent.amount)}
+                        </span>
+                        <span
+                          className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
+                            ent.tds_cut
+                              ? 'bg-amber-100 text-amber-900 border-amber-300'
+                              : 'bg-slate-200 text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          {ent.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
+                        </span>
+                        {ent.notes && (
+                          <span className="text-[11px] text-slate-500 italic truncate max-w-xs">
+                            · {ent.notes}
+                          </span>
+                        )}
                       </div>
-                      <span className="font-bold text-teal-700 shrink-0">{formatINR(p.amount)}</span>
-                    </li>
+                      <span
+                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border shrink-0 ${
+                          ent.status === 'paid'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}
+                      >
+                        {ent.status === 'paid' ? 'Paid' : 'Pending'}
+                      </span>
+                    </div>
                   ))}
-                </ul>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <span className="text-slate-400 block">Paid on</span>
-                    <span className="font-semibold text-slate-800">{formatISTDate(request.paid_at)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block">Mode / Ref</span>
-                    <span className="font-semibold text-slate-800 break-all">
-                      {[request.payment_mode, request.payment_ref].filter(Boolean).join(' · ') || '—'}
-                    </span>
-                  </div>
                 </div>
+              )}
+
+              {payments.length > 0 ? (
+                <div className="space-y-1 pt-2 border-t border-slate-100">
+                  <span className="font-bold text-slate-700 text-xs block mb-1">
+                    Settled Payments ({payments.length})
+                  </span>
+                  <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl">
+                    {payments.map((p, i) => (
+                      <li key={p.id || i} className="p-2.5 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-800">
+                            #{i + 1} · {formatISTDate(p.payment_date, false)}
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {[p.payment_mode, p.payment_ref, p.paid_by_name].filter(Boolean).join(' · ') || '—'}
+                          </p>
+                          {p.remarks && <p className="text-[11px] text-slate-500 italic break-words">{p.remarks}</p>}
+                        </div>
+                        <span className="font-bold text-teal-700 shrink-0">{formatINR(p.amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                (request.status === 'paid' || request.paid_at) && (
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                    <div>
+                      <span className="text-slate-400 block">Paid on</span>
+                      <span className="font-semibold text-slate-800">{formatISTDate(request.paid_at)}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Mode / Ref</span>
+                      <span className="font-semibold text-slate-800 break-all">
+                        {[request.payment_mode, request.payment_ref].filter(Boolean).join(' · ') || '—'}
+                      </span>
+                    </div>
+                  </div>
+                )
               )}
             </div>
           )}

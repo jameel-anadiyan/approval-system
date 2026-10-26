@@ -208,9 +208,12 @@ Deno.serve(handle(async (req) => {
       if (error || !created.user) throw new HttpError(400, "auth_error", error?.message ?? "Could not create the login.");
 
       const region_id = typeof body.region_id === "string" && body.region_id ? requireUuid(body.region_id, "Region") : null;
+      const disbursement_type = role === "disbursement"
+        ? (body.disbursement_type === "payment_only" ? "payment_only" : "entry_only")
+        : null;
       const { error: pErr } = await admin.from("profiles").insert({
         id: created.user.id, username, full_name, designation, role, department_id, shop_id, allowed_types,
-        regional_head_id, region_id, must_change_password: true, created_by: me.id,
+        regional_head_id, region_id, disbursement_type, must_change_password: true, created_by: me.id,
       });
       if (pErr) {
         await admin.auth.admin.deleteUser(created.user.id);
@@ -374,6 +377,7 @@ Deno.serve(handle(async (req) => {
         shop_id, allowed_types, regional_head_id, updated_at: new Date().toISOString()
       };
       if (region_id !== undefined) updatePayload.region_id = region_id;
+      if (body.disbursement_type !== undefined) updatePayload.disbursement_type = body.disbursement_type;
       const { error } = await admin.from("profiles")
         .update(updatePayload).eq("id", userId);
       if (error) throw new HttpError(400, "profile_error", error.message);

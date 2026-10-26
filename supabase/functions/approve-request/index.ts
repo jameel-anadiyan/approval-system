@@ -48,7 +48,7 @@ function appOrigin(v: unknown): string | null {
 
 const TYPE_LABEL: Record<string, string> = {
   general: "General", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
-  asset: "Asset buying", non_cash: "Non-cash request",
+  asset: "Asset buying", asset_below_20k: "Asset buying below 20k", non_cash: "Non-cash request",
 };
 const PROVIDES: Record<string, string> = {
   stall_space: "Stall space", table_chairs: "Table & chairs", electricity_lights: "Electricity & lights",
@@ -112,7 +112,7 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
       ],
     };
   }
-  if (r.request_type === "asset") {
+  if (r.request_type === "asset" || r.request_type === "asset_below_20k") {
     // deno-lint-ignore no-explicit-any
     const quotes = (files ?? []).filter((f: any) => f.quote_amount !== null && f.quote_amount !== undefined);
     const lowest = quotes.length ? Math.min(...quotes.map((q: { quote_amount: number }) => Number(q.quote_amount))) : null;
@@ -218,14 +218,14 @@ Deno.serve(handle(async (req) => {
     if (form) {
       const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections);
       const out = await stampDocument(formPdf, ctx);
-      await store(out.bytes, ++n, r.request_type === "discount" ? "discount_form" : r.request_type === "asset" ? "asset_purchase_form" : "exhibition_form", null, out.pageCount);
+      await store(out.bytes, ++n, r.request_type === "discount" ? "discount_form" : (r.request_type === "asset" || r.request_type === "asset_below_20k") ? "asset_purchase_form" : "exhibition_form", null, out.pageCount);
     }
 
     // One file at a time to keep memory low.
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       const src = await download("request-files", f.storage_path);
-      const isQuote = r.request_type === "asset" && f.quote_amount !== null && f.quote_amount !== undefined;
+      const isQuote = (r.request_type === "asset" || r.request_type === "asset_below_20k") && f.quote_amount !== null && f.quote_amount !== undefined;
       const rejected = isQuote && f.quote_status !== "selected";
       const fileCtx: StampContext = !isQuote ? ctx : rejected
         ? { ...ctx, tone: "rejected",
