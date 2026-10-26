@@ -1,13 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
 import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
 import { formatINR, typeOf, TYPE_LABELS } from '../../lib/formatters';
 import { useDirectory } from '../../lib/directory';
-import { Download, FileSpreadsheet, Eye } from 'lucide-react';
+import { Download, FileSpreadsheet, Eye, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import type { RequestStatus } from '../../types/database';
+import type { RequestRecord, RequestStatus } from '../../types/database';
 
 const ALL_STATUSES: RequestStatus[] = [
   'pending_regional_review',
@@ -24,11 +24,29 @@ const ALL_STATUSES: RequestStatus[] = [
 ];
 
 export const AdminAllRequestsPage: React.FC = () => {
-  const { requests } = useRequests();
+  const { requests, deleteSpecificRequest } = useRequests();
   const { departments } = useDirectory();
   const navigate = useNavigate();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null);
 
   const { filters, setFilters, result: filtered } = useRequestFilters(requests);
+
+  const handleDeleteRequest = async (req: RequestRecord) => {
+    const reqNo = req.request_no || 'this draft';
+    if (!confirm(`Are you sure you want to PERMANENTLY DELETE ${reqNo}?\n\nThis will completely remove it from all departments, including disbursement and clerk queues.`)) {
+      return;
+    }
+    setDeletingId(req.id);
+    const res = await deleteSpecificRequest(req.id);
+    setDeletingId(null);
+    if (res.success) {
+      setBanner({ ok: true, text: `Request ${reqNo} deleted successfully.` });
+    } else {
+      setBanner({ ok: false, text: res.error || 'Failed to delete request.' });
+    }
+    setTimeout(() => setBanner(null), 5000);
+  };
 
   const exportCSV = () => {
     const headers = [
@@ -95,6 +113,20 @@ export const AdminAllRequestsPage: React.FC = () => {
           <span>Export CSV</span>
         </button>
       </div>
+
+      {banner && (
+        <div
+          role="status"
+          className={`p-3.5 rounded-xl border text-xs flex items-start justify-between gap-3 ${
+            banner.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <span>{banner.text}</span>
+          <button type="button" onClick={() => setBanner(null)} className="font-bold opacity-60 hover:opacity-100" aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
 
       <RequestFilters
         value={filters}
@@ -164,14 +196,25 @@ export const AdminAllRequestsPage: React.FC = () => {
                     {req.approval_no || '—'}
                   </td>
                   <td className="p-3.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/requests/${req.id}`)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                      title="View details"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/requests/${req.id}`)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                        title="View details"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deletingId === req.id}
+                        onClick={() => handleDeleteRequest(req)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                        title="Permanently delete request"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

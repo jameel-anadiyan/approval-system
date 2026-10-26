@@ -150,6 +150,8 @@ interface RequestContextType {
   ) => Promise<Result>;
   /** Permanently delete all requests, related data, and reset counters (Admin only) */
   deleteAllRequests: () => Promise<{ success: boolean; error?: string }>;
+  /** Permanently delete a specific request and all associated records (Admin / owner draft) */
+  deleteSpecificRequest: (id: string) => Promise<Result>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -1930,6 +1932,22 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const deleteSpecificRequest = async (id: string): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('delete_request_permanently', { p_request_id: id });
+        if (error) throw error;
+        await loadRequests();
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    updateLocalRequests((prev) => prev.filter((r) => r.id !== id));
+    return { success: true };
+  };
+
   return (
     <RequestContext.Provider
       value={{
@@ -1969,6 +1987,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         selectQuote,
         decideExhibitionWaitlist,
         deleteAllRequests,
+        deleteSpecificRequest,
       }}
     >
       {children}

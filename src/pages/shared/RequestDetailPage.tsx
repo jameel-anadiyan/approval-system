@@ -89,6 +89,7 @@ export const RequestDetailPage: React.FC = () => {
     cancelApprovedRequest,
     selectQuote,
     decideExhibitionWaitlist,
+    deleteSpecificRequest,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
@@ -106,6 +107,26 @@ export const RequestDetailPage: React.FC = () => {
   );
 
   const request = id ? getRequestById(id) : undefined;
+
+  const handleDeleteRequestPermanently = async () => {
+    if (!request) return;
+    const reqNo = request.request_no || 'this draft';
+    const conf = confirm(
+      `Are you sure you want to PERMANENTLY DELETE ${reqNo}?\n\nThis will completely erase the request from all departments, including disbursement, clerk queues, and reports. This action cannot be undone.`
+    );
+    if (!conf) return;
+
+    setBusy(true);
+    const res = await deleteSpecificRequest(request.id);
+    setBusy(false);
+    if (res.success) {
+      navigate('/admin', {
+        state: { notice: `Request ${reqNo} has been permanently deleted.` },
+      });
+    } else {
+      setBanner({ text: res.error || 'Failed to delete request.', ok: false });
+    }
+  };
 
   // The department Head may forward / return on the Regional Head's behalf only when that
   // Regional Head has been deactivated (the server enforces the same rule).
@@ -406,6 +427,19 @@ export const RequestDetailPage: React.FC = () => {
             >
               <Users className="w-4 h-4" />
               <span>Request Other Head</span>
+            </button>
+          )}
+          {role === 'admin' && (
+            <button
+              type="button"
+              id="admin-delete-request-header-btn"
+              onClick={handleDeleteRequestPermanently}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs shadow-xs transition-all shrink-0 cursor-pointer disabled:opacity-50"
+              title="Permanently delete this request completely from the database and all dashboards"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              <span>Delete Request</span>
             </button>
           )}
           <StatusBadge status={request.status} requestType={rType} size="lg" showDescription />
@@ -1414,6 +1448,21 @@ export const RequestDetailPage: React.FC = () => {
                   <span>Approve & Digital Sign</span>
                 </button>
               </>
+            )}
+
+            {/* Admin Delete Action (Available on any status) */}
+            {role === 'admin' && (
+              <button
+                type="button"
+                id="admin-delete-request-action-bar-btn"
+                onClick={handleDeleteRequestPermanently}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100 font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                title="Permanently delete this request completely from the system"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Delete Request</span>
+              </button>
             )}
 
             {/* Owning Head / Admin Action when Disbursement requested clarification */}

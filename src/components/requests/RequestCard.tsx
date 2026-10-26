@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { RequestRecord } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
 import { useRequests } from '../../context/RequestContext';
+import { useAuth } from '../../context/AuthContext';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2 } from 'lucide-react';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -23,7 +24,8 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   onToggleSelect,
 }) => {
   const navigate = useNavigate();
-  const { threshold } = useRequests();
+  const { user } = useAuth();
+  const { threshold, deleteSpecificRequest } = useRequests();
   const rType = typeOf(request);
   const isHighValue = rType === 'general' && request.amount > threshold;
 
@@ -31,6 +33,15 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   const hasVoiceNote = request.files?.some((f) => f.kind === 'voice_note');
   const latestClarification = (request.disbursement_clarifications || [])[0];
   const isPendingClarification = latestClarification?.status === 'pending_head';
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const reqNo = request.request_no || 'this draft';
+    if (!confirm(`Are you sure you want to PERMANENTLY DELETE ${reqNo}?\n\nThis will completely remove it from all departments, including disbursement and clerk queues.`)) {
+      return;
+    }
+    await deleteSpecificRequest(request.id);
+  };
 
   return (
     <div
@@ -87,7 +98,20 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             </span>
           )}
         </div>
-        <StatusBadge status={request.status} requestType={rType} size="sm" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          <StatusBadge status={request.status} requestType={rType} size="sm" />
+          {user?.role === 'admin' && (
+            <button
+              type="button"
+              id={`delete-card-${request.id}`}
+              onClick={handleDelete}
+              className="p-1 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+              title="Permanently delete request"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Content: Title & Notes preview */}
