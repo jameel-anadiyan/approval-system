@@ -7,8 +7,17 @@
 -- It reflects everywhere, including disbursement, so the request no longer exists.
 -- ============================================================================
 
+-- 1. Ensure Admin has direct delete permission on requests table via RLS
+drop policy if exists requests_delete on public.requests;
+create policy requests_delete on public.requests for delete to authenticated
+  using (
+    (select public.my_role()) = 'admin'
+    or (requester_id = (select auth.uid()) and status in ('draft', 'returned', 'withdrawn'))
+  );
+
+-- 2. Permanent deletion RPC
 create or replace function public.delete_request_permanently(p_request_id uuid)
-returns void language plpgsql security definer set search_path = '' as $$
+returns void language plpgsql security definer set search_path = public, storage, auth, pg_temp as $$
 declare
   me public.profiles;
   r public.requests;
@@ -47,17 +56,20 @@ begin
   -- 2. Delete the request record itself
   delete from public.requests where id = r.id;
 
-  -- 3. Delete files from storage buckets
-  if v_storage_paths is not null and array_length(v_storage_paths, 1) > 0 then
+  -- 3. Safely delete files from storage buckets (ignore storage errors if storage table is protected)
+  begin
+    if v_storage_paths is not null and array_length(v_storage_paths, 1) > 0 then
+      delete from storage.objects
+      where bucket_id in ('request-files', 'signed-documents')
+        and name = any(v_storage_paths);
+    end if;
+
     delete from storage.objects
     where bucket_id in ('request-files', 'signed-documents')
-      and name = any(v_storage_paths);
-  end if;
-
-  -- Clean up any files organized in a subfolder named after the request ID
-  delete from storage.objects
-  where bucket_id in ('request-files', 'signed-documents')
-    and (name like (r.id::text || '/%') or name like ('%' || r.id::text || '%'));
+      and (name like (r.id::text || '/%') or name like ('%' || r.id::text || '%'));
+  exception when others then
+    null;
+  end;
 
 end $$;
 

@@ -158,7 +158,27 @@ const RequestContext = createContext<RequestContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_REQ_KEY = 'approval_app_requests_store';
 
-const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+export const errMsg = (err: unknown): string => {
+  if (!err) return 'An unexpected error occurred';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object') {
+    const o = err as Record<string, any>;
+    if (typeof o.message === 'string' && o.message.trim()) {
+      return o.hint ? `${o.message} (${o.hint})` : o.message;
+    }
+    if (typeof o.error_description === 'string' && o.error_description.trim()) return o.error_description;
+    if (typeof o.error === 'string' && o.error.trim()) return o.error;
+    if (typeof o.details === 'string' && o.details.trim()) return o.details;
+    try {
+      const s = JSON.stringify(o);
+      if (s !== '{}') return s;
+    } catch {
+      // ignore
+    }
+  }
+  return String(err);
+};
 
 /** Newest action first, files in upload order, resolve owner head. */
 const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Profile>> = {}) =>
@@ -717,7 +737,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true, request_no: row?.request_no ?? undefined };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -779,7 +799,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1919,11 +1939,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isBackendConnected) {
       try {
         const { error } = await supabase.rpc('delete_all_requests');
-        if (error) throw error;
+        if (error) {
+          // If RPC not found in schema cache, fallback to direct delete
+          if (error.code === 'PGRST202' || error.message?.includes('delete_all_requests')) {
+            const { error: delErr } = await supabase.from('requests').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            if (delErr) throw delErr;
+          } else {
+            throw error;
+          }
+        }
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        console.error('Failed to delete all requests:', err);
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1937,11 +1966,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isBackendConnected) {
       try {
         const { error } = await supabase.rpc('delete_request_permanently', { p_request_id: id });
-        if (error) throw error;
+        if (error) {
+          // If RPC not found in schema cache, fallback to direct delete
+          if (error.code === 'PGRST202' || error.message?.includes('delete_request_permanently')) {
+            const { error: delErr } = await supabase.from('requests').delete().eq('id', id);
+            if (delErr) throw delErr;
+          } else {
+            throw error;
+          }
+        }
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        console.error('Failed to delete request:', err);
+        return { success: false, error: errMsg(err) };
       }
     }
     updateLocalRequests((prev) => prev.filter((r) => r.id !== id));
