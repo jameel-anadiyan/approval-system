@@ -95,10 +95,7 @@ export const Navigation: React.FC = () => {
 
   const hasExhibitionAccess =
     Boolean(user) &&
-    (role === 'admin' ||
-      role === 'head' ||
-      role === 'regional_head' ||
-      Boolean(user?.allowed_types?.includes('exhibition')));
+    (role === 'admin' || Boolean(user?.allowed_types?.includes('exhibition')));
 
   const headWaitlistCount = requests.filter(
     (r) => r.is_waitlist && r.status !== 'draft' && !r.waitlist_approved_at && r.status !== 'rejected' && r.status !== 'withdrawn'
@@ -122,7 +119,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
         { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
-        { label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays },
+        ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },

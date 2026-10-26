@@ -30,7 +30,7 @@ export const HeadDashboardPage: React.FC = () => {
   ).length;
 
   const hasExhibitionAccess = Boolean(user) && (
-    user?.role === 'admin' || user?.role === 'head' || user?.role === 'regional_head' || Boolean(user?.allowed_types?.includes('exhibition'))
+    user?.role === 'admin' || Boolean(user?.allowed_types?.includes('exhibition'))
   );
 
   // Department requests

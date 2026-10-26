@@ -84,10 +84,7 @@ const RequireExhibitionAccess: React.FC = () => {
   const { user, role } = useAuth();
   const allowed =
     Boolean(user) &&
-    (role === 'admin' ||
-      role === 'head' ||
-      role === 'regional_head' ||
-      Boolean(user?.allowed_types?.includes('exhibition')));
+    (role === 'admin' || Boolean(user?.allowed_types?.includes('exhibition')));
   if (!allowed) return <RoleRedirect />;
   return <Outlet />;
 };
