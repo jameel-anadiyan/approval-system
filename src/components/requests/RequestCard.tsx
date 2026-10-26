@@ -130,10 +130,14 @@ export const RequestCard: React.FC<RequestCardProps> = ({
       <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            {rType === 'discount' ? 'Discount' : 'Amount'}
+            {rType === 'discount' ? 'Discount' : rType === 'stock_transfer' ? 'Total MRP' : 'Amount'}
           </div>
           <div className="font-bold text-slate-900 text-base font-display">
-            {formatINR(request.amount)}
+            {rType === 'non_cash' ? (
+              <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Non Cash</span>
+            ) : (
+              formatINR(request.amount)
+            )}
           </div>
         </div>
 

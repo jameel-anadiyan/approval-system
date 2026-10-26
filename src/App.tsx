@@ -48,6 +48,7 @@ const DiscountReportPage = page(() => import('./pages/reports/DiscountReportPage
 const AdminRegionsPage = page(() => import('./pages/admin/AdminRegionsPage'), 'AdminRegionsPage');
 const HeadExhibitionWaitlistPage = page(() => import('./pages/head/HeadExhibitionWaitlistPage'), 'HeadExhibitionWaitlistPage');
 const ExhibitionCalendarPage = page(() => import('./pages/shared/ExhibitionCalendarPage'), 'ExhibitionCalendarPage');
+const AdminProductCategoriesPage = page(() => import('./pages/admin/AdminProductCategoriesPage'), 'AdminProductCategoriesPage');
 
 const PageSpinner: React.FC = () => (
   <div className="min-h-[50vh] flex items-center justify-center">
@@ -228,6 +229,7 @@ export const App: React.FC = () => {
                   <Route path="admin/regional-heads" element={<AdminRegionalHeadsPage />} />
                   <Route path="admin/departments" element={<AdminDepartmentsPage />} />
                   <Route path="admin/shops" element={<AdminShopsPage />} />
+                  <Route path="admin/product-categories" element={<AdminProductCategoriesPage />} />
                   <Route path="admin/staff" element={<AdminStaffPage />} />
                   <Route path="admin/heads" element={<AdminHeadsPage />} />
                   <Route path="admin/disbursement" element={<AdminDisbursementPage />} />

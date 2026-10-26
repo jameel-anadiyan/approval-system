@@ -14,10 +14,14 @@ import {
   AssetFields, assetFromDetails, toAssetDetails, QuotationsEditor, QuoteRow, quotesFromFiles, quoteSummary,
   validateQuotes, newQuoteFiles,
 } from './AssetQuotations';
+import {
+  StockTransferFields, stockTransferFromDetails, toStockTransferDetails, validateStockTransfer, stockTransferCalc,
+} from './StockTransferFields';
 import { WorkCategoryField, useCategoryOptions } from './WorkCategoryField';
 import { TargetHeadField } from './TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useAuth } from '../../context/AuthContext';
+import { useDirectory } from '../../lib/directory';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -43,9 +47,13 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     Number(request.details?.gst_rate ?? 18)
   );
   const [notes, setNotes] = useState(request.notes || '');
+  const dir = useDirectory();
   const [discount, setDiscount] = useState(() => discountFromDetails(request.details));
   const [exhibition, setExhibition] = useState(() => exhibitionFromDetails(request.details));
   const [asset, setAsset] = useState(() => assetFromDetails(request.details));
+  const [stockTransfer, setStockTransfer] = useState(() =>
+    stockTransferFromDetails(request.details, request.shop_id || '', request.shop_name || '')
+  );
   const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files, type === 'asset_below_20k' ? 1 : 2));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
   const [targetHeadId, setTargetHeadId] = useState<string>(request.owner_head_id ?? '');
@@ -70,9 +78,11 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
+  const stockCalc = stockTransferCalc(stockTransfer);
   const amount =
     type === 'non_cash' ? 0
       : type === 'discount' ? discountCalc(discount).value
+      : type === 'stock_transfer' ? stockCalc.totalMrp
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
       : isAsset ? quoteSummary(quotes).amount || request.amount
       : generalTotal;
@@ -90,6 +100,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const getDetails = (): RequestDetails | null => {
     if (type === 'non_cash') return null;
     if (type === 'discount') return toDiscountDetails(discount);
+    if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
     if (type === 'exhibition') {
       const exh = toExhibitionDetails(exhibition);
       if (exhibitionQuota?.mustUseWaitlist) {
@@ -115,8 +126,12 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     setError(null);
     if (!title.trim()) return setError('Please enter a title.');
     if (baseAmount <= 0 && type === 'general') return setError('Amount must be more than zero.');
-    const v = type === 'discount' ? validateDiscount(discount) : type === 'exhibition' ? validateExhibition(exhibition)
-      : isAsset ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined)) : null;
+    const v =
+      type === 'discount' ? validateDiscount(discount)
+      : type === 'exhibition' ? validateExhibition(exhibition)
+      : type === 'stock_transfer' ? validateStockTransfer(stockTransfer)
+      : isAsset ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined))
+      : null;
     if (v) return setError(v);
     if (user?.role !== 'head' && categoryOptions.required && !categoryOptions.categories.some((c) => c.id === categoryId)) {
       return setError('Please select the work category.');
@@ -213,6 +228,15 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         )}
         {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
         {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
+        {type === 'stock_transfer' && (
+          <StockTransferFields
+            value={stockTransfer}
+            onChange={setStockTransfer}
+            shops={dir.shops}
+            categories={dir.productCategories}
+            disabled={busy}
+          />
+        )}
         {isAsset && <AssetFields value={asset} onChange={setAsset} />}
         <div>
           <label htmlFor="edit-notes" className="text-xs font-bold text-slate-700 block mb-1">Purpose / Notes</label>

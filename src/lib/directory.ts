@@ -4,8 +4,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase, invokeEdgeFunction } from './supabase';
 import { useAuth } from '../context/AuthContext';
-import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS, MOCK_REQUESTS } from './mockData';
-import type { AppRole, AuditLogEntry, Department, DisbursementAccountType, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
+import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS, MOCK_REQUESTS, MOCK_PRODUCT_CATEGORIES } from './mockData';
+import type { AppRole, AuditLogEntry, Department, DisbursementAccountType, ProductCategory, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
 
 type Result = { success: boolean; error?: string };
 
@@ -53,13 +53,14 @@ export function useDirectory() {
   const [regions, setRegions] = useState<Region[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
   const [categories, setCategories] = useState<WorkCategory[]>([]);
+  const [productCategories, setProductCategories] = useState<ProductCategory[]>(MOCK_PRODUCT_CATEGORIES);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
       if (isBackendConnected && user) {
-        const [d, s, p, c, rRes] = await Promise.all([
+        const [d, s, p, c, rRes, pcRes] = await Promise.all([
           supabase.from('departments').select('*').order('name'),
           supabase.from('shops').select('*').order('name'),
           supabase
@@ -70,9 +71,17 @@ export function useDirectory() {
             .order('created_at', { ascending: false }),
           supabase.from('work_categories').select('*').order('name'),
           supabase.from('regions').select('*').order('name'),
+          supabase.from('product_categories').select('*').order('name'),
         ]);
         setDepartments((d.data as Department[]) ?? []);
         setShops((s.data as Shop[]) ?? []);
+        if (pcRes?.data && pcRes.data.length > 0) {
+          setProductCategories(pcRes.data as ProductCategory[]);
+        } else if (!pcRes?.error) {
+          setProductCategories((pcRes?.data as ProductCategory[]) ?? []);
+        } else {
+          setProductCategories(MOCK_PRODUCT_CATEGORIES);
+        }
         const loadedRegions = (rRes.data as Region[]) || [];
         const activeRegionList = loadedRegions.length > 0 ? loadedRegions : MOCK_REGIONS;
         setRegions(activeRegionList);
@@ -139,6 +148,7 @@ export function useDirectory() {
         setDepartments(MOCK_DEPARTMENTS);
         setRegions(MOCK_REGIONS);
         setUsers(MOCK_USERS);
+        setProductCategories(MOCK_PRODUCT_CATEGORIES);
       }
     } catch (err) {
       console.error('Error reloading directory data:', err);
@@ -371,6 +381,49 @@ export function useDirectory() {
     });
     if (error) return { success: false, error: error.message };
     await reload();
+    return { success: true };
+  };
+
+  /** Admin adds / renames / (de)activates a product category. */
+  const saveProductCategory = async (input: {
+    id?: string;
+    name: string;
+    is_active?: boolean;
+  }): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('save_product_category', {
+        p_id: input.id ?? null,
+        p_name: input.name,
+        p_is_active: input.is_active ?? true,
+      });
+      if (error) {
+        const cleanName = input.name.trim();
+        const active = input.is_active ?? true;
+        const res = input.id
+          ? await supabase.from('product_categories').update({ name: cleanName, is_active: active, updated_at: new Date().toISOString() }).eq('id', input.id)
+          : await supabase.from('product_categories').insert({ name: cleanName, is_active: active });
+        if (res.error) return { success: false, error: error.message || res.error.message };
+      }
+      await reload();
+      return { success: true };
+    }
+    setProductCategories((prev) =>
+      input.id
+        ? prev.map((c) => (c.id === input.id ? { ...c, ...input, is_active: input.is_active ?? c.is_active } : c))
+        : [{ id: `pcat-${Date.now()}`, name: input.name, is_active: input.is_active ?? true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]
+    );
+    return { success: true };
+  };
+
+  /** Admin toggles active state of a product category */
+  const setProductCategoryActive = async (id: string, active: boolean): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.from('product_categories').update({ is_active: active, updated_at: new Date().toISOString() }).eq('id', id);
+      if (error) return { success: false, error: error.message };
+      await reload();
+      return { success: true };
+    }
+    setProductCategories((prev) => prev.map((c) => (c.id === id ? { ...c, is_active: active } : c)));
     return { success: true };
   };
 
@@ -816,7 +869,8 @@ export function useDirectory() {
   };
 
   return {
-    departments, shops, regions, users, categories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
+    departments, shops, regions, users, categories, productCategories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
+    saveProductCategory, setProductCategoryActive,
     createUser, updateAccess, setUserRegion, setDisbursementType, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
   };

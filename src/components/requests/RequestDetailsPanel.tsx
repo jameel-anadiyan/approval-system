@@ -1,7 +1,7 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
 import { formatINR, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
-import { Percent, CalendarDays, Package } from 'lucide-react';
+import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -92,6 +92,119 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
           <Row label="Specification" value={d.specification} wide />
           <Row label="Purpose" value={d.purpose} wide />
         </div>
+      </div>
+    );
+  }
+
+  if (t === 'stock_transfer') {
+    const isBulk = d.transfer_mode === 'bulk';
+    const pieces = d.total_pieces ?? (d.items?.length || d.pieces_count || 0);
+    const grossWeight = d.total_gross_weight ?? 0;
+    const totalMrp = d.total_mrp ?? request.amount;
+
+    return (
+      <div className="bg-white rounded-2xl border border-blue-200 p-5 sm:p-6 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2">
+            <ArrowLeftRight className="w-5 h-5 text-blue-600" />
+            <h3 className="text-sm font-bold text-slate-900 font-display">
+              Stock Transfer Details
+            </h3>
+          </div>
+          <span className="text-[11px] font-extrabold uppercase px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 self-start sm:self-auto">
+            {isBulk ? 'Bulk Transfer (4+ Items)' : 'Itemized Transfer'}
+          </span>
+        </div>
+
+        {/* Origin to Destination Route */}
+        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">From Shop</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-800 truncate block">
+              {d.from_shop_name || request.shop_name || '—'}
+            </span>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+            <ArrowRight className="w-4 h-4" />
+          </div>
+          <div className="min-w-0 flex-1 text-right">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">To Shop</span>
+            <span className="text-xs sm:text-sm font-bold text-indigo-900 truncate block">
+              {d.to_shop_name || '—'}
+            </span>
+          </div>
+        </div>
+
+        {/* Metrics Grid */}
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center">
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-2.5 sm:p-3 min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">Total Pieces</span>
+            <span className="text-xs sm:text-base font-bold text-slate-800 break-words mt-0.5 block">
+              {pieces} {pieces === 1 ? 'pc' : 'pcs'}
+            </span>
+          </div>
+          <div className="rounded-xl bg-blue-50/50 border border-blue-200/60 p-2.5 sm:p-3 min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold block">Total Gross Wt</span>
+            <span className="text-xs sm:text-base font-bold text-blue-900 break-words mt-0.5 block">
+              {grossWeight} g
+            </span>
+          </div>
+          <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 sm:p-3 min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold block">Total MRP</span>
+            <span className="text-xs sm:text-base font-bold text-emerald-900 break-words mt-0.5 block">
+              {formatINR(totalMrp)}
+            </span>
+          </div>
+        </div>
+
+        {/* If Bulk: show category and details */}
+        {isBulk ? (
+          <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/80 text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500 font-medium">Product Category</span>
+              <span className="font-bold text-slate-800">{d.category_name || 'Mixed / General'}</span>
+            </div>
+            <div className="flex items-center justify-between border-t border-slate-200/60 pt-2">
+              <span className="text-slate-500 font-medium">Pieces Count</span>
+              <span className="font-bold text-slate-800">{pieces}</span>
+            </div>
+          </div>
+        ) : (
+          /* Itemized table */
+          d.items && d.items.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-slate-700 block">
+                Products List ({d.items.length})
+              </span>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                    <tr>
+                      <th className="py-2 px-3">#</th>
+                      <th className="py-2 px-3">Barcode</th>
+                      <th className="py-2 px-3">SKU</th>
+                      <th className="py-2 px-3">Category</th>
+                      <th className="py-2 px-3 text-right">Gross Wt (g)</th>
+                      <th className="py-2 px-3 text-right">MRP</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white font-medium text-slate-700">
+                    {d.items.map((it, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/70">
+                        <td className="py-2 px-3 text-slate-400 font-mono">{idx + 1}</td>
+                        <td className="py-2 px-3 font-mono font-bold text-slate-900">{it.barcode || '—'}</td>
+                        <td className="py-2 px-3 font-mono text-slate-600">{it.sku || '—'}</td>
+                        <td className="py-2 px-3">{it.category_name || '—'}</td>
+                        <td className="py-2 px-3 text-right font-mono">{it.gross_weight}</td>
+                        <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">{formatINR(it.mrp)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        )}
       </div>
     );
   }

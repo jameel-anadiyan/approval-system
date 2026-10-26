@@ -131,6 +131,7 @@ export const ApprovedRequestsPage: React.FC = () => {
               <option value="asset">Asset Buying</option>
               <option value="asset_below_20k">Asset Buying Below 20k</option>
               <option value="non_cash">Non Cash</option>
+              <option value="stock_transfer">Stock Transfer</option>
             </select>
 
             <select
@@ -196,6 +197,10 @@ export const ApprovedRequestsPage: React.FC = () => {
                       <div className="text-base font-extrabold font-display text-slate-900">
                         {isNonCash ? (
                           <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Non Cash</span>
+                        ) : req.request_type === 'stock_transfer' ? (
+                          <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200 font-display">
+                            MRP {formatINR(req.amount)}
+                          </span>
                         ) : (
                           formatINR(req.amount)
                         )}

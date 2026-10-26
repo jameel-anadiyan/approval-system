@@ -27,6 +27,7 @@ import {
   CalendarDays,
   MapPin,
   Globe,
+  Tag,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -86,7 +87,7 @@ export const Navigation: React.FC = () => {
   ).length;
 
   const disbAwaitingCount = requests.filter(
-    (r) => r.status === 'approved' && r.request_type !== 'discount'
+    (r) => r.status === 'approved' && r.request_type !== 'discount' && r.request_type !== 'non_cash' && r.request_type !== 'stock_transfer'
   ).length;
 
   let mainNavItems: NavItem[] = [];
@@ -186,6 +187,7 @@ export const Navigation: React.FC = () => {
         { label: 'Discount Report', path: '/reports/discounts', icon: Percent },
         { label: 'Departments', path: '/admin/departments', icon: Building2 },
         { label: 'Shops', path: '/admin/shops', icon: Store },
+        { label: 'Product Categories', path: '/admin/product-categories', icon: Tag },
         { label: 'Staff & Employees', path: '/admin/staff', icon: Users },
         { label: 'Dept Heads', path: '/admin/heads', icon: UserCheck },
         { label: 'Disbursement Users', path: '/admin/disbursement', icon: Wallet },

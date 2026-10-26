@@ -22,7 +22,7 @@ export type HeadConsultationStatus = 'pending' | 'agreed' | 'disagreed';
 
 export type FileKind = 'document' | 'voice_note';
 
-export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'asset_below_20k' | 'non_cash';
+export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'asset_below_20k' | 'non_cash' | 'stock_transfer';
 
 export type QuoteStatus = 'pending' | 'selected' | 'rejected';
 
@@ -30,6 +30,14 @@ export interface Shop {
   id: string;
   name: string;
   code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductCategory {
+  id: string;
+  name: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -105,8 +113,33 @@ export interface AssetDetails {
   purpose?: string | null;
 }
 
+export interface StockTransferItem {
+  barcode: string;
+  sku: string;
+  mrp: number;
+  gross_weight: number;
+  category_id?: string | null;
+  category_name?: string | null;
+}
+
+export interface StockTransferDetails {
+  transfer_mode: 'itemized' | 'bulk';
+  from_shop_id: string;
+  from_shop_name?: string | null;
+  to_shop_id: string;
+  to_shop_name?: string | null;
+  items?: StockTransferItem[];
+  pieces_count?: number;
+  category_id?: string | null;
+  category_name?: string | null;
+  total_pieces?: number;
+  total_gross_weight?: number;
+  total_mrp?: number;
+  notes?: string | null;
+}
+
 export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>
-  & Partial<AssetDetails>;
+  & Partial<AssetDetails> & Partial<StockTransferDetails>;
 
 export interface Department {
   id: string;

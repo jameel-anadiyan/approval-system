@@ -237,7 +237,7 @@ export const ACTION_LABELS: Record<string, string> = {
   disbursement_entry_cancelled: 'Disbursement: Payment entry cancelled',
 };
 
-export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash'];
+export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'];
 
 export const TYPE_LABELS: Record<RequestType, string> = {
   general: 'General',
@@ -246,6 +246,7 @@ export const TYPE_LABELS: Record<RequestType, string> = {
   asset: 'Asset Buying',
   asset_below_20k: 'Asset Buying Below 20k',
   non_cash: 'Non Cash',
+  stock_transfer: 'Stock Transfer',
 };
 
 export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
@@ -255,6 +256,7 @@ export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
   asset: 'Min. 2 bills or quotes. Head picks the best — up to ₹10,000 Head approves, above goes to Admin.',
   asset_below_20k: 'Asset purchases up to ₹20,000. 1 bill or quote mandatory.',
   non_cash: 'Operational or administrative request without cash involved (no disbursement needed).',
+  stock_transfer: 'Transfer stock between shops. Head approval (no disbursement step).',
 };
 
 export const TYPE_BADGES: Record<RequestType, string> = {
@@ -264,13 +266,14 @@ export const TYPE_BADGES: Record<RequestType, string> = {
   asset: 'bg-teal-50 text-teal-700 border-teal-200',
   asset_below_20k: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   non_cash: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  stock_transfer: 'bg-blue-50 text-blue-800 border-blue-200',
 };
 
 export const typeOf = (r: { request_type?: RequestType | null }): RequestType => r.request_type ?? 'general';
 
-/** Status label that knows Discount and Non-Cash approvals have no payment step. */
+/** Status label that knows Discount, Non-Cash, and Stock Transfer approvals have no payment step. */
 export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null }): string {
-  if (r.status === 'approved' && (typeOf(r) === 'discount' || typeOf(r) === 'non_cash')) return 'Approved';
+  if (r.status === 'approved' && (typeOf(r) === 'discount' || typeOf(r) === 'non_cash' || typeOf(r) === 'stock_transfer')) return 'Approved';
   if (r.status === 'pending_head_review' && (typeOf(r) === 'asset' || typeOf(r) === 'asset_below_20k')) return 'Head: select quotation';
   return STATUS_META[r.status]?.label ?? r.status;
 }

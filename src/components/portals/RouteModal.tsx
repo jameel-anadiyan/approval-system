@@ -31,8 +31,13 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   const limit = formatINRWhole(threshold);
   const isRequesterHead = request.requester_role === 'head';
 
-  // Request type decides the level: Discount = B (Head), Exhibition = A (Admin).
-  const typeLock: ApprovalRoute | null = type === 'exhibition' ? 'A' : type === 'discount' && !isRequesterHead ? 'B' : null;
+  // Request type decides the level: Discount & Stock Transfer = B (Head), Exhibition = A (Admin).
+  const typeLock: ApprovalRoute | null =
+    type === 'exhibition'
+      ? 'A'
+      : (type === 'discount' || type === 'stock_transfer') && !isRequesterHead
+        ? 'B'
+        : null;
   const isRouteBDisabled = isHighValue || isRequesterHead || typeLock === 'A';
   const isRouteADisabled = typeLock === 'B';
 
@@ -69,7 +74,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
         {/* Request Summary Banner */}
         <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
           <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-            <span>Amount:</span>
+            <span>{type === 'stock_transfer' ? 'Total MRP:' : 'Amount:'}</span>
             <span className="font-bold text-slate-900 text-sm font-display">
               {formatINR(request.amount)}
             </span>
@@ -102,7 +107,9 @@ export const RouteModal: React.FC<RouteModalProps> = ({
             <div>
               <span className="font-bold">{TYPE_LABELS[type]}:</span>{' '}
               {typeLock === 'B'
-                ? 'needs B-level approval — the Department Head approves directly. No payment step.'
+                ? type === 'stock_transfer'
+                  ? 'Internal stock movement — the Department / Regional Head approves directly. No disbursement or payment step.'
+                  : 'needs B-level approval — the Department Head approves directly. No payment step.'
                 : 'needs A-level approval — Head reviews, then Admin approves.'}
             </div>
           </div>

@@ -11,7 +11,7 @@ import {
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
 
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
-const REQUEST_TYPES = ["general", "discount", "exhibition", "asset", "asset_below_20k", "non_cash"] as const;
+const REQUEST_TYPES = ["general", "discount", "exhibition", "asset", "asset_below_20k", "non_cash", "stock_transfer"] as const;
 
 const DEPT_ROLES: Role[] = ["head", "clerk", "employee", "regional_head"];
 

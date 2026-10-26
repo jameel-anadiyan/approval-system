@@ -9,6 +9,7 @@ import {
   AppNotification,
   AppSettings,
   AuditLogEntry,
+  ProductCategory,
 } from '../types/database';
 
 export const MOCK_REGIONS: Region[] = [
@@ -141,7 +142,7 @@ export const MOCK_USERS: Profile[] = [
     department_id: 'dept-fin-001',
     region_id: 'reg-south',
     region: MOCK_REGIONS[0],
-    allowed_types: ['general', 'exhibition', 'discount', 'asset', 'asset_below_20k', 'non_cash'],
+    allowed_types: ['general', 'exhibition', 'discount', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'],
     is_active: true,
     must_change_password: false,
     created_at: '2026-09-03T10:00:00Z',
@@ -157,7 +158,7 @@ export const MOCK_USERS: Profile[] = [
     department_id: 'dept-fin-001',
     region_id: 'reg-south',
     region: MOCK_REGIONS[0],
-    allowed_types: ['general', 'exhibition', 'discount', 'asset', 'asset_below_20k', 'non_cash'],
+    allowed_types: ['general', 'exhibition', 'discount', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'],
     is_active: true,
     must_change_password: false,
     created_at: '2026-09-03T11:00:00Z',
@@ -172,7 +173,7 @@ export const MOCK_USERS: Profile[] = [
     role: 'employee',
     department_id: 'dept-fin-001',
     regional_head_id: 'user-rh-south-006',
-    allowed_types: ['general', 'exhibition', 'discount', 'asset', 'asset_below_20k', 'non_cash'],
+    allowed_types: ['general', 'exhibition', 'discount', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'],
     is_active: true,
     must_change_password: false,
     created_at: '2026-09-04T04:00:00Z',
@@ -927,4 +928,15 @@ export const MOCK_AUDIT_LOGS: AuditLogEntry[] = [
     details: { role: 'employee', username: 'emp_ravi' },
     created_at: '2026-09-04T04:00:00Z',
   },
+];
+
+export const MOCK_PRODUCT_CATEGORIES: ProductCategory[] = [
+  { id: 'pcat-1', name: 'Diamond Rings', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
+  { id: 'pcat-2', name: 'Gold Necklaces', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
+  { id: 'pcat-3', name: 'Earrings', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
+  { id: 'pcat-4', name: 'Bracelets & Bangles', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
+  { id: 'pcat-5', name: 'Pendants', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
+  { id: 'pcat-6', name: 'Chains', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
+  { id: 'pcat-7', name: 'Diamond Studs', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
+  { id: 'pcat-8', name: 'Coins & Bars', is_active: true, created_at: '2026-09-01T04:00:00Z', updated_at: '2026-09-01T04:00:00Z' },
 ];

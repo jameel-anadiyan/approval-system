@@ -34,9 +34,9 @@ export const AdminDashboardPage: React.FC = () => {
     (r) => r.status === 'pending_admin_approval' || (r.status === 'approving' && (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
   );
 
-  // Total Disbursed / Approved (discount values are not payouts)
+  // Total Disbursed / Approved (discount values and stock transfers are not payouts)
   const totalApproved = requests
-    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount')
+    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount' && typeOf(r) !== 'stock_transfer' && typeOf(r) !== 'non_cash')
     .reduce((sum, r) => sum + r.amount, 0);
 
   // High Value requests (threshold applies to General requests)

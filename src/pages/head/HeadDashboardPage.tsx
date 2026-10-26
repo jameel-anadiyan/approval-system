@@ -57,9 +57,9 @@ export const HeadDashboardPage: React.FC = () => {
     (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
   );
 
-  // Total department amount approved/paid (discount values are not payouts)
+  // Total department amount approved/paid (discount values and stock transfers are not payouts)
   const sanctionedTotal = deptRequests
-    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount')
+    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount' && typeOf(r) !== 'stock_transfer' && typeOf(r) !== 'non_cash')
     .reduce((sum, r) => sum + r.amount, 0);
 
   return (

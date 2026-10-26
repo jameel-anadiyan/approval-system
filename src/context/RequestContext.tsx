@@ -485,7 +485,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const { data: newId, error } = await supabase.rpc('create_typed_draft', {
           p_type: type,
           p_title: data.title,
-          p_amount: type === 'non_cash' ? 0 : (type === 'general' || type === 'asset' || type === 'asset_below_20k' ? data.amount : null),
+          p_amount: type === 'non_cash' ? 0 : (type === 'general' || type === 'asset' || type === 'asset_below_20k' || type === 'stock_transfer' ? data.amount : null),
           p_notes: data.notes || null,
           p_details: data.details ?? {},
           p_target_head_id: data.target_head_id || null,
@@ -847,8 +847,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const current = getRequestById(id);
     if (!current) return { success: false, error: 'Request not found' };
 
-    // High-value rule: Route B is not allowed above the configured threshold (Discount is always B)
-    if (route === 'B' && current.request_type !== 'discount' && current.amount > threshold) {
+    // High-value rule: Route B is not allowed above the configured threshold (Discount & Stock Transfer are always B)
+    if (route === 'B' && current.request_type !== 'discount' && current.request_type !== 'stock_transfer' && current.amount > threshold) {
       return {
         success: false,
         error: `Requests above ₹${threshold.toLocaleString('en-IN')} must take Route A (Admin approval required).`,

@@ -124,8 +124,10 @@ export const VerifyPage: React.FC = () => {
 
                 <dl className="space-y-3 text-xs">
                   <Row label="Request">{result.request_no} · {result.title}</Row>
-                  <Row label="Approved Amount">
-                    <span className="font-extrabold text-emerald-400 text-base font-display">{formatINR(result.amount)}</span>
+                  <Row label={result.request_type === 'stock_transfer' ? 'Total MRP' : 'Approved Amount'}>
+                    <span className="font-extrabold text-emerald-400 text-base font-display">
+                      {result.request_type === 'non_cash' ? 'Non-Cash (No Payment)' : formatINR(result.amount)}
+                    </span>
                   </Row>
                   <Row label="Department">
                     <span className="flex items-center gap-1">
@@ -146,7 +148,9 @@ export const VerifyPage: React.FC = () => {
                   <Row label="Payment status">
                     <span
                       className={`font-bold px-2 py-0.5 rounded-md ${
-                        result.status === 'cancelled'
+                        result.request_type === 'stock_transfer' || result.request_type === 'discount' || result.request_type === 'non_cash'
+                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                          : result.status === 'cancelled'
                           ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                           : result.status === 'paid' || (result.balance <= 0 && result.paid_amount > 0)
                           ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
@@ -155,7 +159,13 @@ export const VerifyPage: React.FC = () => {
                           : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                       }`}
                     >
-                      {result.status === 'cancelled'
+                      {result.request_type === 'stock_transfer'
+                        ? 'Internal stock transfer · No payment required'
+                        : result.request_type === 'discount'
+                        ? 'Discount approval · Completed'
+                        : result.request_type === 'non_cash'
+                        ? 'Non-cash · No payment required'
+                        : result.status === 'cancelled'
                         ? result.paid_amount > 0
                           ? `Cancelled after partial payment of ${formatINR(result.paid_amount)}`
                           : 'Cancelled · not payable'
@@ -166,7 +176,7 @@ export const VerifyPage: React.FC = () => {
                         : 'Not yet paid'}
                     </span>
                   </Row>
-                  {result.request_type !== 'discount' && (
+                  {result.request_type !== 'discount' && result.request_type !== 'stock_transfer' && result.request_type !== 'non_cash' && (
                     <div className="grid grid-cols-3 gap-2 pt-1">
                       <div className="rounded-xl bg-slate-900/70 border border-slate-700 p-2.5 text-center min-w-0">
                         <p className="text-[10px] text-slate-400 uppercase tracking-wide">Approved</p>

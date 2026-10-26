@@ -15,8 +15,12 @@ import {
   AssetFields, AssetForm, emptyAsset, toAssetDetails, QuotationsEditor, QuoteRow, initialQuotes,
   quoteSummary, validateQuotes, newQuoteFiles,
 } from '../../components/requests/AssetQuotations';
+import {
+  StockTransferFields, StockTransferForm, emptyStockTransfer,
+  toStockTransferDetails, validateStockTransfer, stockTransferCalc,
+} from '../../components/requests/StockTransferFields';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight } from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
@@ -29,6 +33,7 @@ const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   asset: <Package className="w-5 h-5" />,
   asset_below_20k: <Package className="w-5 h-5" />,
   non_cash: <FileCheck className="w-5 h-5" />,
+  stock_transfer: <ArrowLeftRight className="w-5 h-5" />,
 };
 
 export const NewRequestPage: React.FC = () => {
@@ -73,6 +78,9 @@ export const NewRequestPage: React.FC = () => {
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
   const [exhibition, setExhibition] = useState<ExhibitionForm>(emptyExhibition);
   const [asset, setAsset] = useState<AssetForm>(emptyAsset);
+  const [stockTransfer, setStockTransfer] = useState<StockTransferForm>(() =>
+    emptyStockTransfer(user?.shop_id || '', user?.shop?.name || '')
+  );
   const [quotes, setQuotes] = useState<QuoteRow[]>(() => initialQuotes(type === 'asset_below_20k' ? 1 : 2));
   const [files, setFiles] = useState<RequestFile[]>([]);
   const [voiceFile, setVoiceFile] = useState<RequestFile | null>(null);
@@ -101,9 +109,11 @@ export const NewRequestPage: React.FC = () => {
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
   const quoteInfo = quoteSummary(quotes);
+  const stockCalc = stockTransferCalc(stockTransfer);
   const amount =
     type === 'non_cash' ? 0
       : type === 'discount' ? discountCalc(discount).value
+      : type === 'stock_transfer' ? stockCalc.totalMrp
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
       : isAsset ? quoteInfo.amount
       : generalTotal;
@@ -137,11 +147,15 @@ export const NewRequestPage: React.FC = () => {
   const effectiveTitle = () =>
     title.trim()
     || (type === 'exhibition' && exhibition.event_name.trim() ? `Exhibition: ${exhibition.event_name.trim()}` : '')
-    || (isAsset && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '');
+    || (isAsset && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '')
+    || (type === 'stock_transfer' && stockTransfer.from_shop_name && stockTransfer.to_shop_name
+        ? `Stock Transfer: ${stockTransfer.from_shop_name} → ${stockTransfer.to_shop_name} (${stockCalc.pieces} pcs)`
+        : '');
 
   const details = (): RequestDetails | null => {
     if (type === 'non_cash') return null;
     if (type === 'discount') return toDiscountDetails(discount);
+    if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
     if (type === 'exhibition') {
       const exh = toExhibitionDetails(exhibition);
       if (exhibitionQuota?.mustUseWaitlist) {
@@ -166,6 +180,10 @@ export const NewRequestPage: React.FC = () => {
     if (isAsset) {
       if (!asset.asset_name.trim()) return 'Enter the asset you want to buy.';
       return validateQuotes(quotes, forDraft, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined);
+    }
+    if (type === 'stock_transfer') {
+      if (forDraft) return null;
+      return validateStockTransfer(stockTransfer);
     }
     if (!effectiveTitle()) return type === 'exhibition' ? 'Enter the event name.' : 'Please enter a request title.';
     if (type === 'general') {
@@ -312,7 +330,7 @@ export const NewRequestPage: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
             <h2 className="text-sm font-bold text-slate-800 font-display">
-              {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : isAsset ? (type === 'asset_below_20k' ? 'Asset Purchase Details (< ₹20k)' : 'Asset Purchase Details') : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
+              {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'stock_transfer' ? 'Stock Transfer Details' : isAsset ? (type === 'asset_below_20k' ? 'Asset Purchase Details (< ₹20k)' : 'Asset Purchase Details') : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
             </h2>
             {type === 'exhibition' && (
               <a
@@ -350,7 +368,7 @@ export const NewRequestPage: React.FC = () => {
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && !isAsset && <span className="text-rose-500">*</span>}
+              {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && type !== 'stock_transfer' && !isAsset && <span className="text-rose-500">*</span>}
             </label>
             <input
               id="request-title"
@@ -360,6 +378,7 @@ export const NewRequestPage: React.FC = () => {
               placeholder={
                 type === 'discount' ? 'e.g. Discount for bridal set – Mrs. Fathima'
                   : type === 'exhibition' ? 'Optional – event name is used if empty'
+                  : type === 'stock_transfer' ? 'Optional – origin and destination shops are used if empty'
                   : isAsset ? 'Optional – asset name is used if empty'
                   : 'e.g. Vendor invoice for showroom lighting'
               }
@@ -374,6 +393,16 @@ export const NewRequestPage: React.FC = () => {
                 <strong>Non-Cash Request:</strong> This request is for operational or internal approval with no cash or disbursement involved.
               </div>
             </div>
+          )}
+
+          {type === 'stock_transfer' && (
+            <StockTransferFields
+              value={stockTransfer}
+              onChange={setStockTransfer}
+              shops={dir.shops}
+              categories={dir.productCategories}
+              disabled={isSubmitting || isSavingDraft}
+            />
           )}
 
           {type === 'general' && (

@@ -49,6 +49,7 @@ function appOrigin(v: unknown): string | null {
 const TYPE_LABEL: Record<string, string> = {
   general: "General", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
   asset: "Asset buying", asset_below_20k: "Asset buying below 20k", non_cash: "Non-cash request",
+  stock_transfer: "Stock transfer",
 };
 const PROVIDES: Record<string, string> = {
   stall_space: "Stall space", table_chairs: "Table & chairs", electricity_lights: "Electricity & lights",
@@ -145,6 +146,41 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
       ],
     };
   }
+  if (r.request_type === "stock_transfer") {
+    const isBulk = d.transfer_mode === "bulk";
+    // deno-lint-ignore no-explicit-any
+    const items = Array.isArray(d.items) ? d.items : [];
+    // deno-lint-ignore no-explicit-any
+    const itemRows: [string, string][] = items.map((item: any, i: number) => [
+      `Item ${i + 1} · ${item.category_name ?? "Product"}`,
+      `Barcode: ${item.barcode || "—"} | SKU: ${item.sku || "—"} | Wt: ${item.gross_weight_grams ? `${item.gross_weight_grams} g` : "—"} | MRP: ${money(item.mrp)}`,
+    ]);
+
+    return {
+      subtitle: "STOCK TRANSFER APPROVAL FORM",
+      sections: [
+        { title: "Transfer Details", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Origin Shop (From)", txt(d.from_shop_name ?? r.shop_name)],
+          ["Destination Shop (To)", txt(d.to_shop_name)], ["Transfer Mode", isBulk ? "Bulk Transfer (4+ Items)" : "Itemized Transfer"],
+          ["Total Pieces", txt(d.total_pieces ?? items.length)],
+          ["Total Gross Weight", d.total_gross_weight_grams ? `${d.total_gross_weight_grams} g` : "—"],
+          ["Total MRP Value", money(d.total_mrp ?? r.amount)],
+        ] },
+        ...(isBulk ? [
+          { title: "Bulk Transfer Summary", rows: [
+            ["Product Category", txt(d.bulk_category_name)],
+            ["Pieces", txt(d.total_pieces)],
+            ["Gross Weight", d.total_gross_weight_grams ? `${d.total_gross_weight_grams} g` : "—"],
+            ["Total MRP", money(d.total_mrp ?? r.amount)],
+          ] }
+        ] : items.length ? [
+          { title: "Itemized Products", rows: itemRows }
+        ] : []),
+        ...(r.notes ? [{ title: "Remarks / Purpose", text: r.notes as string }] : []),
+      ],
+    };
+  }
   return null;
 }
 
@@ -178,7 +214,11 @@ Deno.serve(handle(async (req) => {
       approverLine,
       dateTime: ist(b.decided_at),
       requestNo: r.request_no,
-      amount: inr(Number(r.amount)),
+      amount: r.request_type === "stock_transfer"
+        ? `Stock Transfer (MRP: ${inr(Number(r.amount))})`
+        : r.request_type === "non_cash"
+          ? "Non-Cash (No payment)"
+          : inr(Number(r.amount)),
       reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at
         ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
       verifyUrl: origin ? `${origin}/verify/${r.verify_token}` : null,
@@ -218,7 +258,19 @@ Deno.serve(handle(async (req) => {
     if (form) {
       const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections);
       const out = await stampDocument(formPdf, ctx);
-      await store(out.bytes, ++n, r.request_type === "discount" ? "discount_form" : (r.request_type === "asset" || r.request_type === "asset_below_20k") ? "asset_purchase_form" : "exhibition_form", null, out.pageCount);
+      await store(
+        out.bytes,
+        ++n,
+        r.request_type === "discount"
+          ? "discount_form"
+          : (r.request_type === "asset" || r.request_type === "asset_below_20k")
+            ? "asset_purchase_form"
+            : r.request_type === "stock_transfer"
+              ? "stock_transfer_form"
+              : "exhibition_form",
+        null,
+        out.pageCount
+      );
     }
 
     // One file at a time to keep memory low.
@@ -250,7 +302,7 @@ Deno.serve(handle(async (req) => {
         ["Approval No", b.approval_no],
         ["Request No", r.request_no],
         ["Type", TYPE_LABEL[r.request_type] ?? "General"],
-        ["Amount", r.request_type === "non_cash" ? "Non-Cash (No payment)" : inr(Number(r.amount))],
+        ["Amount", r.request_type === "stock_transfer" ? `Total MRP: ${inr(Number(r.amount))} (Stock Transfer)` : r.request_type === "non_cash" ? "Non-Cash (No payment)" : inr(Number(r.amount))],
         ["Department", r.department ?? "—"],
         ["Shop", r.shop_name ?? "—"],
         ["Requested by", r.requester_name],

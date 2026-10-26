@@ -74,7 +74,11 @@ Deno.serve(handle(async (req) => {
       approverLine,
       dateTime: ist(b.decided_at),
       requestNo: r.request_no,
-      amount: inr(Number(r.amount)),
+      amount: r.request_type === "stock_transfer"
+        ? `Stock Transfer (MRP: ${inr(Number(r.amount))})`
+        : r.request_type === "non_cash"
+          ? "Non-Cash (No payment)"
+          : inr(Number(r.amount)),
       reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at
         ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
       verifyUrl: origin ? `${origin}/verify/${r.verify_token}` : null,
@@ -119,7 +123,7 @@ Deno.serve(handle(async (req) => {
       rows: [
         ["Approval No", b.approval_no],
         ["Request No", r.request_no],
-        ["Amount", inr(Number(r.amount))],
+        ["Amount", r.request_type === "stock_transfer" ? `Total MRP: ${inr(Number(r.amount))} (Stock Transfer)` : r.request_type === "non_cash" ? "Non-Cash (No payment)" : inr(Number(r.amount))],
         ["Department", r.department ?? "—"],
         ["Requested by", r.requester_name],
         ["Submitted", r.submitted_at ? ist(r.submitted_at) : "—"],

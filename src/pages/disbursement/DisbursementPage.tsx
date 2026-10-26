@@ -56,8 +56,8 @@ export const DisbursementPage: React.FC = () => {
     if (!res.success) setNotice(res.error || 'Download failed');
   };
 
-  // Discount approvals have no payment step, so they never reach Disbursement.
-  const payable = requests.filter((r) => typeOf(r) !== 'discount');
+  // Discount approvals and Stock Transfers have no payment step, so they never reach Disbursement.
+  const payable = requests.filter((r) => typeOf(r) !== 'discount' && typeOf(r) !== 'stock_transfer');
 
   // Awaiting payment: status === 'approved'
   const awaitingQueue = payable.filter((r) => r.status === 'approved');
