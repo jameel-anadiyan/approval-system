@@ -143,7 +143,11 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
       isOpen={isOpen}
       onClose={resetAndClose}
       title={step === 'success' ? 'Approval Completed' : 'Approve & Digital Sign'}
-      description={`Request ${request.request_no || ''} for ${formatINR(request.amount)}`}
+      description={
+        rType === 'stock_transfer'
+          ? `Stock Transfer ${request.request_no || ''} · Total MRP: ${formatINR(request.amount)}`
+          : `Request ${request.request_no || ''} for ${formatINR(request.amount)}`
+      }
       maxWidth="md"
     >
       {step === 'preview' && (
@@ -179,10 +183,15 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500">Pages to Stamp</span>
               <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                {hasForm ? 'Request form + ' : ''}
-                {documentPagesCount > 0 ? `${documentPagesCount} page${documentPagesCount > 1 ? 's' : ''} + ` : ''}Cover Sheet
+                {hasForm ? (rType === 'stock_transfer' ? 'Transfer form + ' : 'Request form + ') : ''}
+                {documentPagesCount > 0 ? `${documentPagesCount} doc page${documentPagesCount > 1 ? 's' : ''} + ` : ''}Cover Sheet
               </span>
             </div>
+            {rType === 'stock_transfer' && documentPagesCount === 0 && (
+              <div className="text-[11px] text-blue-700 bg-blue-50/70 p-2 rounded-lg border border-blue-200">
+                No external documents attached. The generated Stock Transfer form will be signed and sealed with official stamp and QR verification.
+              </div>
+            )}
           </div>
 
           {/* Credentials Preview: Seal and Signature */}

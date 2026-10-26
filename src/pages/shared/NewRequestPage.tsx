@@ -495,7 +495,13 @@ export const NewRequestPage: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <h2 className="text-sm font-bold text-slate-800 font-display">
-              {type === 'exhibition' ? "Organiser's proposal / quotation" : type === 'discount' ? 'Discount PDF (bill / estimate)' : 'Document Attachments'}{' '}
+              {type === 'exhibition'
+                ? "Organiser's proposal / quotation"
+                : type === 'discount'
+                ? 'Discount PDF (bill / estimate)'
+                : type === 'stock_transfer'
+                ? 'Document Attachments (e.g. delivery challan / gate pass)'
+                : 'Document Attachments'}{' '}
               {docsRequired ? <span className="text-rose-500">*</span> : <span className="text-slate-400 font-normal text-xs">(optional)</span>}
             </h2>
             <span className="text-[11px] text-slate-400">{type === 'discount' ? 'PDF required' : 'PDF, JPG, PNG'}</span>
@@ -511,6 +517,11 @@ export const NewRequestPage: React.FC = () => {
           {type === 'exhibition' && (
             <p className="text-[11px] text-slate-500">
               The filled form is turned into a signed PDF automatically when approved.
+            </p>
+          )}
+          {type === 'stock_transfer' && (
+            <p className="text-[11px] text-slate-500">
+              Documents are not mandatory. The filled stock transfer request form itself will be automatically generated, signed, and sealed. Any attached documents will be sealed together.
             </p>
           )}
         </div>
