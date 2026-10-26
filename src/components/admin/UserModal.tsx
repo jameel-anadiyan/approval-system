@@ -54,6 +54,16 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [designation, setDesignation] = useState('');
   const [role, setRole] = useState<AppRole>(allowedRoles[0] || 'employee');
   const [disbursementType, setDisbursementType] = useState<DisbursementAccountType>('entry_only');
+
+  React.useEffect(() => {
+    if (isOpen) {
+      if (allowedRoles.length > 0 && (!allowedRoles.includes(role) || allowedRoles.length === 1)) {
+        setRole(allowedRoles[0]);
+      }
+      setDisbursementType('entry_only');
+    }
+  }, [isOpen, allowedRoles]);
+
   const [departmentId, setDepartmentId] = useState<string>(
     user?.department_id || departments[0]?.id || ''
   );
@@ -168,12 +178,18 @@ export const UserModal: React.FC<UserModalProps> = ({
     }
   };
 
+  const isDisbursementRole = role === 'disbursement' || (allowedRoles.length === 1 && allowedRoles[0] === 'disbursement');
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Create Staff Account"
-      description="Create a new login credential. The user will be required to change their password on first sign in."
+      title={isDisbursementRole ? "Create Disbursement Account" : "Create Staff Account"}
+      description={
+        isDisbursementRole
+          ? "Create a login credential for Disbursement staff with either Entry Only or Payment Only permissions."
+          : "Create a new login credential. The user will be required to change their password on first sign in."
+      }
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
