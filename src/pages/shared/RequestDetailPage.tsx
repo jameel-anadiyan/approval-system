@@ -18,6 +18,7 @@ import { RegionalForwardModal } from '../../components/portals/RegionalForwardMo
 import { isMyRoutingRequest } from '../../lib/workflow';
 import { supabase } from '../../lib/supabase';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
+import { AddDisbursementEntryModal } from '../../components/portals/AddDisbursementEntryModal';
 import { ConsultHeadsModal } from '../../components/portals/ConsultHeadsModal';
 import { RespondConsultationModal } from '../../components/portals/RespondConsultationModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
@@ -34,7 +35,7 @@ import {
   ROLE_LABELS,
   typeOf,
 } from '../../lib/formatters';
-import { paymentSummary } from '../../types/database';
+import { DisbursementEntry, paymentSummary } from '../../types/database';
 import {
   ArrowLeft,
   Send,
@@ -54,6 +55,7 @@ import {
   Store,
   Users,
   AlertCircle,
+  PlusCircle,
   ThumbsUp,
   ThumbsDown,
   Clock,
@@ -83,14 +85,16 @@ export const RequestDetailPage: React.FC = () => {
     rejectRequest,
     approveRequest,
     markAsPaid,
+    addDisbursementEntry,
     cancelApprovedRequest,
     selectQuote,
     decideExhibitionWaitlist,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'regional_forward' | 'pay' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'regional_forward' | 'pay' | 'add_disb_entry' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | null
   >(null);
+  const [selectedEntry, setSelectedEntry] = useState<DisbursementEntry | null>(null);
   const [consultInitialStatus, setConsultInitialStatus] = useState<'agreed' | 'disagreed' | null>(null);
   const [copiedNo, setCopiedNo] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -194,6 +198,34 @@ export const RequestDetailPage: React.FC = () => {
     !isFinalized;
 
   const rType = typeOf(request);
+  const isDisbursement = role === 'disbursement';
+  const isEntryOnly = isDisbursement && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
+  const isPaymentOnly = isDisbursement && user?.disbursement_type === 'payment_only';
+  const canAddDisbursementEntry = isEntryOnly || role === 'admin';
+  const canDisbursePayment = isPaymentOnly || role === 'admin';
+
+  const entries: DisbursementEntry[] = useMemo(() => {
+    return (request.disbursement_entries || []).filter((e) => e.status !== 'cancelled');
+  }, [request.disbursement_entries]);
+
+  const pendingEntries = useMemo(() => {
+    return entries.filter((e) => e.status === 'pending');
+  }, [entries]);
+
+  const totalEntered = useMemo(() => {
+    return entries.reduce((s, e) => s + Number(e.amount || 0), 0);
+  }, [entries]);
+
+  const remainingUnentered = useMemo(() => {
+    return Math.max(0, Math.round(((request.amount || 0) - totalEntered) * 100) / 100);
+  }, [request.amount, totalEntered]);
+
+  const nextEntryNo = useMemo(() => {
+    return entries.reduce((m, e) => Math.max(m, e.entry_no || 0), 0) + 1;
+  }, [entries]);
+
+  const firstPendingEntry = pendingEntries[0] || null;
+
   const isHighValue = rType === 'general' && request.amount > threshold;
   const isAsset = rType === 'asset' || rType === 'asset_below_20k';
   // Asset buying: the owning Head (or Admin when it reached Admin directly) selects the best quotation.
@@ -826,50 +858,123 @@ export const RequestDetailPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Disbursement Entries List if any */}
-              {(request.disbursement_entries || []).length > 0 && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <span className="font-bold text-slate-700 text-xs block mb-1">
-                    Disbursement Entries ({(request.disbursement_entries || []).length})
-                  </span>
-                  {(request.disbursement_entries || []).map((ent) => (
-                    <div
-                      key={ent.id}
-                      className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2 text-xs"
-                    >
-                      <div className="flex items-center gap-2 flex-wrap min-w-0">
-                        <span className="font-mono font-bold text-sky-900 bg-sky-100 px-2 py-0.5 rounded-md text-[11px]">
-                          Entry #{ent.entry_no}
-                        </span>
-                        <span className="font-bold text-slate-900 font-mono">
-                          {formatINR(ent.amount)}
-                        </span>
-                        <span
-                          className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
-                            ent.tds_cut
-                              ? 'bg-amber-100 text-amber-900 border-amber-300'
-                              : 'bg-slate-200 text-slate-700 border-slate-300'
-                          }`}
-                        >
-                          {ent.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
-                        </span>
-                        {ent.notes && (
-                          <span className="text-[11px] text-slate-500 italic truncate max-w-xs">
-                            · {ent.notes}
-                          </span>
-                        )}
-                      </div>
-                      <span
-                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border shrink-0 ${
-                          ent.status === 'paid'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}
-                      >
-                        {ent.status === 'paid' ? 'Paid' : 'Pending'}
+              {/* Disbursement Entries List if applicable */}
+              {(request.status === 'approved' || request.status === 'paid' || entries.length > 0) && (
+                <div className="space-y-2 pt-3 border-t border-slate-100">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <FileCheck className="w-4 h-4 text-sky-600" />
+                      <span className="font-bold text-slate-800 text-xs">
+                        Disbursement Entries ({entries.length})
                       </span>
+                      {entries.length > 0 && (
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          · {formatINR(totalEntered)} entered of {formatINR(request.amount)}
+                        </span>
+                      )}
                     </div>
-                  ))}
+
+                    {canAddDisbursementEntry && request.status === 'approved' && remainingUnentered > 0 && !isPendingDisbursementClarification && (
+                      <button
+                        type="button"
+                        onClick={() => setModalState('add_disb_entry')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-sky-300 bg-sky-50 text-sky-800 text-xs font-bold hover:bg-sky-100 transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5 text-sky-600" />
+                        <span>+ Add Entry #{nextEntryNo}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {entries.length === 0 ? (
+                    <div className="text-xs text-slate-600 bg-slate-50 border border-dashed border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span>
+                          {canAddDisbursementEntry
+                            ? 'No payment entries created yet. Click "+ Add Entry #1" to record the first entry with TDS indication.'
+                            : 'Awaiting payment entries from an Entry Only account before disbursement can proceed.'}
+                        </span>
+                      </div>
+                      {canAddDisbursementEntry && request.status === 'approved' && !isPendingDisbursementClarification && (
+                        <button
+                          type="button"
+                          onClick={() => setModalState('add_disb_entry')}
+                          className="shrink-0 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-sky-600 text-white font-bold text-xs hover:bg-sky-700 transition-colors cursor-pointer"
+                        >
+                          + Add Entry #1
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {entries.map((ent) => {
+                        const isEntryPending = ent.status === 'pending';
+                        return (
+                          <div
+                            key={ent.id}
+                            className={`p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-colors ${
+                              isEntryPending ? 'bg-sky-50/40 border-sky-200' : 'bg-slate-50/70 border-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                              <span className="font-mono font-extrabold text-sky-900 bg-sky-100/90 px-2 py-0.5 rounded-md text-[11px]">
+                                Entry #{ent.entry_no}
+                              </span>
+                              <span className="font-extrabold text-slate-900 font-mono text-xs">
+                                {formatINR(ent.amount)}
+                              </span>
+                              <span
+                                className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
+                                  ent.tds_cut
+                                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                    : 'bg-slate-200 text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                {ent.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
+                              </span>
+                              {ent.notes && (
+                                <span className="text-[11px] text-slate-500 italic truncate max-w-xs">
+                                  · {ent.notes}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                              {isEntryPending ? (
+                                canDisbursePayment && !isPendingDisbursementClarification && request.status === 'approved' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedEntry(ent);
+                                      setModalState('pay');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95"
+                                  >
+                                    <Banknote className="w-3.5 h-3.5" />
+                                    <span>Pay Entry #{ent.entry_no} ({formatINR(ent.amount)})</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                    {isPendingDisbursementClarification
+                                      ? 'On Hold'
+                                      : isEntryOnly
+                                      ? 'Awaiting Payment'
+                                      : 'Pending'}
+                                  </span>
+                                )
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Paid</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1345,26 +1450,84 @@ export const RequestDetailPage: React.FC = () => {
                   <span>Ask Head for Clarification</span>
                 </button>
 
-                <button
-                  type="button"
-                  disabled={isPendingDisbursementClarification}
-                  onClick={() => setModalState('pay')}
-                  title={isPendingDisbursementClarification ? 'Payment is on hold pending Head clarification' : undefined}
-                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
-                    isPendingDisbursementClarification
-                      ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
-                      : 'bg-teal-600 hover:bg-teal-700 text-white cursor-pointer shadow-teal-200'
-                  }`}
-                >
-                  <Banknote className="w-4 h-4" />
-                  <span>
-                    {isPendingDisbursementClarification
-                      ? 'Payment on Hold'
-                      : pay.paid > 0
-                      ? `Pay Balance ${formatINR(pay.balance)}`
-                      : 'Record Payment'}
-                  </span>
-                </button>
+                {isEntryOnly ? (
+                  remainingUnentered > 0 ? (
+                    <button
+                      type="button"
+                      disabled={isPendingDisbursementClarification}
+                      onClick={() => setModalState('add_disb_entry')}
+                      title={isPendingDisbursementClarification ? 'Entry creation is on hold pending Head clarification' : undefined}
+                      className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+                        isPendingDisbursementClarification
+                          ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                          : 'bg-sky-600 hover:bg-sky-700 text-white cursor-pointer shadow-sky-200 active:scale-95'
+                      }`}
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      <span>+ Add Entry #{nextEntryNo}</span>
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold text-sky-800 bg-sky-50 border border-sky-200">
+                      <Check className="w-4 h-4 text-sky-600" />
+                      <span>All Entries Added · Ready for Payment</span>
+                    </span>
+                  )
+                ) : isPaymentOnly ? (
+                  firstPendingEntry ? (
+                    <button
+                      type="button"
+                      disabled={isPendingDisbursementClarification}
+                      onClick={() => {
+                        setSelectedEntry(firstPendingEntry);
+                        setModalState('pay');
+                      }}
+                      title={isPendingDisbursementClarification ? 'Payment is on hold pending Head clarification' : undefined}
+                      className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+                        isPendingDisbursementClarification
+                          ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                          : 'bg-teal-600 hover:bg-teal-700 text-white cursor-pointer shadow-teal-200 active:scale-95'
+                      }`}
+                    >
+                      <Banknote className="w-4 h-4" />
+                      <span>
+                        {isPendingDisbursementClarification
+                          ? 'Payment on Hold'
+                          : `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(firstPendingEntry.amount)})`}
+                      </span>
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-500 bg-slate-100 border border-slate-200">
+                      <Clock className="w-4 h-4 text-slate-400" />
+                      <span>Awaiting Entry from Entry-Only Account</span>
+                    </span>
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isPendingDisbursementClarification}
+                    onClick={() => {
+                      if (firstPendingEntry) setSelectedEntry(firstPendingEntry);
+                      setModalState('pay');
+                    }}
+                    title={isPendingDisbursementClarification ? 'Payment is on hold pending Head clarification' : undefined}
+                    className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all ${
+                      isPendingDisbursementClarification
+                        ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                        : 'bg-teal-600 hover:bg-teal-700 text-white cursor-pointer shadow-teal-200'
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4" />
+                    <span>
+                      {isPendingDisbursementClarification
+                        ? 'Payment on Hold'
+                        : firstPendingEntry
+                        ? `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(firstPendingEntry.amount)})`
+                        : pay.paid > 0
+                        ? `Pay Balance ${formatINR(pay.balance)}`
+                        : 'Record Payment'}
+                    </span>
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -1489,17 +1652,46 @@ export const RequestDetailPage: React.FC = () => {
         />
       )}
 
-      {modalState === 'pay' && (
-        <MarkPaidModal
+      {modalState === 'add_disb_entry' && request && (
+        <AddDisbursementEntryModal
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onMarkPaid={async (dt) => {
-            const res = await markAsPaid(request.id, dt);
-            if (!res.success) throw new Error(res.error || 'Action failed');
+          onAddEntry={async (amount, tdsCut, notes) => {
+            const res = await addDisbursementEntry(request.id, amount, tdsCut, notes);
+            if (!res.success) throw new Error(res.error || 'Failed to add entry');
             setBanner({
               ok: true,
-              text: res.fully_paid ? 'Paid in full.' : 'Partial payment recorded. Balance is still pending.',
+              text: `Disbursement entry created successfully (${formatINR(amount)} · ${tdsCut ? 'TDS Cut' : 'TDS Not Cut'}). Ready for payment.`,
+            });
+          }}
+        />
+      )}
+
+      {modalState === 'pay' && request && (
+        <MarkPaidModal
+          isOpen={true}
+          onClose={() => {
+            setModalState(null);
+            setSelectedEntry(null);
+          }}
+          request={request}
+          entry={selectedEntry}
+          onMarkPaid={async (dt) => {
+            const res = await markAsPaid(request.id, {
+              ...dt,
+              entry_id: selectedEntry ? selectedEntry.id : dt.entry_id,
+            });
+            if (!res.success) throw new Error(res.error || 'Action failed');
+            const paidEnt = selectedEntry;
+            setSelectedEntry(null);
+            setBanner({
+              ok: true,
+              text: paidEnt
+                ? `Entry #${paidEnt.entry_no} paid successfully (${formatINR(dt.amount || paidEnt.amount)}).`
+                : res.fully_paid
+                ? 'Paid in full.'
+                : 'Partial payment recorded. Balance is still pending.',
             });
           }}
         />

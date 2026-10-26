@@ -208,6 +208,9 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
       disbursement_clarifications: [...(r.disbursement_clarifications || [])].sort(
         (a, b) => b.created_at.localeCompare(a.created_at)
       ),
+      disbursement_entries: (r.disbursement_entries || [])
+        .map((e) => ({ ...e, amount: Number(e.amount) }))
+        .sort((a, b) => (a.entry_no ?? 0) - (b.entry_no ?? 0)),
       files: [...(r.files || [])].sort(
         (a, b) =>
           ((a as RequestFile & { sort_order?: number }).sort_order ?? 0) -
@@ -302,19 +305,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             .from('disbursement_entries')
             .select('*')
             .order('entry_no', { ascending: true });
+          const entryMap = new Map<string, any[]>();
           if (!entryErr && entries && entries.length > 0) {
-            const entryMap = new Map<string, any[]>();
             entries.forEach((e: any) => {
               const list = entryMap.get(e.request_id) || [];
-              list.push(e);
+              list.push({ ...e, amount: Number(e.amount) });
               entryMap.set(e.request_id, list);
             });
-            data.forEach((r: any) => {
-              r.disbursement_entries = entryMap.get(r.id) || [];
-            });
           }
+          data.forEach((r: any) => {
+            r.disbursement_entries = entryMap.get(r.id) || [];
+          });
         } catch {
-          // Gracefully ignored
+          data.forEach((r: any) => {
+            if (!r.disbursement_entries) r.disbursement_entries = [];
+          });
         }
       }
 
@@ -1159,6 +1164,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   ): Promise<{ success: boolean; error?: string; fully_paid?: boolean }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
+    const isDisbursement = user.role === 'disbursement';
+    const isEntryOnly = isDisbursement && (user.disbursement_type === 'entry_only' || !user.disbursement_type);
+    if (isEntryOnly) {
+      return {
+        success: false,
+        error: 'Permission denied: Entry-Only disbursement accounts cannot record payments. Only Payment-Only or Admin accounts can disburse payments.',
+      };
+    }
+
     if (isBackendConnected) {
       try {
         if (details.entry_id) {
@@ -1173,6 +1187,17 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           if (error) throw error;
           await loadRequests();
           return { success: true, fully_paid: !!(data as { fully_paid?: boolean } | null)?.fully_paid };
+        }
+
+        if (isDisbursement && user.disbursement_type === 'payment_only') {
+          const cur = id ? getRequestById(id) : null;
+          const pending = (cur?.disbursement_entries || []).filter((e) => e.status === 'pending');
+          if (pending.length > 0) {
+            return {
+              success: false,
+              error: 'Payment-Only accounts must settle specific payment entries. Please select an entry to pay.',
+            };
+          }
         }
 
         const { data, error } = await supabase.rpc('add_payment', {
@@ -1195,6 +1220,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const current = id ? getRequestById(id) : requests.find((r) => (r.disbursement_entries || []).some((e) => e.id === details.entry_id));
     if (!current) return { success: false, error: 'Request not found' };
     if (current.status === 'paid') return { success: false, error: 'This request is already fully paid.' };
+
+    if (isDisbursement && user.disbursement_type === 'payment_only') {
+      const pending = (current.disbursement_entries || []).filter((e) => e.status === 'pending');
+      if (pending.length > 0 && !details.entry_id) {
+        return {
+          success: false,
+          error: 'Payment-Only accounts must settle specific payment entries. Please select an entry to pay.',
+        };
+      }
+    }
 
     const entry = details.entry_id ? (current.disbursement_entries || []).find((e) => e.id === details.entry_id) : null;
     const maxPayable = entry ? entry.amount : Math.max(0, current.amount - Number(current.paid_amount ?? 0));
