@@ -1211,7 +1211,12 @@ export const RequestDetailPage: React.FC = () => {
               </button>
             )}
 
-            {isOwner && (request.status === 'submitted' || request.status === 'pending_regional_review' || request.status === 'returned') && (
+            {isOwner && (
+              request.status === 'submitted' ||
+              request.status === 'pending_regional_review' ||
+              request.status === 'returned' ||
+              (role === 'head' && request.status === 'pending_admin_approval')
+            ) && (
               <button
                 type="button"
                 id="withdraw-request"

@@ -199,6 +199,9 @@ export interface RequestRecord {
   route: ApprovalRoute | null;
   routed_by: string | null;
   routed_at: string | null;
+  reviewed_by?: string | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
   approval_no: string | null;
   decided_by: string | null;
   decided_at: string | null;

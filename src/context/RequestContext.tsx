@@ -721,6 +721,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const current = getRequestById(id);
     if (!current) return { success: false, error: 'Request not found' };
 
+    const isHead = user.role === 'head';
+    const toStatus = isHead ? 'pending_admin_approval' : 'submitted';
     const genNo = current.request_no || `REQ-2026-${Math.floor(100000 + Math.random() * 900000)}`;
     const action: RequestAction = {
       id: `act-${Date.now()}`,
@@ -730,8 +732,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       actor_role: user.role,
       action: 'submitted',
       from_status: current.status,
-      to_status: 'submitted',
-      remarks: 'Request formally submitted for department processing.',
+      to_status: toStatus,
+      remarks: isHead
+        ? 'Department Head request routed directly to Admin for approval.'
+        : 'Request formally submitted for department processing.',
       visible_to_requester: true,
       created_at: new Date().toISOString(),
     };
@@ -741,7 +745,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         r.id === id
           ? {
               ...r,
-              status: 'submitted',
+              status: toStatus,
+              route: isHead ? 'A' : r.route,
+              reviewed_by: isHead ? user.id : r.reviewed_by,
+              reviewed_by_name: isHead ? user.full_name : r.reviewed_by_name,
+              reviewed_at: isHead ? new Date().toISOString() : r.reviewed_at,
               request_no: genNo,
               submitted_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),

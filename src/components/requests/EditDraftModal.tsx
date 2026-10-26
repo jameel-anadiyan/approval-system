@@ -118,7 +118,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     const v = type === 'discount' ? validateDiscount(discount) : type === 'exhibition' ? validateExhibition(exhibition)
       : isAsset ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined)) : null;
     if (v) return setError(v);
-    if (categoryOptions.required && !categoryOptions.categories.some((c) => c.id === categoryId)) {
+    if (user?.role !== 'head' && categoryOptions.required && !categoryOptions.categories.some((c) => c.id === categoryId)) {
       return setError('Please select the work category.');
     }
     saveLockRef.current = true;
@@ -129,8 +129,8 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal : amount),
         notes: notes.trim() || undefined,
         details: getDetails(),
-        category_id: categoryOptions.required ? categoryId || null : undefined,
-        target_head_id: type === 'exhibition' ? null : (targetHeadId || undefined),
+        category_id: user?.role !== 'head' && categoryOptions.required ? categoryId || null : undefined,
+        target_head_id: type === 'exhibition' || user?.role === 'head' ? null : (targetHeadId || undefined),
       });
       if (!upd.success) throw new Error(upd.error);
       if (isAsset) {
@@ -169,7 +169,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
             className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
-        {type !== 'exhibition' && (
+        {type !== 'exhibition' && user?.role !== 'head' && (
           <TargetHeadField
             value={targetHeadId}
             onChange={(newHeadId) => {
@@ -180,8 +180,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
             }}
           />
         )}
-        <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
-          currentName={request.category_name} />
+        {user?.role !== 'head' && (
+          <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
+            currentName={request.category_name} />
+        )}
         {type === 'general' && (
           <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80">
             <div>

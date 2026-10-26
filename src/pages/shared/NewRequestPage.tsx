@@ -162,7 +162,7 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const validate = (forDraft: boolean): string | null => {
-    if (!forDraft && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
+    if (!forDraft && user?.role !== 'head' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
     if (isAsset) {
       if (!asset.asset_name.trim()) return 'Enter the asset you want to buy.';
       return validateQuotes(quotes, forDraft, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined);
@@ -200,7 +200,7 @@ export const NewRequestPage: React.FC = () => {
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
-        category_id: categoryOptions.required ? categoryId || null : null,
+        category_id: user?.role !== 'head' && categoryOptions.required ? categoryId || null : null,
         target_head_id: type === 'exhibition' ? null : (targetHeadId || null),
       });
       if (!draftRes.success || !draftRes.id) {
@@ -255,6 +255,12 @@ export const NewRequestPage: React.FC = () => {
           {user?.shop ? <>Shop: <span className="font-semibold text-slate-700">{user.shop.name}</span> · </> : null}
           Choose the request type, fill the form and submit for approval.
         </p>
+        {user?.role === 'head' && (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-purple-800 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1">
+            <UserCheck className="w-3.5 h-3.5 text-purple-600" />
+            Department Head request: Bypasses clerk routing and goes directly to Admin for approval.
+          </p>
+        )}
         {user?.role === 'employee' && user.regional_head_id && (
           <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 rounded-lg px-2.5 py-1">
             <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
@@ -338,7 +344,9 @@ export const NewRequestPage: React.FC = () => {
             </div>
           )}
 
-          <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
+          {user?.role !== 'head' && (
+            <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
+          )}
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
