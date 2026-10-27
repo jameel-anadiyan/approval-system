@@ -27,8 +27,9 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
   const entryAdjustment = entry ? Number(entry.adjustment_amount || 0) : 0;
-  const entryAmount = entry ? entryPayable(entry) : balance;
-  const maxPayable = entry ? entryAmount : balance;
+  // Payment can only be released against an entry; max = the entry amount
+  const entryAmount = entry ? Math.min(entryPayable(entry), balance) : 0;
+  const maxPayable = entryAmount;
 
   const [paymentMode, setPaymentMode] = useState('NEFT');
   const [paymentDate, setPaymentDate] = useState(todayIST);
@@ -59,14 +60,14 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
       return setError('Enter the amount being paid now.');
     }
 
-    if (entry && amount > entryAmount) {
+    if (!entry) {
+      return setError('Payments can only be released against a disbursement entry.');
+    }
+
+    if (amount > entryAmount) {
       return setError(
         `The maximum amount that can be paid is ${formatINR(entryAmount)} against Entry #${entry.entry_no}.`
       );
-    }
-
-    if (!entry && amount > balance) {
-      return setError(`Amount is more than the balance of ${formatINR(balance)}.`);
     }
 
     setIsSubmitting(true);
@@ -98,6 +99,12 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl">{error}</div>}
 
+        {!entry && (
+          <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl font-semibold">
+            No entry selected. Payments can only be released against a disbursement entry created by the Entry-Only account.
+          </div>
+        )}
+
         {/* Specific Entry Card if paying against entry */}
         {entry && (
           <div className="p-3.5 rounded-xl border border-teal-200 bg-teal-50/60 space-y-2">
@@ -118,20 +125,14 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
             </div>
 
             {entryAdjustment > 0 && (
-              <div className="space-y-1 pt-1 text-xs">
-                <div className="flex items-baseline justify-between text-teal-800">
-                  <span>Entry Amount:</span>
-                  <span className="font-mono font-semibold">{formatINR(Number(entry.amount || 0))}</span>
-                </div>
-                <div className="flex items-baseline justify-between text-violet-800">
-                  <span>Less: Old balance / advance adjusted (auto-paid)</span>
-                  <span className="font-mono font-semibold">− {formatINR(entryAdjustment)}</span>
-                </div>
+              <div className="flex items-baseline justify-between pt-1 text-xs text-violet-800">
+                <span>Old balance / advance adjusted separately (already settled)</span>
+                <span className="font-mono font-semibold">{formatINR(entryAdjustment)}</span>
               </div>
             )}
 
             <div className="flex items-baseline justify-between pt-1">
-              <span className="text-xs text-teal-800">{entryAdjustment > 0 ? 'Payable Now:' : 'Capped Entry Amount:'}</span>
+              <span className="text-xs text-teal-800">Entry Amount (max payable):</span>
               <span className="font-mono text-base font-extrabold text-teal-950">
                 {formatINR(entryAmount)}
               </span>
@@ -269,7 +270,7 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
           <button
             type="submit"
             id="payment-submit"
-            disabled={isSubmitting || amount <= 0 || amount > maxPayable}
+            disabled={isSubmitting || !entry || amount <= 0 || amount > maxPayable}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-md shadow-teal-200 transition-all disabled:opacity-50 cursor-pointer"
           >
             {isFull ? <CheckCircle className="w-4 h-4" /> : <Banknote className="w-4 h-4" />}

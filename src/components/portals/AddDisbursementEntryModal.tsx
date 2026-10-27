@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { DisbursementEntry, RequestRecord } from '../../types/database';
+import { DisbursementEntry, RequestRecord, entriesTotal, entryAvailable } from '../../types/database';
 import { formatINR } from '../../lib/formatters';
 import { PlusCircle, ShieldAlert, Check, FileText, Percent, AlertCircle, RotateCcw, Banknote, CheckCircle2 } from 'lucide-react';
 
@@ -25,42 +25,58 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
   const maxEntryNo = existingEntries.reduce((max, e) => Math.max(max, e.entry_no || 0), 0);
   const nextEntryNo = maxEntryNo + 1;
 
-  const totalEntered = existingEntries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  const remainingUnentered = Math.max(0, Math.round((Number(request.amount || 0) - totalEntered) * 100) / 100);
+  const totalEntered = entriesTotal(existingEntries);
+  // Balance available for new entries = approved - paid/adjusted - unpaid entries
+  const remainingUnentered = entryAvailable(request);
 
   const [amountStr, setAmountStr] = useState<string>(
     remainingUnentered > 0 ? remainingUnentered.toFixed(2) : ''
   );
+  const [amountTouched, setAmountTouched] = useState(false);
   const [tdsCut, setTdsCut] = useState<boolean>(false);
   const [adjustmentStr, setAdjustmentStr] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const parsedAmount = Math.round((parseFloat(amountStr) || 0) * 100) / 100;
-  const parsedAdjustment = Math.round((parseFloat(adjustmentStr) || 0) * 100) / 100;
-  const toPay = Math.max(0, Math.round((parsedAmount - parsedAdjustment) * 100) / 100);
-  const adjustmentInvalid = parsedAdjustment < 0 || parsedAdjustment > parsedAmount;
-  const fullyAdjusted = parsedAdjustment > 0 && parsedAdjustment === parsedAmount;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const parsedAmount = round2(parseFloat(amountStr) || 0);
+  const parsedAdjustment = round2(parseFloat(adjustmentStr) || 0);
+  const total = round2(parsedAmount + parsedAdjustment);
+  // Max entry amount after keeping room for the adjustment
+  const maxEntryAmount = Math.max(0, round2(remainingUnentered - parsedAdjustment));
+  const adjustmentInvalid = parsedAdjustment < 0 || parsedAdjustment > remainingUnentered;
+  const overLimit = total > remainingUnentered;
+  const adjustmentOnly = parsedAmount === 0 && parsedAdjustment > 0;
+
+  const handleAdjustmentChange = (value: string) => {
+    setAdjustmentStr(value);
+    // Keep the auto-filled entry amount = balance - adjustment until the user edits it
+    if (!amountTouched) {
+      const adj = round2(parseFloat(value) || 0);
+      const next = Math.max(0, round2(remainingUnentered - adj));
+      setAmountStr(next > 0 ? next.toFixed(2) : '0');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (parsedAmount <= 0) {
-      setError('Please enter a valid entry amount greater than ₹0.');
+    if (parsedAmount < 0 || parsedAdjustment < 0) {
+      setError('Amounts cannot be negative.');
       return;
     }
 
-    if (parsedAmount > remainingUnentered) {
+    if (total <= 0) {
+      setError('Enter an entry amount or an old balance / advance adjustment.');
+      return;
+    }
+
+    if (overLimit) {
       setError(
-        `Entry amount cannot exceed the unentered approved balance of ${formatINR(remainingUnentered)}.`
+        `Entry amount + adjustment (${formatINR(total)}) cannot exceed the balance available for entries (${formatINR(remainingUnentered)}).`
       );
-      return;
-    }
-
-    if (adjustmentInvalid) {
-      setError('Old balance / advance adjustment cannot be negative or more than the entry amount.');
       return;
     }
 
@@ -111,7 +127,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </div>
           <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 min-w-0">
             <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">
-              Unentered
+              Available
             </span>
             <span className="text-xs sm:text-sm font-extrabold text-amber-800 break-words">
               {formatINR(remainingUnentered)}
@@ -137,10 +153,39 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </span>
         </div>
 
-        {/* Entry Amount */}
+        {/* Old balance / old advance adjustment (separate from the entry amount) */}
+        <div className="p-3.5 rounded-xl border border-violet-200 bg-violet-50/50 space-y-2.5">
+          <label htmlFor="entry-adjustment" className="text-xs font-bold text-violet-950 flex items-center gap-1.5">
+            <RotateCcw className="w-3.5 h-3.5 text-violet-600" />
+            Old Balance / Old Advance Adjustment (₹)
+            <span className="text-[10px] font-semibold text-violet-600">Optional</span>
+          </label>
+          <input
+            id="entry-adjustment"
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0"
+            max={remainingUnentered}
+            value={adjustmentStr}
+            onChange={(e) => handleAdjustmentChange(e.target.value)}
+            placeholder="0.00"
+            className={`w-full text-sm font-bold font-mono p-2.5 rounded-xl border bg-white outline-hidden focus:ring-1 ${
+              adjustmentInvalid
+                ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                : 'border-violet-200 focus:border-violet-500 focus:ring-violet-500'
+            }`}
+          />
+          <p className="text-[11px] text-violet-800/80 leading-snug">
+            Deducted from the request balance and marked as <strong>paid automatically</strong>. It is not part of the
+            entry amount — the Payment account does not pay it.
+          </p>
+        </div>
+
+        {/* Entry Amount (what the Payment-Only account pays) */}
         <div>
           <label htmlFor="entry-amount" className="text-xs font-bold text-slate-700 block mb-1">
-            Entry Amount (₹) <span className="text-rose-500">*</span>
+            Entry Amount to Pay (₹) <span className="text-rose-500">*</span>
           </label>
           <div className="flex gap-2">
             <input
@@ -148,18 +193,28 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
               type="number"
               inputMode="decimal"
               step="0.01"
-              min="0.01"
-              max={remainingUnentered}
+              min="0"
+              max={maxEntryAmount}
               required
               value={amountStr}
-              onChange={(e) => setAmountStr(e.target.value)}
+              onChange={(e) => {
+                setAmountTouched(true);
+                setAmountStr(e.target.value);
+              }}
               placeholder="0.00"
-              className="w-full text-base font-bold font-mono p-3 rounded-xl border border-slate-200 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-hidden"
+              className={`w-full text-base font-bold font-mono p-3 rounded-xl border outline-hidden focus:ring-1 ${
+                overLimit
+                  ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                  : 'border-slate-200 focus:border-sky-500 focus:ring-sky-500'
+              }`}
             />
-            {remainingUnentered > 0 && (
+            {maxEntryAmount > 0 && (
               <button
                 type="button"
-                onClick={() => setAmountStr(remainingUnentered.toFixed(2))}
+                onClick={() => {
+                  setAmountTouched(true);
+                  setAmountStr(maxEntryAmount.toFixed(2));
+                }}
                 className="shrink-0 px-3 rounded-xl border border-sky-200 bg-sky-50 text-sky-700 text-xs font-bold hover:bg-sky-100 transition-colors"
               >
                 Max Balance
@@ -167,77 +222,43 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
             )}
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Gross entry amount, including any old balance / advance adjustment below.
+            The Payment-Only account can pay at most this amount against Entry #{nextEntryNo}. Use 0 to record only an
+            adjustment.
           </p>
         </div>
 
-        {/* Old balance / old advance adjustment */}
-        <div className="p-3.5 rounded-xl border border-violet-200 bg-violet-50/50 space-y-2.5">
-          <label htmlFor="entry-adjustment" className="text-xs font-bold text-violet-950 flex items-center gap-1.5">
-            <RotateCcw className="w-3.5 h-3.5 text-violet-600" />
-            Old Balance / Old Advance Adjustment (₹)
-            <span className="text-[10px] font-semibold text-violet-600">Optional</span>
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="entry-adjustment"
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
-              max={parsedAmount || undefined}
-              value={adjustmentStr}
-              onChange={(e) => setAdjustmentStr(e.target.value)}
-              placeholder="0.00"
-              className={`w-full text-sm font-bold font-mono p-2.5 rounded-xl border bg-white outline-hidden focus:ring-1 ${
-                adjustmentInvalid
-                  ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
-                  : 'border-violet-200 focus:border-violet-500 focus:ring-violet-500'
-              }`}
-            />
-            {parsedAmount > 0 && (
-              <button
-                type="button"
-                onClick={() => setAdjustmentStr(parsedAmount.toFixed(2))}
-                className="shrink-0 px-3 rounded-xl border border-violet-200 bg-white text-violet-700 text-xs font-bold hover:bg-violet-100 transition-colors"
-              >
-                Full
-              </button>
-            )}
-          </div>
-          <p className="text-[11px] text-violet-800/80 leading-snug">
-            This amount is deducted from the entry and marked as <strong>paid automatically</strong>. The Payment
-            account does not need to pay it.
-          </p>
-          {parsedAmount > 0 && parsedAdjustment > 0 && !adjustmentInvalid && (
-            <div className="grid grid-cols-3 gap-2 text-center pt-1">
-              <div className="rounded-lg bg-white border border-slate-200 p-2 min-w-0">
-                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block">Entry</span>
-                <span className="text-xs font-extrabold text-slate-900 break-words">{formatINR(parsedAmount)}</span>
-              </div>
-              <div className="rounded-lg bg-violet-100/70 border border-violet-200 p-2 min-w-0">
-                <span className="text-[9px] font-bold uppercase tracking-wider text-violet-700 flex items-center justify-center gap-0.5">
-                  <CheckCircle2 className="w-2.5 h-2.5" /> Adjusted
-                </span>
-                <span className="text-xs font-extrabold text-violet-800 break-words">{formatINR(parsedAdjustment)}</span>
-              </div>
-              <div className="rounded-lg bg-teal-50 border border-teal-200 p-2 min-w-0">
-                <span className="text-[9px] font-bold uppercase tracking-wider text-teal-700 flex items-center justify-center gap-0.5">
-                  <Banknote className="w-2.5 h-2.5" /> To Pay
-                </span>
-                <span className="text-xs font-extrabold text-teal-800 break-words">{formatINR(toPay)}</span>
-              </div>
+        {parsedAdjustment > 0 && (
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-violet-100/70 border border-violet-200 p-2 min-w-0">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-violet-700 flex items-center justify-center gap-0.5">
+                <CheckCircle2 className="w-2.5 h-2.5" /> Adjusted
+              </span>
+              <span className="text-xs font-extrabold text-violet-800 break-words">{formatINR(parsedAdjustment)}</span>
             </div>
-          )}
-          {fullyAdjusted && (
-            <p className="text-[11px] font-semibold text-violet-900 bg-violet-100/80 border border-violet-200 rounded-lg px-2.5 py-1.5">
-              Entire entry is adjusted — Entry #{nextEntryNo} will be marked <strong>Paid</strong> immediately.
-            </p>
-          )}
-          {adjustmentInvalid && parsedAmount > 0 && (
-            <p className="text-[11px] font-semibold text-rose-700">Adjustment cannot be more than the entry amount.</p>
-          )}
-        </div>
+            <div className="rounded-lg bg-teal-50 border border-teal-200 p-2 min-w-0">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-teal-700 flex items-center justify-center gap-0.5">
+                <Banknote className="w-2.5 h-2.5" /> To Pay
+              </span>
+              <span className="text-xs font-extrabold text-teal-800 break-words">{formatINR(parsedAmount)}</span>
+            </div>
+            <div className="rounded-lg bg-white border border-slate-200 p-2 min-w-0">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block">Total</span>
+              <span className={`text-xs font-extrabold break-words ${overLimit ? 'text-rose-700' : 'text-slate-900'}`}>
+                {formatINR(total)}
+              </span>
+            </div>
+          </div>
+        )}
+        {adjustmentOnly && (
+          <p className="text-[11px] font-semibold text-violet-900 bg-violet-100/80 border border-violet-200 rounded-lg px-2.5 py-1.5">
+            Adjustment only — Entry #{nextEntryNo} will be marked <strong>Paid</strong> immediately (nothing to pay).
+          </p>
+        )}
+        {overLimit && (
+          <p className="text-[11px] font-semibold text-rose-700">
+            Entry amount + adjustment cannot be more than {formatINR(remainingUnentered)}.
+          </p>
+        )}
 
         {/* TDS Cut / Not Cut indication */}
         <div>
@@ -311,15 +332,15 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           <button
             type="submit"
             id="submit-entry-button"
-            disabled={isSubmitting || parsedAmount <= 0 || parsedAmount > remainingUnentered || adjustmentInvalid}
+            disabled={isSubmitting || total <= 0 || overLimit || adjustmentInvalid || parsedAmount < 0}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs shadow-md shadow-sky-200 transition-all disabled:opacity-50 cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" />
             <span>
               {isSubmitting
                 ? 'Creating Entry…'
-                : `Create Entry #${nextEntryNo} (${parsedAmount > 0 ? formatINR(parsedAmount) : '₹0'})${
-                    parsedAdjustment > 0 && !adjustmentInvalid ? ` · To pay ${formatINR(toPay)}` : ''
+                : `Create Entry #${nextEntryNo} (${formatINR(parsedAmount)} to pay)${
+                    parsedAdjustment > 0 ? ` · Adjust ${formatINR(parsedAdjustment)}` : ''
                   }`}
             </span>
           </button>

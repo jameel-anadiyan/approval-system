@@ -36,7 +36,7 @@ import {
   ROLE_LABELS,
   typeOf,
 } from '../../lib/formatters';
-import { DisbursementEntry, entryPayable, paymentSummary } from '../../types/database';
+import { DisbursementEntry, entriesTotal, entryAvailable, entryPayable, paymentSummary } from '../../types/database';
 import {
   ArrowLeft,
   Send,
@@ -240,13 +240,10 @@ export const RequestDetailPage: React.FC = () => {
     return entries.filter((e) => e.status === 'pending');
   }, [entries]);
 
-  const totalEntered = useMemo(() => {
-    return entries.reduce((s, e) => s + Number(e.amount || 0), 0);
-  }, [entries]);
+  const totalEntered = useMemo(() => entriesTotal(entries), [entries]);
 
-  const remainingUnentered = useMemo(() => {
-    return Math.max(0, Math.round(((request.amount || 0) - totalEntered) * 100) / 100);
-  }, [request.amount, totalEntered]);
+  // Balance available for new entries (entry amount + adjustment)
+  const remainingUnentered = useMemo(() => entryAvailable(request), [request]);
 
   const nextEntryNo = useMemo(() => {
     return entries.reduce((m, e) => Math.max(m, e.entry_no || 0), 0) + 1;
@@ -1031,13 +1028,8 @@ export const RequestDetailPage: React.FC = () => {
                                 </span>
                               )}
                               {Number(ent.adjustment_amount || 0) > 0 && (
-                                <span className="basis-full flex items-center gap-1.5 flex-wrap text-[11px]">
-                                  <span className="font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
-                                    Old balance / advance adjusted {formatINR(Number(ent.adjustment_amount))}
-                                  </span>
-                                  <span className="font-bold text-teal-800">
-                                    {entryPayable(ent) > 0 ? `To pay ${formatINR(entryPayable(ent))}` : 'Nothing to pay'}
-                                  </span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
+                                  + Old balance / advance adjusted {formatINR(Number(ent.adjustment_amount))}
                                 </span>
                               )}
                             </div>
@@ -1641,12 +1633,12 @@ export const RequestDetailPage: React.FC = () => {
                       <span>Awaiting Entry from Entry-Only Account</span>
                     </span>
                   )
-                ) : (
+                ) : firstPendingEntry ? (
                   <button
                     type="button"
                     disabled={isPendingDisbursementClarification}
                     onClick={() => {
-                      if (firstPendingEntry) setSelectedEntry(firstPendingEntry);
+                      setSelectedEntry(firstPendingEntry);
                       setModalState('pay');
                     }}
                     title={isPendingDisbursementClarification ? 'Payment is on hold pending Head clarification' : undefined}
@@ -1660,13 +1652,14 @@ export const RequestDetailPage: React.FC = () => {
                     <span>
                       {isPendingDisbursementClarification
                         ? 'Payment on Hold'
-                        : firstPendingEntry
-                        ? `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(entryPayable(firstPendingEntry))})`
-                        : pay.paid > 0
-                        ? `Pay Balance ${formatINR(pay.balance)}`
-                        : 'Record Payment'}
+                        : `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(entryPayable(firstPendingEntry))})`}
                     </span>
                   </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-500 bg-slate-100 border border-slate-200">
+                    <Clock className="w-4 h-4 text-slate-400" />
+                    <span>Awaiting Entry from Entry-Only Account</span>
+                  </span>
                 )}
               </>
             )}
@@ -1804,9 +1797,9 @@ export const RequestDetailPage: React.FC = () => {
             setBanner({
               ok: true,
               text:
-                adjustment >= amount
-                  ? `Disbursement entry created (${formatINR(amount)})${adjText}. Fully adjusted — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
-                  : `Disbursement entry created successfully (${formatINR(amount)} · ${tdsCut ? 'TDS Cut' : 'TDS Not Cut'}${adjText}). ${formatINR(amount - adjustment)} ready for payment.`,
+                amount <= 0
+                  ? `Entry recorded${adjText}. Nothing to pay — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
+                  : `Disbursement entry created: ${formatINR(amount)} to pay (${tdsCut ? 'TDS Cut' : 'TDS Not Cut'})${adjText}. Ready for payment.`,
             });
           }}
         />

@@ -337,14 +337,36 @@ export interface DisbursementEntry {
   paid_by?: string | null;
   paid_by_name?: string | null;
   payment_id?: string | null;
-  /** Old balance / old advance adjusted against this entry (auto-settled, not paid by Payment-Only) */
+  /** Old balance / old advance adjusted with this entry (separate from the entry amount, auto-settled, not paid by Payment-Only) */
   adjustment_amount?: number;
   adjustment_payment_id?: string | null;
 }
 
-/** Amount the Payment-Only account still has to pay for an entry (entry amount minus adjustment). */
-export const entryPayable = (e: Pick<DisbursementEntry, 'amount' | 'adjustment_amount'>) =>
-  Math.max(0, Math.round((Number(e.amount || 0) - Number(e.adjustment_amount || 0)) * 100) / 100);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Amount the Payment-Only account pays for an entry = the entry amount (adjustment is separate). */
+export const entryPayable = (e: Pick<DisbursementEntry, 'amount'>) => Math.max(0, round2(Number(e.amount || 0)));
+
+/** Entry amount + adjustment of all live entries. */
+export const entriesTotal = (entries: DisbursementEntry[] = []) =>
+  round2(
+    entries
+      .filter((e) => e.status !== 'cancelled')
+      .reduce((s, e) => s + Number(e.amount || 0) + Number(e.adjustment_amount || 0), 0)
+  );
+
+/**
+ * Balance still available for new entries (entry amount + adjustment):
+ * request amount - already paid/adjusted - unpaid (pending) entries.
+ */
+export const entryAvailable = (
+  r: { amount?: number | null; paid_amount?: number | null; disbursement_entries?: DisbursementEntry[] | null }
+) => {
+  const pending = (r.disbursement_entries || [])
+    .filter((e) => e.status === 'pending')
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  return Math.max(0, round2(Number(r.amount || 0) - Number(r.paid_amount || 0) - pending));
+};
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
 

@@ -6,7 +6,7 @@ import { RequestFilters, useRequestFilters } from '../../components/requests/Req
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { AddDisbursementEntryModal } from '../../components/portals/AddDisbursementEntryModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
-import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable } from '../../types/database';
+import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable, entriesTotal, entryAvailable } from '../../types/database';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import {
   Banknote,
@@ -293,8 +293,8 @@ export const DisbursementPage: React.FC = () => {
               (e) => e.status !== 'cancelled'
             );
             const pendingEntries = entries.filter((e) => e.status === 'pending');
-            const totalEntered = entries.reduce((s, e) => s + Number(e.amount || 0), 0);
-            const remainingUnentered = Math.max(0, Math.round((Number(req.amount || 0) - totalEntered) * 100) / 100);
+            const totalEntered = entriesTotal(entries);
+            const remainingUnentered = entryAvailable(req);
             const nextEntryNo = entries.reduce((m, e) => Math.max(m, e.entry_no || 0), 0) + 1;
 
             return (
@@ -389,23 +389,7 @@ export const DisbursementPage: React.FC = () => {
                           <span>{isPendingHead ? 'Ask More' : 'Ask Head'}</span>
                         </button>
 
-                        {/* General payment trigger for Admin or when no entry restriction */}
-                        {isAdmin && (
-                          <button
-                            type="button"
-                            disabled={isPendingHead}
-                            onClick={() => setPayTarget({ request: req })}
-                            title={isPendingHead ? 'Payment is on hold pending Head clarification' : undefined}
-                            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-semibold text-xs shadow-xs transition-all ${
-                              isPendingHead
-                                ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
-                                : 'bg-slate-800 hover:bg-slate-900 text-white cursor-pointer active:scale-95'
-                            }`}
-                          >
-                            <Banknote className="w-3.5 h-3.5" />
-                            <span>Quick Pay</span>
-                          </button>
-                        )}
+                        {/* Payments can only be released against an entry (no request-level Quick Pay) */}
                       </div>
                     ) : (
                       <button
@@ -489,7 +473,7 @@ export const DisbursementPage: React.FC = () => {
                               </span>
                               {Number(ent.adjustment_amount ?? 0) > 0 && (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-800 border-violet-200">
-                                  Old Bal. Adj. −{formatINR(Number(ent.adjustment_amount))} · To pay {formatINR(entryPayable(ent))}
+                                  + Old Bal. Adj. {formatINR(Number(ent.adjustment_amount))}
                                 </span>
                               )}
                               <span
@@ -565,9 +549,9 @@ export const DisbursementPage: React.FC = () => {
             }
             const adjText = adjustment > 0 ? ` · Old balance adjusted ${formatINR(adjustment)}` : '';
             setNotice(
-              adjustment >= amount
-                ? `Entry added (${formatINR(amount)})${adjText}. Fully adjusted — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
-                : `Entry added successfully (${formatINR(amount)} · ${tdsCut ? 'TDS Cut' : 'TDS Not Cut'}${adjText}). ${formatINR(amount - adjustment)} ready for Payment.`
+              amount <= 0
+                ? `Entry recorded${adjText}. Nothing to pay — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
+                : `Entry added: ${formatINR(amount)} to pay (${tdsCut ? 'TDS Cut' : 'TDS Not Cut'})${adjText}. Ready for Payment.`
             );
           }}
         />

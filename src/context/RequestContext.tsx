@@ -12,6 +12,7 @@ import {
   DisbursementEntry,
   UserTargetHead,
   entryPayable,
+  entryAvailable,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -1213,35 +1214,18 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       };
     }
 
+    // Payments can only be released against a disbursement entry (for everyone, incl. Admin)
+    if (!details.entry_id) {
+      return {
+        success: false,
+        error: 'Payments can only be released against a disbursement entry. Ask the Entry-Only account to create an entry first.',
+      };
+    }
+
     if (isBackendConnected) {
       try {
-        if (details.entry_id) {
-          const { data, error } = await supabase.rpc('pay_disbursement_entry', {
-            p_entry_id: details.entry_id,
-            p_amount: details.amount ?? null,
-            p_payment_date: details.payment_date || null,
-            p_payment_mode: details.payment_mode || null,
-            p_payment_ref: details.payment_ref || null,
-            p_remarks: details.payment_remarks || null,
-          });
-          if (error) throw error;
-          await loadRequests();
-          return { success: true, fully_paid: !!(data as { fully_paid?: boolean } | null)?.fully_paid };
-        }
-
-        if (isDisbursement && user.disbursement_type === 'payment_only') {
-          const cur = id ? getRequestById(id) : null;
-          const pending = (cur?.disbursement_entries || []).filter((e) => e.status === 'pending');
-          if (pending.length > 0) {
-            return {
-              success: false,
-              error: 'Payment-Only accounts must settle specific payment entries. Please select an entry to pay.',
-            };
-          }
-        }
-
-        const { data, error } = await supabase.rpc('add_payment', {
-          p_request_id: id,
+        const { data, error } = await supabase.rpc('pay_disbursement_entry', {
+          p_entry_id: details.entry_id,
           p_amount: details.amount ?? null,
           p_payment_date: details.payment_date || null,
           p_payment_mode: details.payment_mode || null,
@@ -1256,23 +1240,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    // Offline sandbox mirrors the add_payment / pay_disbursement_entry rules
+    // Offline sandbox mirrors the pay_disbursement_entry rules
     const current = id ? getRequestById(id) : requests.find((r) => (r.disbursement_entries || []).some((e) => e.id === details.entry_id));
     if (!current) return { success: false, error: 'Request not found' };
     if (current.status === 'paid') return { success: false, error: 'This request is already fully paid.' };
 
-    if (isDisbursement && user.disbursement_type === 'payment_only') {
-      const pending = (current.disbursement_entries || []).filter((e) => e.status === 'pending');
-      if (pending.length > 0 && !details.entry_id) {
-        return {
-          success: false,
-          error: 'Payment-Only accounts must settle specific payment entries. Please select an entry to pay.',
-        };
-      }
-    }
-
     const entry = details.entry_id ? (current.disbursement_entries || []).find((e) => e.id === details.entry_id) : null;
-    const maxPayable = entry ? entryPayable(entry) : Math.max(0, current.amount - Number(current.paid_amount ?? 0));
+    if (!entry || entry.status !== 'pending') return { success: false, error: 'This entry has already been paid or cancelled.' };
+    const maxPayable = Math.min(entryPayable(entry), Math.max(0, current.amount - Number(current.paid_amount ?? 0)));
     const amt = Math.round((details.amount ?? maxPayable) * 100) / 100;
     if (amt <= 0) return { success: false, error: 'Payment amount must be more than zero.' };
     if (amt > maxPayable) {
@@ -1347,14 +1322,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     adjustment = 0
   ): Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
+    const amt = Math.round(Math.max(0, amount || 0) * 100) / 100;
     const adj = Math.round(Math.max(0, adjustment || 0) * 100) / 100;
-    if (adj > amount) return { success: false, error: 'Old balance / advance adjustment cannot be more than the entry amount.' };
+    if (amt + adj <= 0) return { success: false, error: 'Enter an entry amount or an old balance / advance adjustment.' };
 
     if (isBackendConnected) {
       try {
         const { data, error } = await supabase.rpc('add_disbursement_entry', {
           p_request_id: requestId,
-          p_amount: amount,
+          p_amount: amt,
           p_tds_cut: tdsCut,
           p_notes: notes?.trim() || null,
           p_adjustment: adj,
@@ -1373,20 +1349,23 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    // Mock (mirrors add_disbursement_entry: adjustment is settled immediately)
+    // Mock (mirrors add_disbursement_entry: adjustment is separate and settled immediately)
     const req = getRequestById(requestId);
     if (!req) return { success: false, error: 'Request not found' };
+    if (amt + adj > entryAvailable(req)) {
+      return { success: false, error: `Entry + adjustment is more than the balance available for entries (₹${entryAvailable(req).toFixed(2)}).` };
+    }
     const existing = req.disbursement_entries || [];
     const nextNo = existing.length > 0 ? Math.max(...existing.map((e) => e.entry_no)) + 1 : 1;
     const now = new Date().toISOString();
-    const fullyAdjusted = adj > 0 && adj === amount;
+    const fullyAdjusted = amt === 0 && adj > 0;
     const entryId = `entry-${Date.now()}`;
     const paymentId = adj > 0 ? `pay-${Date.now()}` : null;
     const newEntry: DisbursementEntry = {
       id: entryId,
       request_id: requestId,
       entry_no: nextNo,
-      amount,
+      amount: amt,
       adjustment_amount: adj,
       adjustment_payment_id: paymentId,
       tds_cut: tdsCut,
