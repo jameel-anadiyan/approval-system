@@ -369,4 +369,187 @@ end $$;
 revoke execute on function public.add_payment(uuid, numeric, date, text, text, text) from public, anon;
 grant execute on function public.add_payment(uuid, numeric, date, text, text, text) to authenticated;
 
+-- 6. Ensure _build_details handles 'non_cash' so it never falls through to exhibition
+create or replace function public._build_details(p_type public.request_type, p_amount numeric, p jsonb)
+returns jsonb language plpgsql immutable set search_path = '' as $function$
+declare
+  d jsonb := coalesce(p, '{}'::jsonb);
+  v_before numeric; v_after numeric; v_excl numeric; v_gst_pct numeric; v_gst numeric; v_total numeric;
+  v_has_gst boolean; v_base numeric; v_gen_gst numeric; v_gen_rate numeric;
+  -- Stock transfer variables
+  v_mode text;
+  v_items jsonb;
+  v_item jsonb;
+  v_pieces int := 0;
+  v_gross_wt numeric := 0;
+  v_mrp_total numeric := 0;
+  v_from_shop text;
+  v_to_shop text;
+begin
+  if p_type = 'non_cash' then
+    return jsonb_build_object(
+      'amount', 0,
+      'details', coalesce(d, '{}'::jsonb)
+    );
+
+  elsif p_type = 'general' then
+    if p_amount is null or p_amount <= 0 then raise exception 'Amount must be more than zero'; end if;
+    v_has_gst := coalesce((d->>'has_gst')::boolean, false);
+    v_base := public._num(d, 'base_amount');
+    v_gen_gst := public._num(d, 'gst_amount');
+    v_gen_rate := public._num(d, 'gst_rate');
+    return jsonb_build_object(
+      'amount', round(p_amount, 2),
+      'details', jsonb_strip_nulls(jsonb_build_object(
+        'base_amount', coalesce(v_base, round(p_amount, 2)),
+        'has_gst', v_has_gst,
+        'gst_rate', case when v_has_gst then coalesce(v_gen_rate, 18) else 0 end,
+        'gst_amount', case when v_has_gst then coalesce(v_gen_gst, round(p_amount - coalesce(v_base, p_amount), 2)) else 0 end,
+        'total_amount', round(p_amount, 2)
+      ))
+    );
+
+  elsif p_type = 'discount' then
+    v_before := public._num(d, 'before_amount');
+    v_after := public._num(d, 'after_amount');
+    if v_before is null or v_before <= 0 then raise exception 'Enter the amount before discount'; end if;
+    if v_after is null or v_after < 0 then raise exception 'Enter the amount after discount'; end if;
+    if v_after >= v_before then raise exception 'After-discount amount must be less than the amount before discount'; end if;
+    return jsonb_build_object(
+      'amount', v_before - v_after,
+      'details', jsonb_build_object(
+        'before_amount', v_before, 'after_amount', v_after,
+        'discount_amount', v_before - v_after,
+        'discount_pct', round((v_before - v_after) / v_before * 100, 2),
+        'customer_name', public._txt(d, 'customer_name', 100),
+        'reference', public._txt(d, 'reference', 100)));
+
+  elsif p_type = 'asset' or p_type = 'asset_below_20k' then
+    if public._txt(d, 'asset_name') is null then raise exception 'Asset name is required'; end if;
+    if p_amount is null or p_amount <= 0 then raise exception 'Enter the quotation amounts'; end if;
+    if p_type = 'asset_below_20k' and p_amount > 20000 then
+      raise exception 'Amount cannot exceed ₹20,000 for Asset Buying Below 20k';
+    end if;
+    return jsonb_build_object(
+      'amount', round(p_amount, 2),
+      'details', jsonb_strip_nulls(jsonb_build_object(
+        'asset_name', public._txt(d, 'asset_name', 200),
+        'quantity', public._txt(d, 'quantity', 50),
+        'specification', public._txt(d, 'specification', 1000),
+        'purpose', public._txt(d, 'purpose', 1000))));
+
+  elsif p_type = 'stock_transfer' then
+    v_from_shop := public._txt(d, 'from_shop_name', 150);
+    v_to_shop := public._txt(d, 'to_shop_name', 150);
+    if public._txt(d, 'from_shop_id') is null then raise exception 'Source (From) shop is required'; end if;
+    if public._txt(d, 'to_shop_id') is null then raise exception 'Destination (To) shop is required'; end if;
+    if (d->>'from_shop_id') = (d->>'to_shop_id') then
+      raise exception 'Destination shop cannot be the same as source shop';
+    end if;
+
+    v_mode := coalesce(d->>'transfer_mode', 'itemized');
+    if v_mode = 'bulk' then
+      v_pieces := coalesce((d->>'pieces_count')::int, 0);
+      v_gross_wt := coalesce(public._num(d, 'total_gross_weight'), 0);
+      v_mrp_total := coalesce(public._num(d, 'total_mrp'), 0);
+      if v_pieces <= 0 then raise exception 'Number of pieces must be at least 1'; end if;
+      if v_gross_wt <= 0 then raise exception 'Total gross weight must be greater than zero'; end if;
+      if v_mrp_total <= 0 then raise exception 'Total MRP must be greater than zero'; end if;
+
+      return jsonb_build_object(
+        'amount', round(v_mrp_total, 2),
+        'details', jsonb_strip_nulls(jsonb_build_object(
+          'transfer_mode', 'bulk',
+          'from_shop_id', d->>'from_shop_id',
+          'from_shop_name', v_from_shop,
+          'to_shop_id', d->>'to_shop_id',
+          'to_shop_name', v_to_shop,
+          'category_id', d->>'category_id',
+          'category_name', public._txt(d, 'category_name', 100),
+          'pieces_count', v_pieces,
+          'total_pieces', v_pieces,
+          'total_gross_weight', round(v_gross_wt, 3),
+          'total_mrp', round(v_mrp_total, 2),
+          'notes', public._txt(d, 'notes', 2000)
+        ))
+      );
+    else
+      -- Itemized transfer
+      v_items := coalesce(d->'items', '[]'::jsonb);
+      if jsonb_array_length(v_items) = 0 then
+        raise exception 'Add at least one product to transfer';
+      end if;
+
+      for v_item in select * from jsonb_array_elements(v_items)
+      loop
+        v_pieces := v_pieces + 1;
+        v_gross_wt := v_gross_wt + coalesce((v_item->>'gross_weight')::numeric, 0);
+        v_mrp_total := v_mrp_total + coalesce((v_item->>'mrp')::numeric, 0);
+      end loop;
+
+      return jsonb_build_object(
+        'amount', round(v_mrp_total, 2),
+        'details', jsonb_strip_nulls(jsonb_build_object(
+          'transfer_mode', 'itemized',
+          'from_shop_id', d->>'from_shop_id',
+          'from_shop_name', v_from_shop,
+          'to_shop_id', d->>'to_shop_id',
+          'to_shop_name', v_to_shop,
+          'items', v_items,
+          'pieces_count', v_pieces,
+          'total_pieces', v_pieces,
+          'total_gross_weight', round(v_gross_wt, 3),
+          'total_mrp', round(v_mrp_total, 2),
+          'notes', public._txt(d, 'notes', 2000)
+        ))
+      );
+    end if;
+
+  else -- exhibition
+    if public._txt(d, 'event_name') is null then raise exception 'Event name is required'; end if;
+    if public._txt(d, 'venue') is null then raise exception 'Venue is required'; end if;
+    if public._txt(d, 'event_dates') is null then raise exception 'Event date(s) & time are required'; end if;
+    v_excl := public._num(d, 'amount_excl_gst');
+    if v_excl is null or v_excl <= 0 then raise exception 'Sponsorship amount (excl. GST) must be more than zero'; end if;
+    v_has_gst := coalesce((d->>'has_gst')::boolean, true);
+    v_gst_pct := coalesce(public._num(d, 'gst_pct'), 18);
+    v_gst := case when v_has_gst then round(v_excl * (v_gst_pct / 100), 2) else 0 end;
+    v_total := v_excl + v_gst;
+    return jsonb_build_object(
+      'amount', v_total,
+      'details', jsonb_strip_nulls(jsonb_build_object(
+        'event_name', public._txt(d, 'event_name', 150),
+        'venue', public._txt(d, 'venue', 200),
+        'event_dates', public._txt(d, 'event_dates', 200),
+        'event_start', public._txt(d, 'event_start', 30),
+        'event_end', public._txt(d, 'event_end', 30),
+        'amount_excl_gst', v_excl,
+        'has_gst', v_has_gst,
+        'gst_pct', v_gst_pct,
+        'gst_amount', v_gst,
+        'total_amount', v_total,
+        'payment_mode_due', public._txt(d, 'payment_mode_due', 100),
+        'organiser_contact', public._txt(d, 'organiser_contact', 150),
+        'organiser_gstin', public._txt(d, 'organiser_gstin', 30),
+        'gst_invoice', coalesce((d->>'gst_invoice')::boolean, false),
+        'expected_footfall', public._txt(d, 'expected_footfall', 50),
+        'stall_size_location', public._txt(d, 'stall_size_location', 100),
+        'provides', d->'provides',
+        'provides_other', public._txt(d, 'provides_other', 200),
+        'voucher_1000_qty', public._num(d, 'voucher_1000_qty'),
+        'voucher_500_qty', public._num(d, 'voucher_500_qty'),
+        'voucher_1000_min', public._num(d, 'voucher_1000_min'),
+        'voucher_500_min', public._num(d, 'voucher_500_min'),
+        'voucher_validity', public._txt(d, 'voucher_validity', 50),
+        'lucky_draw', public._txt(d, 'lucky_draw', 150),
+        'winners_draw', public._txt(d, 'winners_draw', 100),
+        'other_costs', public._num(d, 'other_costs'),
+        'total_budget', coalesce(public._num(d, 'total_budget'), v_total),
+        'purpose', public._txt(d, 'purpose', 1000),
+        'is_waitlist', coalesce((d->>'is_waitlist')::boolean, false)
+      ))
+    );
+  end if;
+end $function$;
+
 notify pgrst, 'reload schema';

@@ -214,7 +214,13 @@ export const NewRequestPage: React.FC = () => {
       if (!forDraft && !hasPdf) return 'Attach the discount PDF (bill / estimate) to submit.';
       return null;
     }
-    return validateExhibition(exhibition);
+    if (type === 'non_cash') {
+      return null;
+    }
+    if (type === 'exhibition') {
+      return validateExhibition(exhibition);
+    }
+    return null;
   };
 
   const save = async (andSubmit: boolean) => {
