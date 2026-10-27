@@ -4,6 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { RotateCcw } from 'lucide-react';
 import type { ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
+import { errMsg } from '../../lib/errorUtils';
 
 interface ReturnModalProps {
   isOpen: boolean;
@@ -37,7 +38,7 @@ export const ReturnModal: React.FC<ReturnModalProps> = ({
       setRemarks('');
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
     }

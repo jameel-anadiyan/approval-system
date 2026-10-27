@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { DisbursementEntry, RequestRecord, entriesTotal, entryAvailable } from '../../types/database';
 import { formatINR } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import { PlusCircle, ShieldAlert, Check, FileText, Percent, AlertCircle, RotateCcw, Banknote, CheckCircle2 } from 'lucide-react';
 
 interface AddDisbursementEntryModalProps {
@@ -85,7 +86,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
       await onAddEntry(parsedAmount, tdsCut, notes.trim() || undefined, parsedAdjustment);
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
     }

@@ -6,6 +6,7 @@ import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { UserAvatar } from '../common/UserAvatar';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { Users, Check, AlertCircle, Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { errMsg } from '../../lib/errorUtils';
 
 interface ConsultHeadsModalProps {
   isOpen: boolean;
@@ -45,7 +46,7 @@ export const ConsultHeadsModal: React.FC<ConsultHeadsModalProps> = ({
         // Exclude current logged in user from list
         setHeads(list.filter((h) => h.id !== user?.id));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) => setError(errMsg(err)))
       .finally(() => setIsLoadingHeads(false));
   }, [isOpen, loadConsultableHeads, user?.id]);
 
@@ -93,7 +94,7 @@ export const ConsultHeadsModal: React.FC<ConsultHeadsModalProps> = ({
       onClose();
       if (onSuccess) onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
     }

@@ -4,6 +4,7 @@ import { FileUploader } from './FileUploader';
 import { RequestFile, RequestRecord, RequestDetails } from '../../types/database';
 import { useRequests } from '../../context/RequestContext';
 import { formatFileSize, formatINR, formatINRWhole, typeOf } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import { FileText, Mic, Trash2, Save, Loader2 } from 'lucide-react';
 import {
   DiscountFields, ExhibitionFields, discountFromDetails, exhibitionFromDetails, discountCalc, exhibitionCalc,
@@ -184,7 +185,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       }
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setBusy(false);
       saveLockRef.current = false;

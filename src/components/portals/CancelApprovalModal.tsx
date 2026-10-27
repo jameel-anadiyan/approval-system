@@ -4,6 +4,7 @@ import { RequestRecord, paymentSummary } from '../../types/database';
 import { ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { formatINR } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import { AlertTriangle, Ban, Loader2, AlertCircle } from 'lucide-react';
 
 interface CancelApprovalModalProps {
@@ -33,7 +34,7 @@ export const CancelApprovalModal: React.FC<CancelApprovalModalProps> = ({ isOpen
       await onCancel(reason.trim(), voice);
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setSubmitting(false);
     }

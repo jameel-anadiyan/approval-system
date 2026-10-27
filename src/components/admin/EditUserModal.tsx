@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { Profile } from '../../types/database';
 import { UserCheck, ShieldAlert, Loader2 } from 'lucide-react';
+import { errMsg } from '../../lib/errorUtils';
 
 interface EditUserModalProps {
   isOpen: boolean;
@@ -65,8 +66,8 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
       } else {
         onClose();
       }
-    } catch (err: any) {
-      setError(err?.message || 'Failed to update user details.');
+    } catch (err: unknown) {
+      setError(errMsg(err));
     } finally {
       setBusy(false);
     }

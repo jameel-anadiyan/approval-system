@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { errMsg } from './errorUtils';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rwwbpyodelmofjujgtyf.supabase.co';
 const supabaseKey =
@@ -40,17 +41,15 @@ export async function functionErrorMessage(err: unknown): Promise<string> {
   const ctx = (err as { context?: Response })?.context;
   if (ctx && typeof ctx.json === 'function') {
     try {
-      const body = await ctx.json();
+      const body = await ctx.clone().json();
       if (body?.error?.message) return body.error.message;
+      if (typeof body?.error === 'string') return body.error;
+      if (typeof body?.message === 'string') return body.message;
     } catch {
       /* ignore */
     }
   }
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/Failed to send a request to the Edge Function/i.test(msg)) {
-    return 'Could not reach the server function. It may not be deployed yet, or the network is down.';
-  }
-  return msg;
+  return errMsg(err);
 }
 
 export async function invokeEdgeFunction<T = unknown>(

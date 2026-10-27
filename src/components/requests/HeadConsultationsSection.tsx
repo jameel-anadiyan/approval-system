@@ -6,6 +6,7 @@ import { UserAvatar } from '../common/UserAvatar';
 import { ActionVoiceField } from './ActionVoiceField';
 import { ConsultationVoicePlayer } from './ConsultationVoicePlayer';
 import { formatISTDate } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import {
   Users,
   CheckCircle2,
@@ -85,7 +86,7 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
           : `Revised your decision to ${status.toUpperCase()}.`
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setSubmittingAction(null);
     }

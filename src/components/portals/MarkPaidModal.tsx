@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { DisbursementEntry, RequestRecord, entryPayable, paymentSummary } from '../../types/database';
 import { formatINR, formatISTDate } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import type { PaymentInput } from '../../context/RequestContext';
 import { Banknote, CheckCircle, History, Percent, FileText } from 'lucide-react';
 
@@ -82,7 +83,7 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
       });
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
     }

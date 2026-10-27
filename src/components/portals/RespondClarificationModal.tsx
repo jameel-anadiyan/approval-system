@@ -6,6 +6,7 @@ import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { ConsultationVoicePlayer } from '../requests/ConsultationVoicePlayer';
 import { Loader2, MessageSquare, AlertCircle, CornerDownLeft, Paperclip, FileText, Image as ImageIcon, X } from 'lucide-react';
 import { formatISTDate, formatFileSize } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 
 const MAX_FILES = 10;
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -75,7 +76,7 @@ export const RespondClarificationModal: React.FC<RespondClarificationModalProps>
       if (onSuccess) onSuccess(res.warning);
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setSubmitting(false);
     }

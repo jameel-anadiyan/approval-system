@@ -5,6 +5,7 @@ import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { ConsultationVoicePlayer } from '../requests/ConsultationVoicePlayer';
 import { formatINR, formatISTDate } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import {
   ThumbsUp,
   ThumbsDown,
@@ -66,7 +67,7 @@ export const RespondConsultationModal: React.FC<RespondConsultationModalProps> =
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setSubmitting(false);
     }

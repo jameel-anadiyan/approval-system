@@ -3,6 +3,7 @@
 // Functions (which hold the service key). Offline sandbox uses demo data.
 import { useCallback, useEffect, useState } from 'react';
 import { supabase, invokeEdgeFunction } from './supabase';
+import { errMsg } from './errorUtils';
 import { useAuth } from '../context/AuthContext';
 import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS, MOCK_REQUESTS, MOCK_PRODUCT_CATEGORIES } from './mockData';
 import type { AppRole, AuditLogEntry, Department, DisbursementAccountType, ProductCategory, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
@@ -171,7 +172,7 @@ export function useDirectory() {
         p_code: input.code,
         p_is_active: input.is_active ?? true,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await reload();
       return { success: true };
     }
@@ -192,7 +193,7 @@ export function useDirectory() {
         p_code: input.code,
         p_is_active: input.is_active ?? true,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await reload();
       return { success: true };
     }
@@ -211,7 +212,7 @@ export function useDirectory() {
         action: 'create',
         ...input,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
 
       // Ensure region_id is assigned directly via RPC or direct update
       if (input.region_id && data?.id) {
@@ -279,7 +280,7 @@ export function useDirectory() {
 
       // 3. Invoke Edge Function for shop_ids, categories, heads
       const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
-      if (error && access.region_id === undefined && access.disbursement_type === undefined) return { success: false, error: error.message };
+      if (error && access.region_id === undefined && access.disbursement_type === undefined) return { success: false, error: errMsg(error) };
 
       await reload();
       return { success: true };
@@ -379,7 +380,7 @@ export function useDirectory() {
       p_is_active: input.is_active ?? true,
       p_department_id: input.department_id ?? null,
     });
-    if (error) return { success: false, error: error.message };
+    if (error) return { success: false, error: errMsg(error) };
     await reload();
     return { success: true };
   };
@@ -402,7 +403,7 @@ export function useDirectory() {
         const res = input.id
           ? await supabase.from('product_categories').update({ name: cleanName, is_active: active, updated_at: new Date().toISOString() }).eq('id', input.id)
           : await supabase.from('product_categories').insert({ name: cleanName, is_active: active });
-        if (res.error) return { success: false, error: error.message || res.error.message };
+        if (res.error) return { success: false, error: errMsg(res.error) || errMsg(error) };
       }
       await reload();
       return { success: true };
@@ -419,7 +420,7 @@ export function useDirectory() {
   const setProductCategoryActive = async (id: string, active: boolean): Promise<Result> => {
     if (live) {
       const { error } = await supabase.from('product_categories').update({ is_active: active, updated_at: new Date().toISOString() }).eq('id', id);
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await reload();
       return { success: true };
     }
@@ -431,7 +432,7 @@ export function useDirectory() {
   const setDiscountReportAccess = async (userId: string, allowed: boolean): Promise<Result> => {
     if (live) {
       const { error } = await supabase.rpc('set_discount_report_access', { p_user_id: userId, p_allowed: allowed });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await reload();
       return { success: true };
     }
@@ -601,7 +602,7 @@ export function useDirectory() {
   const resetPassword = async (userId: string, password: string): Promise<Result> => {
     if (!live) return { success: true };
     const { error } = await invokeEdgeFunction('admin-users', { action: 'reset_password', user_id: userId, password });
-    if (error) return { success: false, error: error.message };
+    if (error) return { success: false, error: errMsg(error) };
     await reload();
     return { success: true };
   };
@@ -609,7 +610,7 @@ export function useDirectory() {
   const setActive = async (userId: string, active: boolean): Promise<Result> => {
     if (live) {
       const { error } = await invokeEdgeFunction('admin-users', { action: 'set_active', user_id: userId, active });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await reload();
       return { success: true };
     }
@@ -624,15 +625,15 @@ export function useDirectory() {
     const { data, error } = await invokeEdgeFunction<{ path: string; token: string }>('credentials', {
       action: 'upload_url', user_id: userId, kind,
     });
-    if (error || !data) return { success: false, error: error?.message ?? 'Could not get upload link.' };
+    if (error || !data) return { success: false, error: error ? errMsg(error) : 'Could not get upload link.' };
     const { error: upErr } = await supabase.storage
       .from('credentials')
       .uploadToSignedUrl(data.path, data.token, file, { contentType: 'image/png' });
-    if (upErr) return { success: false, error: upErr.message };
+    if (upErr) return { success: false, error: errMsg(upErr) };
     const { error: cErr } = await invokeEdgeFunction('credentials', {
       action: 'confirm', user_id: userId, kind, path: data.path,
     });
-    if (cErr) return { success: false, error: cErr.message };
+    if (cErr) return { success: false, error: errMsg(cErr) };
     return { success: true };
   };
 
@@ -644,7 +645,7 @@ export function useDirectory() {
         user_id: userId,
         image: dataUrl,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await reload();
       return { success: true };
     }
@@ -659,7 +660,7 @@ export function useDirectory() {
         action: 'remove_photo',
         user_id: userId,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await reload();
       return { success: true };
     }
@@ -929,5 +930,5 @@ export async function saveThreshold(live: boolean, value: number): Promise<Resul
     return { success: true };
   }
   const { error } = await supabase.rpc('update_setting', { p_key: 'high_value_threshold', p_value: value });
-  return error ? { success: false, error: error.message } : { success: true };
+  return error ? { success: false, error: errMsg(error) } : { success: true };
 }

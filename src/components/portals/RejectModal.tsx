@@ -4,6 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { XCircle } from 'lucide-react';
 import type { ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
+import { errMsg } from '../../lib/errorUtils';
 
 interface RejectModalProps {
   isOpen: boolean;
@@ -37,7 +38,7 @@ export const RejectModal: React.FC<RejectModalProps> = ({
       setReason('');
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
     }

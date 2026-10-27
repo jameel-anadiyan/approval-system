@@ -4,6 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { formatINR } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import { HelpCircle, Send, Loader2, UserCheck, AlertCircle } from 'lucide-react';
 
 interface DisbursementClarificationModalProps {
@@ -46,7 +47,7 @@ export const DisbursementClarificationModal: React.FC<DisbursementClarificationM
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setSubmitting(false);
     }

@@ -4,6 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { Send } from 'lucide-react';
 import type { ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
+import { errMsg } from '../../lib/errorUtils';
 
 interface RegionalForwardModalProps {
   isOpen: boolean;
@@ -33,7 +34,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({ isOp
       setRemarks('');
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
     }

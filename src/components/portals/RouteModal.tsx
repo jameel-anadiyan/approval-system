@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord, ApprovalRoute } from '../../types/database';
 import { formatINR, formatINRWhole, TYPE_LABELS, typeOf } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { ShieldAlert, ArrowRight, UserCheck, Lock, Award } from 'lucide-react';
@@ -56,7 +57,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
       await onRoute(selectedRoute, remarks, voice);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
     }

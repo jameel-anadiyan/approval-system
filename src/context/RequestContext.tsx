@@ -164,44 +164,8 @@ const RequestContext = createContext<RequestContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_REQ_KEY = 'approval_app_requests_store';
 
-export const errMsg = (err: unknown): string => {
-  if (!err) return 'An unexpected error occurred';
-  if (typeof err === 'string') {
-    if (err.includes('Failed to fetch')) {
-      return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
-    }
-    return err;
-  }
-  if (err instanceof Error) {
-    if (err.message.includes('Failed to fetch')) {
-      return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
-    }
-    return err.message;
-  }
-  if (typeof err === 'object') {
-    const o = err as Record<string, any>;
-    if (typeof o.message === 'string' && o.message.trim()) {
-      if (o.message.includes('Failed to fetch')) {
-        return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
-      }
-      return o.hint ? `${o.message} (${o.hint})` : o.message;
-    }
-    if (typeof o.error_description === 'string' && o.error_description.trim()) return o.error_description;
-    if (typeof o.error === 'string' && o.error.trim()) return o.error;
-    if (typeof o.details === 'string' && o.details.trim()) return o.details;
-    try {
-      const s = JSON.stringify(o);
-      if (s !== '{}') return s;
-    } catch {
-      // ignore
-    }
-  }
-  const str = String(err);
-  if (str.includes('Failed to fetch')) {
-    return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
-  }
-  return str;
-};
+import { errMsg } from '../lib/errorUtils';
+export { errMsg };
 
 /** Newest action first, files in upload order, resolve owner head. */
 const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Profile>> = {}) =>
@@ -728,7 +692,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!user) return { success: false, error: 'Must be logged in' };
     if (isBackendConnected) {
       const { data: path, error } = await supabase.rpc('remove_file', { p_file_id: fileId });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       if (path) await supabase.storage.from('request-files').remove([path as string]);
       await loadRequests();
       return { success: true };
@@ -749,7 +713,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!res.success) return res;
       }
       const { error } = await supabase.rpc('delete_draft', { p_request_id: id });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await loadRequests();
       return { success: true };
     }
@@ -908,7 +872,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -966,7 +930,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1060,7 +1024,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1112,7 +1076,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1171,7 +1135,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (opts.reload !== false) await loadRequests();
         return { success: true, approval_no: data?.approval_no };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1267,7 +1231,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true, fully_paid: !!(data as { fully_paid?: boolean } | null)?.fully_paid };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1376,7 +1340,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const res = data as { entry_id?: string; entry_no?: number; fully_paid?: boolean } | null;
         return { success: true, entry_id: res?.entry_id, entry_no: res?.entry_no, fully_paid: !!res?.fully_paid };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1460,7 +1424,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await loadRequests();
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return { success: false, error: errMsg(err) };
       }
     }
 
@@ -1580,7 +1544,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_voice_path: voicePath,
         p_voice_duration: voiceDuration,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await loadRequests(true);
       return { success: true, count: data?.count };
     }
@@ -1611,7 +1575,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } catch (uploadErr: unknown) {
           return {
             success: false,
-            error: uploadErr instanceof Error ? uploadErr.message : 'Voice upload failed',
+            error: errMsg(uploadErr),
           };
         }
       }
@@ -1623,7 +1587,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_voice_path: voicePath,
         p_voice_duration: voiceDuration,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await loadRequests(true);
       return { success: true };
     }
@@ -1682,7 +1646,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } catch (uploadErr: unknown) {
           return {
             success: false,
-            error: uploadErr instanceof Error ? uploadErr.message : 'Voice upload failed',
+            error: errMsg(uploadErr),
           };
         }
       }
@@ -1705,7 +1669,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               'Database migration required: Please run migration 0018_disbursement_clarifications.sql in Supabase SQL Editor to enable clarifications.',
           };
         }
-        return { success: false, error: error.message };
+        return { success: false, error: errMsg(error) };
       }
       await loadRequests(true);
       return { success: true };
@@ -1811,7 +1775,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } catch (uploadErr: unknown) {
           return {
             success: false,
-            error: uploadErr instanceof Error ? uploadErr.message : 'Voice upload failed',
+            error: errMsg(uploadErr),
           };
         }
       }
@@ -1838,7 +1802,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               'Database migration required: Please run migration 0018_disbursement_clarifications.sql in Supabase SQL Editor to enable clarifications.',
           };
         }
-        return { success: false, error: error.message };
+        return { success: false, error: errMsg(error) };
       }
       if (uploaded.length && requestId) {
         const signed = await signClarificationFiles(requestId);
@@ -1974,7 +1938,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const { error } = await supabase.rpc('set_quote', {
       p_file_id: fileId, p_vendor: vendor, p_amount: amount, p_preferred: preferred,
     });
-    if (error) return { success: false, error: error.message };
+    if (error) return { success: false, error: errMsg(error) };
     return { success: true };
   };
 
@@ -1985,7 +1949,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       p_request_id: requestId, p_file_id: fileId, p_remarks: remarks?.trim() || null,
     });
     await loadRequests(true);
-    if (error) return { success: false, error: error.message };
+    if (error) return { success: false, error: errMsg(error) };
     return { success: true, status: (data as { status?: string } | null)?.status };
   };
 
@@ -2005,7 +1969,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_action: action,
         p_remarks: remarks || null,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) return { success: false, error: errMsg(error) };
       await loadRequests(true);
       return { success: true };
     }

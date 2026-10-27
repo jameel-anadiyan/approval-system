@@ -4,6 +4,7 @@ import { RequestRecord } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests, type ActionVoice } from '../../context/RequestContext';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
+import { errMsg } from '../../lib/errorUtils';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { invokeEdgeFunction } from '../../lib/supabase';
 import { downloadStoredFile } from '../../lib/files';
@@ -105,7 +106,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
     } catch (err: unknown) {
       clearInterval(progressTimer);
       setStep('preview');
-      setErrorMessage(err instanceof Error ? err.message : String(err));
+      setErrorMessage(errMsg(err));
     }
   };
 
