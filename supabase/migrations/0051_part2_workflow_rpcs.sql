@@ -353,6 +353,7 @@ begin
 end $function$;
 
 -- Update discount_report to return invoice_no & bill_date
+drop function if exists public.discount_report(date, date);
 create or replace function public.discount_report(p_from date default null, p_to date default null)
 returns table (
   id uuid, request_no text, title text, status public.request_status,
@@ -389,5 +390,7 @@ begin
      order by r.submitted_at desc nulls last;
 end $$;
 
+revoke execute on function public.discount_report(date, date) from public, anon;
+grant execute on function public.discount_report(date, date) to authenticated;
 
 notify pgrst, 'reload schema';
