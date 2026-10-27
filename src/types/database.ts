@@ -337,7 +337,14 @@ export interface DisbursementEntry {
   paid_by?: string | null;
   paid_by_name?: string | null;
   payment_id?: string | null;
+  /** Old balance / old advance adjusted against this entry (auto-settled, not paid by Payment-Only) */
+  adjustment_amount?: number;
+  adjustment_payment_id?: string | null;
 }
+
+/** Amount the Payment-Only account still has to pay for an entry (entry amount minus adjustment). */
+export const entryPayable = (e: Pick<DisbursementEntry, 'amount' | 'adjustment_amount'>) =>
+  Math.max(0, Math.round((Number(e.amount || 0) - Number(e.adjustment_amount || 0)) * 100) / 100);
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
 
@@ -396,6 +403,8 @@ export interface RequestPayment {
   paid_by_name: string | null;
   created_at: string;
   entry_id?: string | null;
+  /** Auto-recorded old balance / old advance adjustment (not a real payout) */
+  is_adjustment?: boolean;
 }
 
 /** Paid so far, balance left, and whether some (but not all) has been paid. */

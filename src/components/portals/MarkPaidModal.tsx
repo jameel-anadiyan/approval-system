@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
-import { DisbursementEntry, RequestRecord, paymentSummary } from '../../types/database';
+import { DisbursementEntry, RequestRecord, entryPayable, paymentSummary } from '../../types/database';
 import { formatINR, formatISTDate } from '../../lib/formatters';
 import type { PaymentInput } from '../../context/RequestContext';
 import { Banknote, CheckCircle, History, Percent, FileText } from 'lucide-react';
@@ -26,7 +26,8 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   const { paid, balance } = paymentSummary(request);
   const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
-  const entryAmount = entry ? Number(entry.amount || 0) : balance;
+  const entryAdjustment = entry ? Number(entry.adjustment_amount || 0) : 0;
+  const entryAmount = entry ? entryPayable(entry) : balance;
   const maxPayable = entry ? entryAmount : balance;
 
   const [paymentMode, setPaymentMode] = useState('NEFT');
@@ -116,8 +117,21 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
               </span>
             </div>
 
+            {entryAdjustment > 0 && (
+              <div className="space-y-1 pt-1 text-xs">
+                <div className="flex items-baseline justify-between text-teal-800">
+                  <span>Entry Amount:</span>
+                  <span className="font-mono font-semibold">{formatINR(Number(entry.amount || 0))}</span>
+                </div>
+                <div className="flex items-baseline justify-between text-violet-800">
+                  <span>Less: Old balance / advance adjusted (auto-paid)</span>
+                  <span className="font-mono font-semibold">− {formatINR(entryAdjustment)}</span>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-baseline justify-between pt-1">
-              <span className="text-xs text-teal-800">Capped Entry Amount:</span>
+              <span className="text-xs text-teal-800">{entryAdjustment > 0 ? 'Payable Now:' : 'Capped Entry Amount:'}</span>
               <span className="font-mono text-base font-extrabold text-teal-950">
                 {formatINR(entryAmount)}
               </span>
@@ -157,7 +171,7 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
                 <li key={p.id} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
                   <span className="text-slate-600 min-w-0 truncate">
                     {formatISTDate(p.payment_date, false)}
-                    {p.payment_mode ? ` · ${p.payment_mode}` : ''}
+                    {p.is_adjustment ? ' · Old balance / advance adjustment' : p.payment_mode ? ` · ${p.payment_mode}` : ''}
                     {p.payment_ref ? ` · ${p.payment_ref}` : ''}
                   </span>
                   <span className="font-bold text-slate-900 shrink-0">{formatINR(p.amount)}</span>

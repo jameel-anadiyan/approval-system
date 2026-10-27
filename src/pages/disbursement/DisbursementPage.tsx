@@ -6,7 +6,7 @@ import { RequestFilters, useRequestFilters } from '../../components/requests/Req
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { AddDisbursementEntryModal } from '../../components/portals/AddDisbursementEntryModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
-import { DisbursementEntry, RequestRecord, paymentSummary } from '../../types/database';
+import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable } from '../../types/database';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import {
   Banknote,
@@ -487,6 +487,11 @@ export const DisbursementPage: React.FC = () => {
                               <span className="font-extrabold text-slate-900 font-mono text-sm">
                                 {formatINR(ent.amount)}
                               </span>
+                              {Number(ent.adjustment_amount ?? 0) > 0 && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-800 border-violet-200">
+                                  Old Bal. Adj. −{formatINR(Number(ent.adjustment_amount))} · To pay {formatINR(entryPayable(ent))}
+                                </span>
+                              )}
                               <span
                                 className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
                                   ent.tds_cut
@@ -521,7 +526,7 @@ export const DisbursementPage: React.FC = () => {
                                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95"
                                   >
                                     <Banknote className="w-3.5 h-3.5" />
-                                    <span>Pay Entry #{ent.entry_no} ({formatINR(ent.amount)})</span>
+                                    <span>Pay Entry #{ent.entry_no} ({formatINR(entryPayable(ent))})</span>
                                   </button>
                                 ) : (
                                   <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">
@@ -553,13 +558,16 @@ export const DisbursementPage: React.FC = () => {
           isOpen={true}
           onClose={() => setEntryModalTarget(null)}
           request={entryModalTarget}
-          onAddEntry={async (amount, tdsCut, notes) => {
-            const res = await addDisbursementEntry(entryModalTarget.id, amount, tdsCut, notes);
+          onAddEntry={async (amount, tdsCut, notes, adjustment = 0) => {
+            const res = await addDisbursementEntry(entryModalTarget.id, amount, tdsCut, notes, adjustment);
             if (!res.success) {
               throw new Error(res.error || 'Failed to add disbursement entry');
             }
+            const adjText = adjustment > 0 ? ` · Old balance adjusted ${formatINR(adjustment)}` : '';
             setNotice(
-              `Entry added successfully (${formatINR(amount)} · ${tdsCut ? 'TDS Cut' : 'TDS Not Cut'}). Ready for Payment.`
+              adjustment >= amount
+                ? `Entry added (${formatINR(amount)})${adjText}. Fully adjusted — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
+                : `Entry added successfully (${formatINR(amount)} · ${tdsCut ? 'TDS Cut' : 'TDS Not Cut'}${adjText}). ${formatINR(amount - adjustment)} ready for Payment.`
             );
           }}
         />
@@ -577,7 +585,7 @@ export const DisbursementPage: React.FC = () => {
             if (!res.success) throw new Error(res.error || 'Could not record payment');
             setNotice(
               payTarget.entry
-                ? `Entry #${payTarget.entry.entry_no} marked as Paid (${formatINR(dt.amount || payTarget.entry.amount)}).`
+                ? `Entry #${payTarget.entry.entry_no} marked as Paid (${formatINR(dt.amount || entryPayable(payTarget.entry))}).`
                 : res.fully_paid
                 ? 'Paid in full — request closed.'
                 : 'Partial payment recorded. Balance stays in Awaiting Payment.'

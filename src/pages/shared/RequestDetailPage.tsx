@@ -36,7 +36,7 @@ import {
   ROLE_LABELS,
   typeOf,
 } from '../../lib/formatters';
-import { DisbursementEntry, paymentSummary } from '../../types/database';
+import { DisbursementEntry, entryPayable, paymentSummary } from '../../types/database';
 import {
   ArrowLeft,
   Send,
@@ -1030,6 +1030,16 @@ export const RequestDetailPage: React.FC = () => {
                                   · {ent.notes}
                                 </span>
                               )}
+                              {Number(ent.adjustment_amount || 0) > 0 && (
+                                <span className="basis-full flex items-center gap-1.5 flex-wrap text-[11px]">
+                                  <span className="font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
+                                    Old balance / advance adjusted {formatINR(Number(ent.adjustment_amount))}
+                                  </span>
+                                  <span className="font-bold text-teal-800">
+                                    {entryPayable(ent) > 0 ? `To pay ${formatINR(entryPayable(ent))}` : 'Nothing to pay'}
+                                  </span>
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
@@ -1044,7 +1054,7 @@ export const RequestDetailPage: React.FC = () => {
                                     className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95"
                                   >
                                     <Banknote className="w-3.5 h-3.5" />
-                                    <span>Pay Entry #{ent.entry_no} ({formatINR(ent.amount)})</span>
+                                    <span>Pay Entry #{ent.entry_no} ({formatINR(entryPayable(ent))})</span>
                                   </button>
                                 ) : (
                                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
@@ -1058,7 +1068,7 @@ export const RequestDetailPage: React.FC = () => {
                               ) : (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                  <span>Paid</span>
+                                  <span>{entryPayable(ent) === 0 && Number(ent.adjustment_amount || 0) > 0 ? 'Adjusted' : 'Paid'}</span>
                                 </span>
                               )}
                             </div>
@@ -1081,13 +1091,18 @@ export const RequestDetailPage: React.FC = () => {
                         <div className="min-w-0">
                           <p className="font-semibold text-slate-800">
                             #{i + 1} · {formatISTDate(p.payment_date, false)}
+                            {p.is_adjustment && (
+                              <span className="ml-1.5 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-800 border border-violet-200">
+                                Adjustment
+                              </span>
+                            )}
                           </p>
                           <p className="text-[11px] text-slate-500 truncate">
-                            {[p.payment_mode, p.payment_ref, p.paid_by_name].filter(Boolean).join(' · ') || '—'}
+                            {[p.is_adjustment ? 'Old balance / advance adjustment' : p.payment_mode, p.payment_ref, p.paid_by_name].filter(Boolean).join(' · ') || '—'}
                           </p>
                           {p.remarks && <p className="text-[11px] text-slate-500 italic break-words">{p.remarks}</p>}
                         </div>
-                        <span className="font-bold text-teal-700 shrink-0">{formatINR(p.amount)}</span>
+                        <span className={`font-bold shrink-0 ${p.is_adjustment ? 'text-violet-700' : 'text-teal-700'}`}>{formatINR(p.amount)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1617,7 +1632,7 @@ export const RequestDetailPage: React.FC = () => {
                       <span>
                         {isPendingDisbursementClarification
                           ? 'Payment on Hold'
-                          : `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(firstPendingEntry.amount)})`}
+                          : `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(entryPayable(firstPendingEntry))})`}
                       </span>
                     </button>
                   ) : (
@@ -1646,7 +1661,7 @@ export const RequestDetailPage: React.FC = () => {
                       {isPendingDisbursementClarification
                         ? 'Payment on Hold'
                         : firstPendingEntry
-                        ? `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(firstPendingEntry.amount)})`
+                        ? `Pay Entry #${firstPendingEntry.entry_no} (${formatINR(entryPayable(firstPendingEntry))})`
                         : pay.paid > 0
                         ? `Pay Balance ${formatINR(pay.balance)}`
                         : 'Record Payment'}
@@ -1782,12 +1797,16 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onAddEntry={async (amount, tdsCut, notes) => {
-            const res = await addDisbursementEntry(request.id, amount, tdsCut, notes);
+          onAddEntry={async (amount, tdsCut, notes, adjustment = 0) => {
+            const res = await addDisbursementEntry(request.id, amount, tdsCut, notes, adjustment);
             if (!res.success) throw new Error(res.error || 'Failed to add entry');
+            const adjText = adjustment > 0 ? ` · Old balance adjusted ${formatINR(adjustment)}` : '';
             setBanner({
               ok: true,
-              text: `Disbursement entry created successfully (${formatINR(amount)} · ${tdsCut ? 'TDS Cut' : 'TDS Not Cut'}). Ready for payment.`,
+              text:
+                adjustment >= amount
+                  ? `Disbursement entry created (${formatINR(amount)})${adjText}. Fully adjusted — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
+                  : `Disbursement entry created successfully (${formatINR(amount)} · ${tdsCut ? 'TDS Cut' : 'TDS Not Cut'}${adjText}). ${formatINR(amount - adjustment)} ready for payment.`,
             });
           }}
         />

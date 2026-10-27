@@ -11,6 +11,7 @@ import {
   DisbursementClarification,
   DisbursementEntry,
   UserTargetHead,
+  entryPayable,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -100,8 +101,10 @@ interface RequestContextType {
     requestId: string,
     amount: number,
     tdsCut: boolean,
-    notes?: string
-  ) => Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number }>;
+    notes?: string,
+    /** Old balance / old advance adjusted from this entry (auto-settled) */
+    adjustment?: number
+  ) => Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }>;
   cancelDisbursementEntry: (entryId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
   payDisbursementEntry: (
     entryId: string,
@@ -235,7 +238,7 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
         (a, b) => b.created_at.localeCompare(a.created_at)
       ),
       disbursement_entries: (r.disbursement_entries || [])
-        .map((e) => ({ ...e, amount: Number(e.amount) }))
+        .map((e) => ({ ...e, amount: Number(e.amount), adjustment_amount: Number(e.adjustment_amount ?? 0) }))
         .sort((a, b) => (a.entry_no ?? 0) - (b.entry_no ?? 0)),
       files: [...(r.files || [])].sort(
         (a, b) =>
@@ -335,7 +338,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           if (!entryErr && entries && entries.length > 0) {
             entries.forEach((e: any) => {
               const list = entryMap.get(e.request_id) || [];
-              list.push({ ...e, amount: Number(e.amount) });
+              list.push({ ...e, amount: Number(e.amount), adjustment_amount: Number(e.adjustment_amount ?? 0) });
               entryMap.set(e.request_id, list);
             });
           }
@@ -1269,11 +1272,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     const entry = details.entry_id ? (current.disbursement_entries || []).find((e) => e.id === details.entry_id) : null;
-    const maxPayable = entry ? entry.amount : Math.max(0, current.amount - Number(current.paid_amount ?? 0));
+    const maxPayable = entry ? entryPayable(entry) : Math.max(0, current.amount - Number(current.paid_amount ?? 0));
     const amt = Math.round((details.amount ?? maxPayable) * 100) / 100;
     if (amt <= 0) return { success: false, error: 'Payment amount must be more than zero.' };
     if (amt > maxPayable) {
-      return { success: false, error: entry ? `Payment cannot exceed Entry #${entry.entry_no} amount of ₹${entry.amount.toFixed(2)}.` : `Payment is more than the balance of ₹${maxPayable.toFixed(2)}.` };
+      return { success: false, error: entry ? `Payment cannot exceed the payable amount of Entry #${entry.entry_no} (₹${maxPayable.toFixed(2)}).` : `Payment is more than the balance of ₹${maxPayable.toFixed(2)}.` };
     }
 
     const already = Number(current.paid_amount ?? 0);
@@ -1340,9 +1343,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     requestId: string,
     amount: number,
     tdsCut: boolean,
-    notes?: string
-  ): Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number }> => {
+    notes?: string,
+    adjustment = 0
+  ): Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
+    const adj = Math.round(Math.max(0, adjustment || 0) * 100) / 100;
+    if (adj > amount) return { success: false, error: 'Old balance / advance adjustment cannot be more than the entry amount.' };
 
     if (isBackendConnected) {
       try {
@@ -1351,41 +1357,82 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_amount: amount,
           p_tds_cut: tdsCut,
           p_notes: notes?.trim() || null,
+          p_adjustment: adj,
         });
-        if (error) throw error;
+        if (error) {
+          if (adj > 0 && (error.message.includes('p_adjustment') || error.message.includes('schema cache'))) {
+            throw new Error('Database migration required: run 0050_entry_old_balance_adjustment.sql in the Supabase SQL Editor.');
+          }
+          throw error;
+        }
         await loadRequests();
-        const res = data as any;
-        return { success: true, entry_id: res?.entry_id, entry_no: res?.entry_no };
+        const res = data as { entry_id?: string; entry_no?: number; fully_paid?: boolean } | null;
+        return { success: true, entry_id: res?.entry_id, entry_no: res?.entry_no, fully_paid: !!res?.fully_paid };
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     }
 
-    // Mock
+    // Mock (mirrors add_disbursement_entry: adjustment is settled immediately)
     const req = getRequestById(requestId);
     if (!req) return { success: false, error: 'Request not found' };
     const existing = req.disbursement_entries || [];
     const nextNo = existing.length > 0 ? Math.max(...existing.map((e) => e.entry_no)) + 1 : 1;
+    const now = new Date().toISOString();
+    const fullyAdjusted = adj > 0 && adj === amount;
+    const entryId = `entry-${Date.now()}`;
+    const paymentId = adj > 0 ? `pay-${Date.now()}` : null;
     const newEntry: DisbursementEntry = {
-      id: `entry-${Date.now()}`,
+      id: entryId,
       request_id: requestId,
       entry_no: nextNo,
       amount,
+      adjustment_amount: adj,
+      adjustment_payment_id: paymentId,
       tds_cut: tdsCut,
-      status: 'pending',
+      status: fullyAdjusted ? 'paid' : 'pending',
       notes: notes?.trim() || null,
       created_by: user.id,
       created_by_name: user.full_name,
-      created_at: new Date().toISOString(),
+      created_at: now,
+      paid_at: fullyAdjusted ? now : null,
+      paid_by: fullyAdjusted ? user.id : null,
+      paid_by_name: fullyAdjusted ? user.full_name : null,
+      payment_id: fullyAdjusted ? paymentId : null,
     };
+    const paid = Number(req.paid_amount ?? 0) + adj;
+    const full = adj > 0 && paid >= req.amount;
     updateLocalRequests((prev) =>
       prev.map((r) =>
         r.id === requestId
-          ? { ...r, disbursement_entries: [...(r.disbursement_entries || []), newEntry] }
+          ? {
+              ...r,
+              disbursement_entries: [...(r.disbursement_entries || []), newEntry],
+              ...(adj > 0
+                ? {
+                    paid_amount: paid,
+                    status: full ? ('paid' as const) : r.status,
+                    paid_by: full ? user.id : r.paid_by,
+                    paid_at: full ? now : r.paid_at,
+                    payment_mode: full ? 'Adjustment' : r.payment_mode,
+                    updated_at: now,
+                    payments: [
+                      ...(r.payments || []),
+                      {
+                        id: paymentId!, request_id: requestId, amount: adj, payment_date: now.slice(0, 10),
+                        payment_mode: 'Adjustment', payment_ref: null,
+                        remarks: `Old balance / old advance adjustment · Entry #${nextNo}`,
+                        paid_by: user.id, paid_by_name: user.full_name, created_at: now,
+                        entry_id: entryId, is_adjustment: true,
+                      },
+                    ],
+                  }
+                : {}),
+            }
           : r
       )
     );
-    return { success: true, entry_id: newEntry.id, entry_no: nextNo };
+    return { success: true, entry_id: newEntry.id, entry_no: nextNo, fully_paid: full };
   };
 
   const cancelDisbursementEntry = async (
@@ -1407,12 +1454,23 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    // Mock
+    // Mock (reverses any old balance / advance adjustment recorded with the entry)
     updateLocalRequests((prev) =>
-      prev.map((r) => ({
-        ...r,
-        disbursement_entries: (r.disbursement_entries || []).filter((e) => e.id !== entryId),
-      }))
+      prev.map((r) => {
+        const ent = (r.disbursement_entries || []).find((e) => e.id === entryId);
+        if (!ent) return r;
+        const adj = Number(ent.adjustment_amount || 0);
+        return {
+          ...r,
+          disbursement_entries: (r.disbursement_entries || []).filter((e) => e.id !== entryId),
+          ...(adj > 0
+            ? {
+                paid_amount: Math.max(0, Number(r.paid_amount ?? 0) - adj),
+                payments: (r.payments || []).filter((p) => !(p.entry_id === entryId && p.is_adjustment)),
+              }
+            : {}),
+        };
+      })
     );
     return { success: true };
   };
