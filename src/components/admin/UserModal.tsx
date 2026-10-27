@@ -385,6 +385,27 @@ export const UserModal: React.FC<UserModalProps> = ({
                   </span>
                 </div>
               </label>
+
+              <label className={`sm:col-span-2 flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                disbursementType === 'stock_transfer_monitor'
+                  ? 'bg-indigo-600/10 border-indigo-500 ring-1 ring-indigo-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}>
+                <input
+                  type="radio"
+                  name="disbursement_type"
+                  value="stock_transfer_monitor"
+                  checked={disbursementType === 'stock_transfer_monitor'}
+                  onChange={() => setDisbursementType('stock_transfer_monitor')}
+                  className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">Stock Transfer Monitor</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Sees only approved stock transfers and marks them as Transfer Completed. Can view the Stock Transfer Report. No payment access.
+                  </span>
+                </div>
+              </label>
             </div>
           </div>
         )}

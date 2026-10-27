@@ -138,8 +138,14 @@ export interface StockTransferDetails {
   notes?: string | null;
 }
 
+/** Shop picked on General / Non-Cash requests (moved to requests.shop_id by the server). */
+export interface RequestShopChoice {
+  shop_id?: string | null;
+  shop_name?: string | null;
+}
+
 export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>
-  & Partial<AssetDetails> & Partial<StockTransferDetails>;
+  & Partial<AssetDetails> & Partial<StockTransferDetails> & RequestShopChoice;
 
 export interface Department {
   id: string;
@@ -193,11 +199,22 @@ export interface Profile {
   default_head_id?: string | null;
   /** Heads assigned to this employee / regional head */
   user_heads?: { head_id: string; is_default: boolean }[];
-  /** Disbursement role only: Entry Only vs Payment Only */
+  /** Disbursement role only: Entry Only vs Payment Only vs Stock Transfer Monitor */
   disbursement_type?: DisbursementAccountType | null;
+  /** Granted by Admin to open the Stock Transfer Report (Admin / Monitor always have it) */
+  can_view_stock_transfer_report?: boolean;
 }
 
-export type DisbursementAccountType = 'entry_only' | 'payment_only';
+export type DisbursementAccountType = 'entry_only' | 'payment_only' | 'stock_transfer_monitor';
+
+/** A shop the signed-in user may tag a General / Non-Cash request with. */
+export interface RequestShopOption {
+  id: string;
+  name: string;
+  code: string;
+  /** true = user's own / covered shop; false = user has none, so any active shop is offered */
+  associated: boolean;
+}
 
 export interface UserTargetHead {
   head_id: string;
@@ -298,6 +315,11 @@ export interface RequestRecord {
   waitlist_approved_at?: string | null;
   /** Disbursement entries (for entry-only / payment-only accounts) */
   disbursement_entries?: DisbursementEntry[];
+  /** Stock transfer: marked complete by the Stock Transfer Monitor account (or Admin) */
+  transfer_completed_at?: string | null;
+  transfer_completed_by?: string | null;
+  transfer_completed_by_name?: string | null;
+  transfer_completed_remarks?: string | null;
 }
 
 export interface DisbursementEntry {

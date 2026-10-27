@@ -28,6 +28,7 @@ import { HeadConsultationsSection } from '../../components/requests/HeadConsulta
 import { DisbursementClarificationSection } from '../../components/requests/DisbursementClarificationSection';
 import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
 import { UserAvatar } from '../../components/common/UserAvatar';
+import { CompleteTransferModal } from '../../components/portals/CompleteTransferModal';
 import {
   formatINR,
   formatINRWhole,
@@ -64,6 +65,8 @@ import {
   Ban,
   AlertTriangle,
   MapPin,
+  PackageCheck,
+  Truck,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -90,10 +93,11 @@ export const RequestDetailPage: React.FC = () => {
     selectQuote,
     decideExhibitionWaitlist,
     deleteSpecificRequest,
+    markTransferComplete,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'regional_forward' | 'pay' | 'add_disb_entry' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | null
+    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'regional_forward' | 'pay' | 'add_disb_entry' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | 'complete_transfer' | null
   >(null);
   const [selectedEntry, setSelectedEntry] = useState<DisbursementEntry | null>(null);
   const [consultInitialStatus, setConsultInitialStatus] = useState<'agreed' | 'disagreed' | null>(null);
@@ -220,10 +224,13 @@ export const RequestDetailPage: React.FC = () => {
 
   const rType = typeOf(request);
   const isDisbursement = role === 'disbursement';
-  const isEntryOnly = isDisbursement && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
+  const isStockMonitorUser = isDisbursement && user?.disbursement_type === 'stock_transfer_monitor';
+  const isEntryOnly = isDisbursement && !isStockMonitorUser && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
   const isPaymentOnly = isDisbursement && user?.disbursement_type === 'payment_only';
   const canAddDisbursementEntry = isEntryOnly || role === 'admin';
   const canDisbursePayment = isPaymentOnly || role === 'admin';
+  const isApprovedTransfer = rType === 'stock_transfer' && request.status === 'approved';
+  const canCompleteTransfer = isApprovedTransfer && !request.transfer_completed_at && (role === 'admin' || isStockMonitorUser);
 
   const entries: DisbursementEntry[] = useMemo(() => {
     return (request.disbursement_entries || []).filter((e) => e.status !== 'cancelled');
@@ -558,6 +565,57 @@ export const RequestDetailPage: React.FC = () => {
               </p>
             )}
           </div>
+        </div>
+      )}
+
+      {isApprovedTransfer && (
+        <div
+          id="transfer-status-banner"
+          className={`mb-4 p-4 rounded-2xl border shadow-xs flex items-start gap-3 ${
+            request.transfer_completed_at
+              ? 'bg-gradient-to-r from-emerald-50 to-white border-emerald-200'
+              : 'bg-gradient-to-r from-amber-50 to-white border-amber-200'
+          }`}
+        >
+          <div className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shrink-0 shadow-xs ${
+            request.transfer_completed_at ? 'bg-emerald-600' : 'bg-amber-500'
+          }`}>
+            {request.transfer_completed_at ? <PackageCheck className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
+          </div>
+          <div className="text-xs space-y-1 min-w-0 flex-1">
+            {request.transfer_completed_at ? (
+              <>
+                <p className="text-sm font-extrabold text-emerald-950 font-display">Transfer completed</p>
+                <p className="text-emerald-800">
+                  Marked complete by <strong>{request.transfer_completed_by_name || 'Stock Transfer Monitor'}</strong> on{' '}
+                  {formatISTDate(request.transfer_completed_at)}.
+                </p>
+                {request.transfer_completed_remarks && (
+                  <p className="text-slate-700 bg-white/80 border border-emerald-100 rounded-lg px-2.5 py-1.5 break-words">
+                    “{request.transfer_completed_remarks}”
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-extrabold text-amber-950 font-display">Awaiting transfer</p>
+                <p className="text-amber-800">
+                  Approved — the stock has not yet been confirmed as received at{' '}
+                  <strong>{request.details?.to_shop_name || 'the destination shop'}</strong>.
+                </p>
+              </>
+            )}
+          </div>
+          {canCompleteTransfer && (
+            <button
+              type="button"
+              id="mark-transfer-complete-banner-btn"
+              onClick={() => setModalState('complete_transfer')}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-200 shrink-0 transition-all active:scale-95"
+            >
+              <PackageCheck className="w-4 h-4" /> Mark Complete
+            </button>
+          )}
         </div>
       )}
 
@@ -1491,8 +1549,21 @@ export const RequestDetailPage: React.FC = () => {
               </button>
             )}
 
+            {/* Stock Transfer Monitor / Admin: confirm the stock reached the destination shop */}
+            {canCompleteTransfer && (
+              <button
+                type="button"
+                id="mark-transfer-complete-btn"
+                onClick={() => setModalState('complete_transfer')}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all active:scale-95 cursor-pointer"
+              >
+                <PackageCheck className="w-4 h-4" />
+                <span>Mark Transfer Complete</span>
+              </button>
+            )}
+
             {/* Disbursement Action */}
-            {role === 'disbursement' && request.status === 'approved' && rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && (
+            {role === 'disbursement' && !isStockMonitorUser && request.status === 'approved' && rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && (
               <>
                 <button
                   type="button"
@@ -1747,6 +1818,18 @@ export const RequestDetailPage: React.FC = () => {
                 ? 'Paid in full.'
                 : 'Partial payment recorded. Balance is still pending.',
             });
+          }}
+        />
+      )}
+      {modalState === 'complete_transfer' && request && (
+        <CompleteTransferModal
+          isOpen
+          request={request}
+          onClose={() => setModalState(null)}
+          onConfirm={async (remarks) => {
+            const res = await markTransferComplete(request.id, remarks);
+            if (res.success) setBanner({ ok: true, text: 'Stock transfer marked as completed.' });
+            return res;
           }}
         />
       )}

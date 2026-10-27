@@ -5,7 +5,7 @@ import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/form
 import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2 } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck } from 'lucide-react';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -96,6 +96,19 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               <Tag className="w-3 h-3" />
               {request.category_name}
             </span>
+          )}
+          {rType === 'stock_transfer' && request.status === 'approved' && (
+            request.transfer_completed_at ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <PackageCheck className="w-3 h-3" />
+                Transfer Completed
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                <Truck className="w-3 h-3" />
+                Awaiting Transfer
+              </span>
+            )
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

@@ -107,6 +107,8 @@ interface RequestContextType {
     entryId: string,
     details: PaymentInput
   ) => Promise<{ success: boolean; error?: string; fully_paid?: boolean }>;
+  /** Stock Transfer Monitor (or Admin) marks an approved stock transfer as physically completed. */
+  markTransferComplete: (requestId: string, remarks?: string) => Promise<Result>;
   /** Inter-department head consultations */
   requestHeadConsultations: (
     requestId: string,
@@ -563,7 +565,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       amount: data.amount,
       request_type: type,
       details: data.details ?? null,
-      shop_name: user.shop?.name ?? null,
+      shop_name: (data.details as { shop_name?: string | null } | null)?.shop_name ?? user.shop?.name ?? null,
       status: 'draft',
       route: null,
       routed_by: null,
@@ -1197,6 +1199,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!user) return { success: false, error: 'Must be logged in' };
 
     const isDisbursement = user.role === 'disbursement';
+    if (isDisbursement && user.disbursement_type === 'stock_transfer_monitor') {
+      return { success: false, error: 'Permission denied: Stock Transfer Monitor accounts cannot record payments.' };
+    }
     const isEntryOnly = isDisbursement && (user.disbursement_type === 'entry_only' || !user.disbursement_type);
     if (isEntryOnly) {
       return {
@@ -1417,6 +1422,58 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     details: PaymentInput
   ): Promise<{ success: boolean; error?: string; fully_paid?: boolean }> => {
     return markAsPaid('', { ...details, entry_id: entryId });
+  };
+
+  const markTransferComplete = async (requestId: string, remarks?: string): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('mark_stock_transfer_complete', {
+          p_request_id: requestId,
+          p_remarks: remarks?.trim() || null,
+        });
+        if (error) throw error;
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    const req = getRequestById(requestId);
+    if (!req || req.request_type !== 'stock_transfer') return { success: false, error: 'Stock transfer not found' };
+    if (req.status !== 'approved') return { success: false, error: 'Only approved stock transfers can be marked complete' };
+    if (req.transfer_completed_at) return { success: false, error: 'This transfer is already marked complete' };
+    const now = new Date().toISOString();
+    const action: RequestAction = {
+      id: `act-${Date.now()}`,
+      request_id: requestId,
+      actor_id: user.id,
+      actor_name: user.full_name,
+      actor_role: user.role,
+      action: 'transfer_completed',
+      from_status: 'approved',
+      to_status: 'approved',
+      remarks: remarks?.trim() || 'Stock transfer marked as completed',
+      visible_to_requester: true,
+      created_at: now,
+    };
+    updateLocalRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              transfer_completed_at: now,
+              transfer_completed_by: user.id,
+              transfer_completed_by_name: user.full_name,
+              transfer_completed_remarks: remarks?.trim() || null,
+              actions: [action, ...(r.actions || [])],
+            }
+          : r
+      )
+    );
+    return { success: true };
   };
 
   const requestHeadConsultations = async (
@@ -2014,6 +2071,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addDisbursementEntry,
         cancelDisbursementEntry,
         payDisbursementEntry,
+        markTransferComplete,
         requestHeadConsultations,
         respondHeadConsultation,
         loadConsultableHeads,

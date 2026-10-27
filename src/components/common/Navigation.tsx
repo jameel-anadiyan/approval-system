@@ -28,10 +28,14 @@ import {
   MapPin,
   Globe,
   Tag,
+  Truck,
+  PackageCheck,
+  PackageSearch,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { canViewDiscountReport } from '../../lib/discountReport';
+import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTransferReport';
 import { isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
 
 interface NavItem {
@@ -101,6 +105,16 @@ export const Navigation: React.FC = () => {
     (r) => r.is_waitlist && r.status !== 'draft' && !r.waitlist_approved_at && r.status !== 'rejected' && r.status !== 'withdrawn'
   ).length;
 
+  const transferPendingCount = requests.filter(
+    (r) => r.request_type === 'stock_transfer' && r.status === 'approved' && !r.transfer_completed_at
+  ).length;
+
+  // Admin-granted report tab for non-admin, non-monitor users
+  const stockReportItem: NavItem[] =
+    role !== 'admin' && !isStockMonitor(user) && canViewStockTransferReport(user)
+      ? [{ label: 'Stock Transfer Report', path: '/reports/stock-transfers', icon: Truck }]
+      : [];
+
   switch (role) {
     case 'employee':
       mainNavItems = [
@@ -111,6 +125,7 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
+        ...stockReportItem,
         { label: 'Profile', path: '/profile', icon: UserCheck },
       ];
       break;
@@ -125,6 +140,7 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
+        ...stockReportItem,
         { label: 'My Requests', path: '/my', icon: FileText },
         { label: 'Profile', path: '/profile', icon: UserCheck },
       ];
@@ -140,6 +156,7 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
+        ...stockReportItem,
         { label: 'My Requests', path: '/my', icon: FileText },
         { label: 'Profile', path: '/profile', icon: UserCheck },
       ];
@@ -161,6 +178,7 @@ export const Navigation: React.FC = () => {
         { label: 'From Other Heads', path: '/head/consultations', icon: Users, badge: headConsultationsCount },
         { label: 'My Seal & Sign', path: '/head/credentials', icon: ShieldCheck },
         ...(canViewDiscountReport(user) ? [{ label: 'Discount Report', path: '/reports/discounts', icon: Percent }] : []),
+        ...stockReportItem,
         { label: 'Staff Users', path: '/head/users', icon: Users },
         { label: 'Dept Requests', path: '/head/department', icon: Building2 },
         { label: 'My Requests', path: '/my', icon: FileText },
@@ -181,7 +199,9 @@ export const Navigation: React.FC = () => {
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
       ];
       moreNavItems = [
+        { label: 'Stock Transfers', path: '/stock-transfers', icon: Truck, badge: transferPendingCount, badgeVariant: 'amber' },
         { label: 'Discount Report', path: '/reports/discounts', icon: Percent },
+        { label: 'Stock Transfer Report', path: '/reports/stock-transfers', icon: FileSpreadsheet },
         { label: 'Departments', path: '/admin/departments', icon: Building2 },
         { label: 'Shops', path: '/admin/shops', icon: Store },
         { label: 'Product Categories', path: '/admin/product-categories', icon: Tag },
@@ -196,6 +216,17 @@ export const Navigation: React.FC = () => {
       break;
 
     case 'disbursement':
+      if (isStockMonitor(user)) {
+        mainNavItems = [
+          { label: 'Not Completed', path: '/stock-transfers', icon: PackageSearch, badge: transferPendingCount, badgeVariant: 'amber' },
+          { label: 'Transfer Completed', path: '/stock-transfers/completed', icon: PackageCheck },
+          { label: 'Transfer Report', path: '/reports/stock-transfers', icon: FileSpreadsheet },
+        ];
+        moreNavItems = [
+          { label: 'Profile', path: '/profile', icon: UserCheck },
+        ];
+        break;
+      }
       mainNavItems = [
         { label: 'Search', path: '/disbursement', icon: Search },
         { label: 'Awaiting Pay', path: '/disbursement/awaiting', icon: Clock, badge: disbAwaitingCount },
@@ -205,6 +236,7 @@ export const Navigation: React.FC = () => {
       moreNavItems = [
         { label: 'Paid History', path: '/disbursement/paid', icon: CheckCircle },
         { label: 'Verify Scan', path: '/disbursement/verify', icon: ShieldCheck },
+        ...stockReportItem,
         { label: 'Profile', path: '/profile', icon: UserCheck },
       ];
       break;
@@ -226,6 +258,7 @@ export const Navigation: React.FC = () => {
                 item.path === '/head' ||
                 item.path === '/clerk' ||
                 item.path === '/disbursement' ||
+                item.path === '/stock-transfers' ||
                 item.path === '/my' ||
                 item.path === '/regional' ||
                 item.path === '/approved' ||
@@ -293,6 +326,7 @@ export const Navigation: React.FC = () => {
                 item.path === '/head' ||
                 item.path === '/clerk' ||
                 item.path === '/disbursement' ||
+                item.path === '/stock-transfers' ||
                 item.path === '/my' ||
                 item.path === '/regional' ||
                 item.path === '/approved' ||

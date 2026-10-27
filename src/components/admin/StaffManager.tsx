@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
-import { ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
-import type { AppRole, Profile } from '../../types/database';
+import { DISBURSEMENT_TYPE_LABELS, ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
+import type { AppRole, DisbursementAccountType, Profile } from '../../types/database';
 import { UserModal } from './UserModal';
 import { EditUserModal } from './EditUserModal';
 import { AccessModal, coveringRegionalHeads, rolesWithTypes } from './AccessFields';
@@ -13,6 +13,28 @@ import { PhotoUploadModal } from './PhotoUploadModal';
 import { UserAvatar } from '../common/UserAvatar';
 import { Modal } from '../common/Modal';
 import { LoadingSpinner } from '../common/LoadingSpinner';
+
+const DISB_TYPE_STYLES: Record<DisbursementAccountType, { badge: string; active: string; text: string; help: string }> = {
+  entry_only: {
+    badge: 'bg-sky-50 text-sky-800 border-sky-300',
+    active: 'bg-sky-600 text-white shadow-xs',
+    text: 'text-sky-700',
+    help: 'Can create entries with automatic numbering (1, 2...) & TDS status. Cannot pay.',
+  },
+  payment_only: {
+    badge: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+    active: 'bg-emerald-600 text-white shadow-xs',
+    text: 'text-emerald-700',
+    help: 'Can pay amount against each entry (max = entry amount). Cannot create entries.',
+  },
+  stock_transfer_monitor: {
+    badge: 'bg-indigo-50 text-indigo-800 border-indigo-300',
+    active: 'bg-indigo-600 text-white shadow-xs',
+    text: 'text-indigo-700',
+    help: 'Sees only approved stock transfers and marks them as Transfer Completed. No payment access.',
+  },
+};
+const disbType = (u: Profile): DisbursementAccountType => u.disbursement_type || 'entry_only';
 
 interface StaffManagerProps {
   title: string;
@@ -126,6 +148,28 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
     );
   };
 
+  const toggleStockReport = async (u: Profile) => {
+    setBusyId(u.id);
+    const res = await dir.setStockTransferReportAccess(u.id, !u.can_view_stock_transfer_report);
+    setBusyId(null);
+    show(
+      res.success
+        ? `Stock Transfer Report ${u.can_view_stock_transfer_report ? 'access removed for' : 'opened to'} ${u.full_name}.`
+        : res.error!,
+      res.success
+    );
+  };
+
+  const changeDisbType = async (u: Profile, t: DisbursementAccountType) => {
+    setBusyId(u.id);
+    const res = await dir.setDisbursementType(u.id, t);
+    setBusyId(null);
+    show(
+      res.success ? `Updated to ${DISBURSEMENT_TYPE_LABELS[t]} for ${u.full_name}.` : res.error || 'Failed to update account type',
+      res.success
+    );
+  };
+
   const submitReset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetTarget) return;
@@ -214,12 +258,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         {ROLE_LABELS[u.role]}
                       </span>
                       {u.role === 'disbursement' && (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                          u.disbursement_type === 'payment_only'
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                            : 'bg-sky-50 text-sky-800 border-sky-300'
-                        }`}>
-                          {u.disbursement_type === 'payment_only' ? 'Payment Only' : 'Entry Only'}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${DISB_TYPE_STYLES[disbType(u)].badge}`}>
+                          {DISBURSEMENT_TYPE_LABELS[disbType(u)]}
                         </span>
                       )}
                     </div>
@@ -357,55 +397,59 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
               )}
 
               {u.role === 'disbursement' && (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border border-sky-200/80 bg-sky-50/60">
+                <div className="flex flex-col gap-3 p-3 rounded-xl border border-sky-200/80 bg-sky-50/60">
                   <div className="min-w-0">
                     <span className="flex items-center gap-2 text-xs text-sky-950 font-bold">
-                      <Wallet className="w-4 h-4 text-sky-600 shrink-0" />
-                      <span>Account Type: <strong className={u.disbursement_type === 'payment_only' ? 'text-emerald-700' : 'text-sky-700'}>{u.disbursement_type === 'payment_only' ? 'Payment Only' : 'Entry Only'}</strong></span>
+                      {disbType(u) === 'stock_transfer_monitor'
+                        ? <Truck className="w-4 h-4 text-indigo-600 shrink-0" />
+                        : <Wallet className="w-4 h-4 text-sky-600 shrink-0" />}
+                      <span>Account Type: <strong className={DISB_TYPE_STYLES[disbType(u)].text}>{DISBURSEMENT_TYPE_LABELS[disbType(u)]}</strong></span>
                     </span>
-                    <p className="text-[11px] text-sky-800/80 mt-0.5">
-                      {u.disbursement_type === 'payment_only'
-                        ? 'Can pay amount against each entry (max = entry amount). Cannot create entries.'
-                        : 'Can create entries with automatic numbering (1, 2...) & TDS status. Cannot pay.'}
-                    </p>
+                    <p className="text-[11px] text-sky-800/80 mt-0.5">{DISB_TYPE_STYLES[disbType(u)].help}</p>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                    <button
-                      type="button"
-                      disabled={busyId === u.id || u.disbursement_type === 'entry_only' || !u.disbursement_type}
-                      onClick={async () => {
-                        setBusyId(u.id);
-                        const res = await dir.setDisbursementType(u.id, 'entry_only');
-                        setBusyId(null);
-                        show(res.success ? `Updated to Entry Only for ${u.full_name}.` : (res.error || 'Failed to update account type'), res.success);
-                      }}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                        u.disbursement_type === 'entry_only' || !u.disbursement_type
-                          ? 'bg-sky-600 text-white shadow-xs'
-                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      Entry Only
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === u.id || u.disbursement_type === 'payment_only'}
-                      onClick={async () => {
-                        setBusyId(u.id);
-                        const res = await dir.setDisbursementType(u.id, 'payment_only');
-                        setBusyId(null);
-                        show(res.success ? `Updated to Payment Only for ${u.full_name}.` : (res.error || 'Failed to update account type'), res.success);
-                      }}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                        u.disbursement_type === 'payment_only'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      Payment Only
-                    </button>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['entry_only', 'payment_only', 'stock_transfer_monitor'] as DisbursementAccountType[]).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        id={`disb-type-${t}-${u.id}`}
+                        disabled={busyId === u.id || disbType(u) === t}
+                        onClick={() => changeDisbType(u, t)}
+                        className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all leading-tight ${
+                          disbType(u) === t
+                            ? DISB_TYPE_STYLES[t].active
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {t === 'stock_transfer_monitor' ? 'Stock Transfer Monitor' : DISBURSEMENT_TYPE_LABELS[t]}
+                      </button>
+                    ))}
                   </div>
                 </div>
+              )}
+
+              {me?.role === 'admin' && u.role !== 'admin' && !(u.role === 'disbursement' && disbType(u) === 'stock_transfer_monitor') && (
+                <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-indigo-200/80 bg-indigo-50/50 cursor-pointer">
+                  <span className="flex items-center gap-2 text-xs text-indigo-900">
+                    <Truck className="w-3.5 h-3.5 text-indigo-600" />
+                    <span><strong>Stock Transfer Report</strong> access</span>
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    id={`stock-report-access-${u.id}`}
+                    aria-checked={!!u.can_view_stock_transfer_report}
+                    disabled={busyId === u.id}
+                    onClick={() => toggleStockReport(u)}
+                    className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
+                      u.can_view_stock_transfer_report ? 'bg-indigo-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                      u.can_view_stock_transfer_report ? 'translate-x-4' : ''
+                    }`} />
+                  </button>
+                </label>
               )}
 
               {me?.role === 'admin' && u.role === 'head' && (

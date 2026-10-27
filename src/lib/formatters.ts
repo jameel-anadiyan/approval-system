@@ -235,6 +235,13 @@ export const ACTION_LABELS: Record<string, string> = {
   disbursement_entry_created: 'Disbursement: Payment entry created',
   disbursement_entry_paid: 'Disbursement: Payment entry settled',
   disbursement_entry_cancelled: 'Disbursement: Payment entry cancelled',
+  transfer_completed: 'Stock transfer completed',
+};
+
+export const DISBURSEMENT_TYPE_LABELS: Record<'entry_only' | 'payment_only' | 'stock_transfer_monitor', string> = {
+  entry_only: 'Entry Only',
+  payment_only: 'Payment Only',
+  stock_transfer_monitor: 'Stock Transfer Monitor',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'];

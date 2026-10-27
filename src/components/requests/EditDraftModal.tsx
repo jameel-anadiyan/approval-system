@@ -22,6 +22,7 @@ import { TargetHeadField } from './TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
+import { RequestShopField, useRequestShops, needsShopPick } from './RequestShopField';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -59,6 +60,14 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [targetHeadId, setTargetHeadId] = useState<string>(request.owner_head_id ?? '');
   const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
+  const shopState = useRequestShops();
+  const pickShop = needsShopPick(type);
+  const [shopId, setShopId] = useState<string>(request.shop_id ?? '');
+  const [shopName, setShopName] = useState<string>(request.shop_name ?? '');
+  // A single associated shop is always the request's shop.
+  const effectiveShopId = shopState.autoShop ? shopState.autoShop.id : shopId;
+  const effectiveShopName = shopState.autoShop ? shopState.autoShop.name : shopName;
+  const shopChoice = () => ({ shop_id: effectiveShopId || '', shop_name: effectiveShopName || null });
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +107,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   };
 
   const getDetails = (): RequestDetails | null => {
-    if (type === 'non_cash') return null;
+    if (type === 'non_cash') return shopState.loading ? null : shopChoice();
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
     if (type === 'exhibition') {
@@ -117,6 +126,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       gst_rate: hasGst ? gstRate : 0,
       gst_amount: gstAmount,
       total_amount: generalTotal,
+      ...(shopState.loading ? {} : shopChoice()),
     };
   };
 
@@ -135,6 +145,9 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     if (v) return setError(v);
     if (user?.role !== 'head' && categoryOptions.required && !categoryOptions.categories.some((c) => c.id === categoryId)) {
       return setError('Please select the work category.');
+    }
+    if (pickShop && shopState.mustPick && !effectiveShopId) {
+      return setError('Please select the shop for this request.');
     }
     saveLockRef.current = true;
     setBusy(true);
@@ -198,6 +211,18 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         {user?.role !== 'head' && (
           <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
             currentName={request.category_name} />
+        )}
+        {pickShop && (
+          <RequestShopField
+            state={shopState}
+            value={shopId}
+            currentName={request.shop_name}
+            onChange={(id, name) => {
+              setShopId(id);
+              setShopName(name);
+            }}
+            disabled={busy}
+          />
         )}
         {type === 'general' && (
           <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80">

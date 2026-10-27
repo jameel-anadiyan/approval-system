@@ -10,6 +10,7 @@ import { LoginPage } from './pages/auth/LoginPage';
 import { ForcePasswordChangePage } from './pages/auth/ForcePasswordChangePage';
 import type { AppRole } from './types/database';
 import { canViewDiscountReport } from './lib/discountReport';
+import { canViewStockTransferReport, isStockMonitor } from './lib/stockTransferReport';
 
 import { NewRequestPage } from './pages/shared/NewRequestPage';
 import { RequestDetailPage } from './pages/shared/RequestDetailPage';
@@ -49,6 +50,8 @@ const AdminRegionsPage = page(() => import('./pages/admin/AdminRegionsPage'), 'A
 const HeadExhibitionWaitlistPage = page(() => import('./pages/head/HeadExhibitionWaitlistPage'), 'HeadExhibitionWaitlistPage');
 const ExhibitionCalendarPage = page(() => import('./pages/shared/ExhibitionCalendarPage'), 'ExhibitionCalendarPage');
 const AdminProductCategoriesPage = page(() => import('./pages/admin/AdminProductCategoriesPage'), 'AdminProductCategoriesPage');
+const StockTransferMonitorPage = page(() => import('./pages/stock/StockTransferMonitorPage'), 'StockTransferMonitorPage');
+const StockTransferReportPage = page(() => import('./pages/reports/StockTransferReportPage'), 'StockTransferReportPage');
 
 const PageSpinner: React.FC = () => (
   <div className="min-h-[50vh] flex items-center justify-center">
@@ -67,6 +70,28 @@ const RequireRole: React.FC<{ roles: AppRole[] }> = ({ roles }) => {
 const RequireDiscountReport: React.FC = () => {
   const { user } = useAuth();
   if (!canViewDiscountReport(user)) return <RoleRedirect />;
+  return <Outlet />;
+};
+
+/** Admin, Stock Transfer Monitor accounts, or users Admin granted Stock Transfer Report access. */
+const RequireStockTransferReport: React.FC = () => {
+  const { user } = useAuth();
+  if (!canViewStockTransferReport(user)) return <RoleRedirect />;
+  return <Outlet />;
+};
+
+/** Admin or a Stock Transfer Monitor disbursement account. */
+const RequireStockMonitor: React.FC = () => {
+  const { user, role } = useAuth();
+  if (!(role === 'admin' || isStockMonitor(user))) return <RoleRedirect />;
+  return <Outlet />;
+};
+
+/** Payment / entry disbursement accounts only (monitor accounts have no payment work). */
+const RequirePaymentDisbursement: React.FC = () => {
+  const { user, role } = useAuth();
+  if (role !== 'disbursement') return <RoleRedirect />;
+  if (isStockMonitor(user)) return <Navigate to="/stock-transfers" replace />;
   return <Outlet />;
 };
 
@@ -124,7 +149,7 @@ const AppLayout: React.FC = () => {
 };
 
 const RoleRedirect: React.FC = () => {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   if (!role) return <Navigate to="/login" replace />;
 
   switch (role) {
@@ -135,7 +160,7 @@ const RoleRedirect: React.FC = () => {
     case 'clerk':
       return <Navigate to="/clerk" replace />;
     case 'disbursement':
-      return <Navigate to="/disbursement" replace />;
+      return <Navigate to={isStockMonitor(user) ? '/stock-transfers' : '/disbursement'} replace />;
     case 'regional_head':
       return <Navigate to="/regional" replace />;
     case 'employee':
@@ -176,6 +201,17 @@ export const App: React.FC = () => {
                 {/* Discount report (Admin + Heads with access) */}
                 <Route element={<RequireDiscountReport />}>
                   <Route path="reports/discounts" element={<DiscountReportPage />} />
+                </Route>
+
+                {/* Stock transfer report (Admin + monitor accounts + users granted access) */}
+                <Route element={<RequireStockTransferReport />}>
+                  <Route path="reports/stock-transfers" element={<StockTransferReportPage />} />
+                </Route>
+
+                {/* Stock Transfer Monitor (Admin + monitor accounts) */}
+                <Route element={<RequireStockMonitor />}>
+                  <Route path="stock-transfers" element={<StockTransferMonitorPage />} />
+                  <Route path="stock-transfers/completed" element={<StockTransferMonitorPage />} />
                 </Route>
 
                 {/* Special Waiting List for Exhibitions (Admin + Heads with access) */}
@@ -236,7 +272,7 @@ export const App: React.FC = () => {
                 </Route>
 
                 {/* Disbursement routes */}
-                <Route element={<RequireRole roles={['disbursement']} />}>
+                <Route element={<RequirePaymentDisbursement />}>
                   <Route path="disbursement" element={<DisbursementPage />} />
                   <Route path="disbursement/awaiting" element={<DisbursementPage />} />
                   <Route path="disbursement/paid" element={<DisbursementPage />} />

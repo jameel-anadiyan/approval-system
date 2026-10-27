@@ -209,7 +209,7 @@ Deno.serve(handle(async (req) => {
 
       const region_id = typeof body.region_id === "string" && body.region_id ? requireUuid(body.region_id, "Region") : null;
       const disbursement_type = role === "disbursement"
-        ? (body.disbursement_type === "payment_only" ? "payment_only" : "entry_only")
+        ? (["payment_only", "stock_transfer_monitor"].includes(body.disbursement_type) ? body.disbursement_type : "entry_only")
         : null;
       const { error: pErr } = await admin.from("profiles").insert({
         id: created.user.id, username, full_name, designation, role, department_id, shop_id, allowed_types,

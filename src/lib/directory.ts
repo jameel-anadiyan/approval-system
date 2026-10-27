@@ -453,6 +453,40 @@ export function useDirectory() {
     return { success: true };
   };
 
+  /** Admin grants / revokes any user's access to the Stock Transfer Report tab. */
+  const setStockTransferReportAccess = async (userId: string, allowed: boolean): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('set_stock_transfer_report_access', { p_user_id: userId, p_allowed: allowed });
+      if (error) {
+        return {
+          success: false,
+          error:
+            error.message.includes('does not exist') || error.message.includes('schema cache')
+              ? 'Database migration required: run 0049_request_shop_and_stock_transfer_monitor.sql in the Supabase SQL Editor.'
+              : error.message,
+        };
+      }
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) => {
+      const next = prev.map((u) => (u.id === userId ? { ...u, can_view_stock_transfer_report: allowed } : u));
+      try {
+        const saved = localStorage.getItem('approval_app_sandbox_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.id === userId) {
+            parsed.can_view_stock_transfer_report = allowed;
+            localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
+            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
+          }
+        }
+      } catch {}
+      return next;
+    });
+    return { success: true };
+  };
+
   /** Admin grants / revokes a Head's access to the Special Waiting List Exhibition tab. */
   const setExhibitionWaitlistAccess = async (userId: string, allowed: boolean): Promise<Result> => {
     if (live) {
@@ -871,7 +905,7 @@ export function useDirectory() {
   return {
     departments, shops, regions, users, categories, productCategories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
     saveProductCategory, setProductCategoryActive,
-    createUser, updateAccess, setUserRegion, setDisbursementType, saveCategory, setDiscountReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
+    createUser, updateAccess, setUserRegion, setDisbursementType, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
   };
 }

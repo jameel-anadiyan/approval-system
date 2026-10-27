@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -25,6 +25,7 @@ import { WorkCategoryField, useCategoryOptions } from '../../components/requests
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useDirectory } from '../../lib/directory';
+import { RequestShopField, useRequestShops, needsShopPick } from '../../components/requests/RequestShopField';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
@@ -91,6 +92,20 @@ export const NewRequestPage: React.FC = () => {
   const [targetHeadId, setTargetHeadId] = useState('');
   const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState('');
+  const shopState = useRequestShops();
+  const [shopId, setShopId] = useState('');
+  const [shopName, setShopName] = useState('');
+  const pickShop = needsShopPick(type);
+
+  // Exactly one associated shop: assign it as the default.
+  useEffect(() => {
+    if (shopState.autoShop) {
+      setShopId(shopState.autoShop.id);
+      setShopName(shopState.autoShop.name);
+    }
+  }, [shopState.autoShop?.id]);
+
+  const shopChoice = () => (shopId ? { shop_id: shopId, shop_name: shopName || null } : {});
 
   const exhibitionQuota = useMemo(() => {
     if (type !== 'exhibition') return null;
@@ -153,7 +168,7 @@ export const NewRequestPage: React.FC = () => {
         : '');
 
   const details = (): RequestDetails | null => {
-    if (type === 'non_cash') return null;
+    if (type === 'non_cash') return shopId ? shopChoice() : null;
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
     if (type === 'exhibition') {
@@ -172,11 +187,13 @@ export const NewRequestPage: React.FC = () => {
       gst_rate: hasGst ? gstRate : 0,
       gst_amount: gstAmount,
       total_amount: generalTotal,
+      ...shopChoice(),
     };
   };
 
   const validate = (forDraft: boolean): string | null => {
     if (!forDraft && user?.role !== 'head' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
+    if (!forDraft && pickShop && shopState.mustPick && !shopId) return 'Select the shop for this request.';
     if (isAsset) {
       if (!asset.asset_name.trim()) return 'Enter the asset you want to buy.';
       return validateQuotes(quotes, forDraft, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined);
@@ -364,6 +381,18 @@ export const NewRequestPage: React.FC = () => {
 
           {user?.role !== 'head' && (
             <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
+          )}
+
+          {pickShop && (
+            <RequestShopField
+              state={shopState}
+              value={shopId}
+              onChange={(id, name) => {
+                setShopId(id);
+                setShopName(name);
+              }}
+              disabled={isSubmitting || isSavingDraft}
+            />
           )}
 
           <div>
