@@ -9,6 +9,7 @@ import {
   DiscountFields, ExhibitionFields, emptyDiscount, emptyExhibition, discountCalc, exhibitionCalc,
   validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
   DiscountForm, ExhibitionForm,
+  NonCashFields, NonCashForm, emptyNonCash, toNonCashDetails,
 } from '../../components/requests/TypedRequestFields';
 import { GstSelector } from '../../components/requests/GstSelector';
 import {
@@ -77,6 +78,7 @@ export const NewRequestPage: React.FC = () => {
   const [gstRate, setGstRate] = useState<number>(18);
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
+  const [nonCash, setNonCash] = useState<NonCashForm>(emptyNonCash);
   const [exhibition, setExhibition] = useState<ExhibitionForm>(emptyExhibition);
   const [asset, setAsset] = useState<AssetForm>(emptyAsset);
   const [stockTransfer, setStockTransfer] = useState<StockTransferForm>(() =>
@@ -161,6 +163,7 @@ export const NewRequestPage: React.FC = () => {
 
   const effectiveTitle = () =>
     title.trim()
+    || (type === 'non_cash' && nonCash.associated_notes.trim() ? `Non-Cash: ${nonCash.associated_notes.trim().slice(0, 50)}` : '')
     || (type === 'exhibition' && exhibition.event_name.trim() ? `Exhibition: ${exhibition.event_name.trim()}` : '')
     || (isAsset && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '')
     || (type === 'stock_transfer' && stockTransfer.from_shop_name && stockTransfer.to_shop_name
@@ -168,7 +171,7 @@ export const NewRequestPage: React.FC = () => {
         : '');
 
   const details = (): RequestDetails | null => {
-    if (type === 'non_cash') return shopId ? shopChoice() : null;
+    if (type === 'non_cash') return toNonCashDetails(nonCash, shopChoice());
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
     if (type === 'exhibition') {
@@ -418,6 +421,7 @@ export const NewRequestPage: React.FC = () => {
                   : type === 'exhibition' ? 'Optional – event name is used if empty'
                   : type === 'stock_transfer' ? 'Optional – origin and destination shops are used if empty'
                   : isAsset ? 'Optional – asset name is used if empty'
+                  : type === 'non_cash' ? 'e.g. Branch maintenance clearance / Administrative approval'
                   : 'e.g. Vendor invoice for showroom lighting'
               }
               className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
@@ -425,12 +429,11 @@ export const NewRequestPage: React.FC = () => {
           </div>
 
           {type === 'non_cash' && (
-            <div className="p-3.5 bg-emerald-50 border border-emerald-200/80 rounded-xl text-xs text-emerald-900 leading-relaxed flex items-start gap-2">
-              <FileCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <strong>Non-Cash Request:</strong> This request is for operational or internal approval with no cash or disbursement involved.
-              </div>
-            </div>
+            <NonCashFields
+              value={nonCash}
+              onChange={setNonCash}
+              disabled={isSubmitting || isSavingDraft}
+            />
           )}
 
           {type === 'stock_transfer' && (

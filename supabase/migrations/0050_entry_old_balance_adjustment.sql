@@ -409,6 +409,15 @@ begin
       ))
     );
 
+  elsif p_type = 'non_cash' then
+    return jsonb_build_object(
+      'amount', 0,
+      'details', jsonb_strip_nulls(jsonb_build_object(
+        'associated_value', public._num(d, 'associated_value'),
+        'associated_notes', public._txt(d, 'associated_notes', 500)
+      ))
+    );
+
   elsif p_type = 'discount' then
     v_before := public._num(d, 'before_amount');
     v_after := public._num(d, 'after_amount');
@@ -869,5 +878,75 @@ begin
 end $function$;
 revoke execute on function public.submit_request(uuid) from public, anon;
 grant execute on function public.submit_request(uuid) to authenticated;
+
+-- 11. Complete update_typed_draft (supports non_cash cleanly and records shop) -
+create or replace function public.update_typed_draft(
+  p_request_id uuid,
+  p_title text,
+  p_amount numeric,
+  p_notes text default null::text,
+  p_details jsonb default null::jsonb
+)
+returns void language plpgsql security definer set search_path = '' as $function$
+declare
+  me public.profiles;
+  r public.requests;
+  v jsonb;
+  v_title text;
+  v_shop_id uuid;
+  v_shop_name text;
+  v_clean_details jsonb;
+begin
+  me := public._me();
+  select * into r from public.requests where id = p_request_id for update;
+  if r.id is null or r.requester_id <> me.id then raise exception 'Not found'; end if;
+  if r.status not in ('draft','returned') then raise exception 'This request can no longer be edited'; end if;
+
+  v_clean_details := case when p_details is null then null else p_details - 'shop_id' - 'shop_name' end;
+
+  if r.request_type <> 'non_cash' then
+    v := public._build_details(r.request_type, coalesce(p_amount, r.amount), coalesce(v_clean_details, r.details));
+  end if;
+
+  v_title := nullif(btrim(coalesce(p_title, '')), '');
+  if v_title is null and r.request_type = 'exhibition' then v_title := 'Exhibition: ' || (v->'details'->>'event_name'); end if;
+  if v_title is null and (r.request_type = 'asset' or r.request_type = 'asset_below_20k') then v_title := 'Asset: ' || (v->'details'->>'asset_name'); end if;
+  if v_title is null and r.request_type = 'non_cash' then v_title := 'Non-Cash Request'; end if;
+  if v_title is null and r.request_type = 'stock_transfer' then
+    v_title := 'Stock Transfer: ' || coalesce(v->'details'->>'from_shop_name', 'Shop') || ' → ' || coalesce(v->'details'->>'to_shop_name', 'Shop');
+  end if;
+  if v_title is null then raise exception 'Title is required'; end if;
+
+  v_shop_id := r.shop_id;
+  v_shop_name := r.shop_name;
+
+  if r.request_type in ('general', 'non_cash') and p_details is not null and p_details ? 'shop_id' then
+    v_shop_id := public._resolve_request_shop(me, p_details);
+    select name into v_shop_name from public.shops where id = v_shop_id;
+  elsif r.request_type in ('general', 'non_cash') and v_shop_id is null then
+    v_shop_id := public._resolve_request_shop(me, null);
+    select name into v_shop_name from public.shops where id = v_shop_id;
+  end if;
+
+  if r.request_type = 'stock_transfer' and (v->'details'->>'from_shop_id') ~ '^[0-9a-fA-F-]{36}$' then
+    v_shop_id := (v->'details'->>'from_shop_id')::uuid;
+    v_shop_name := coalesce(v->'details'->>'from_shop_name', (select name from public.shops where id = v_shop_id));
+  end if;
+
+  update public.requests set
+    title = left(v_title, 200),
+    amount = case when r.request_type = 'non_cash' then 0 else (v->>'amount')::numeric end,
+    notes = nullif(btrim(p_notes), ''),
+    details = case when r.request_type = 'non_cash' then coalesce(v_clean_details, r.details) else v->'details' end,
+    shop_id = v_shop_id,
+    shop_name = v_shop_name,
+    updated_at = now()
+  where id = r.id;
+  if r.request_type = 'asset' or r.request_type = 'asset_below_20k' then
+    perform public._sync_asset_amount(r.id);
+  end if;
+end $function$;
+revoke execute on function public.update_typed_draft(uuid, text, numeric, text, jsonb) from public, anon;
+grant execute on function public.update_typed_draft(uuid, text, numeric, text, jsonb) to authenticated;
 
 notify pgrst, 'reload schema';

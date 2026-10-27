@@ -181,6 +181,27 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
       ],
     };
   }
+  if (r.request_type === "non_cash") {
+    const val = Number(d.associated_value || 0);
+    return {
+      subtitle: "NON-CASH APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)], ["Subject / Title", txt(r.title)],
+          ["Payment Consideration", "Non-Cash (No direct disbursement)"],
+        ] },
+        ...(val > 0 || d.associated_notes ? [
+          { title: "Associated Cash / Value / Adjustment (Not Paid Directly)", rows: [
+            ...(val > 0 ? [["Associated Value", money(val)]] : []),
+            ...(d.associated_notes ? [["Adjustment Details", txt(d.associated_notes)]] : []),
+          ] }
+        ] : []),
+        ...(r.notes ? [{ title: "Remarks / Purpose", text: r.notes as string }] : []),
+      ],
+    };
+  }
   return null;
 }
 

@@ -264,7 +264,10 @@ export const RequestDetailPage: React.FC = () => {
   const approveBlockReason = isConsultationBlocked ? consultationBlockReason
     : needsQuote ? 'Select the best quotation first' : undefined;
   const amountLabel =
-    rType === 'discount' ? 'Discount Value' : rType === 'stock_transfer' ? 'Total MRP Value' : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)'
+    rType === 'discount' ? 'Discount Value'
+      : rType === 'stock_transfer' ? 'Total MRP Value'
+      : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)'
+      : rType === 'non_cash' ? 'Payable Amount'
       : isAsset ? (request.selected_quote_id ? 'Selected Quotation Amount' : 'Indicative Amount (Head selects final)')
       : 'Total Requested Amount';
   const voiceNotes = (request.files || []).filter((f) => {
@@ -696,8 +699,20 @@ export const RequestDetailPage: React.FC = () => {
                   {amountLabel}
                 </span>
                 <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-display mt-0.5">
-                  {rType === 'non_cash' ? 'Non Cash' : formatINR(request.amount)}
+                  {rType === 'non_cash' ? 'Non-Cash (No Payment)' : formatINR(request.amount)}
                 </div>
+                {rType === 'non_cash' && (
+                  <div className="text-xs text-slate-500 font-medium mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      Operational Approval · No Cash Involved
+                    </span>
+                    {Number(request.details?.associated_value || 0) > 0 && (
+                      <span className="text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                        Associated Value: {formatINR(Number(request.details?.associated_value))} (Not paid directly)
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               {isHighValue && (
                 <div className="text-right">

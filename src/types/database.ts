@@ -138,6 +138,11 @@ export interface StockTransferDetails {
   notes?: string | null;
 }
 
+export interface NonCashDetails {
+  associated_value?: number | null;
+  associated_notes?: string | null;
+}
+
 /** Shop picked on General / Non-Cash requests (moved to requests.shop_id by the server). */
 export interface RequestShopChoice {
   shop_id?: string | null;
@@ -145,7 +150,7 @@ export interface RequestShopChoice {
 }
 
 export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>
-  & Partial<AssetDetails> & Partial<StockTransferDetails> & RequestShopChoice;
+  & Partial<AssetDetails> & Partial<StockTransferDetails> & Partial<NonCashDetails> & RequestShopChoice;
 
 export interface Department {
   id: string;

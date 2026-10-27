@@ -8,6 +8,7 @@ import { FileText, Mic, Trash2, Save, Loader2 } from 'lucide-react';
 import {
   DiscountFields, ExhibitionFields, discountFromDetails, exhibitionFromDetails, discountCalc, exhibitionCalc,
   validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
+  NonCashFields, nonCashFromDetails, toNonCashDetails, NonCashForm,
 } from './TypedRequestFields';
 import { GstSelector } from './GstSelector';
 import {
@@ -50,6 +51,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [notes, setNotes] = useState(request.notes || '');
   const dir = useDirectory();
   const [discount, setDiscount] = useState(() => discountFromDetails(request.details));
+  const [nonCash, setNonCash] = useState<NonCashForm>(() => nonCashFromDetails(request.details));
   const [exhibition, setExhibition] = useState(() => exhibitionFromDetails(request.details));
   const [asset, setAsset] = useState(() => assetFromDetails(request.details));
   const [stockTransfer, setStockTransfer] = useState(() =>
@@ -107,7 +109,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   };
 
   const getDetails = (): RequestDetails | null => {
-    if (type === 'non_cash') return shopState.loading ? null : shopChoice();
+    if (type === 'non_cash') return toNonCashDetails(nonCash, shopState.loading ? undefined : shopChoice());
     if (type === 'discount') return toDiscountDetails(discount);
     if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
     if (type === 'exhibition') {
@@ -252,6 +254,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           </div>
         )}
         {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
+        {type === 'non_cash' && <NonCashFields value={nonCash} onChange={setNonCash} disabled={busy} />}
         {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
         {type === 'stock_transfer' && (
           <StockTransferFields

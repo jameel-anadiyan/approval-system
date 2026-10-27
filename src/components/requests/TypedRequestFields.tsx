@@ -2,9 +2,9 @@
 // New Request page and the Edit Draft modal. Values are kept as strings while
 // typing and converted to RequestDetails with toDiscountDetails / toExhibitionDetails.
 import React from 'react';
-import { RequestDetails, ExhibitionProvide } from '../../types/database';
+import { RequestDetails, ExhibitionProvide, RequestShopChoice } from '../../types/database';
 import { formatINR, PROVIDE_LABELS } from '../../lib/formatters';
-import { Percent, CalendarDays, Megaphone, Target, IndianRupee, AlertOctagon, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import { Percent, CalendarDays, Megaphone, Target, IndianRupee, AlertOctagon, CheckCircle2, AlertTriangle, Clock, FileCheck } from 'lucide-react';
 import { GstSelector } from './GstSelector';
 import type { ExhibitionQuotaStatus } from '../../lib/exhibitionQuota';
 
@@ -466,6 +466,116 @@ export const ExhibitionFields: React.FC<{
             placeholder="Why should we sponsor this event? Expected walk-ins, sales, brand reach…" className={inputCls} />
         </div>
       </section>
+    </div>
+  );
+};
+
+// ───────────────────────── Non-Cash ─────────────────────────
+
+export interface NonCashForm {
+  associated_value: string;
+  associated_notes: string;
+}
+
+export const emptyNonCash: NonCashForm = { associated_value: '', associated_notes: '' };
+
+export const nonCashFromDetails = (d?: RequestDetails | null): NonCashForm => ({
+  associated_value:
+    d?.associated_value !== undefined && d?.associated_value !== null
+      ? String(d.associated_value)
+      : '',
+  associated_notes: str(d?.associated_notes ?? ''),
+});
+
+export const toNonCashDetails = (f: NonCashForm, shopChoice?: RequestShopChoice): RequestDetails => {
+  const v = num(f.associated_value);
+  return {
+    ...(shopChoice || {}),
+    associated_value: v > 0 ? v : null,
+    associated_notes: f.associated_notes.trim() || null,
+  };
+};
+
+export const NonCashFields: React.FC<{
+  value: NonCashForm;
+  onChange: (v: NonCashForm) => void;
+  disabled?: boolean;
+}> = ({ value, onChange, disabled }) => {
+  const set = (k: keyof NonCashForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...value, [k]: e.target.value });
+
+  const valNum = num(value.associated_value);
+
+  return (
+    <div className="space-y-4">
+      {/* Informative banner */}
+      <div className="p-3.5 bg-emerald-50 border border-emerald-200/80 rounded-xl text-xs text-emerald-900 leading-relaxed flex items-start gap-2.5">
+        <FileCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+        <div>
+          <span className="font-bold text-emerald-950 block mb-0.5">Non-Cash Operational Request</span>
+          <p className="text-emerald-800">
+            This request is for operational, administrative, or internal approvals where no direct cash payout or disbursement is required.
+          </p>
+        </div>
+      </div>
+
+      {/* Optional value / adjustment box */}
+      <div className="p-4 bg-slate-50/80 border border-slate-200/90 rounded-2xl space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="block text-xs font-bold text-slate-800">
+            Associated Cash / Value / Adjustment (Not Paid Directly)
+          </label>
+          <span className="text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
+            Optional
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-500 leading-relaxed">
+          If this non-cash request involves any nominal value, offset, vendor adjustment, or internal consideration that is not paid directly, mention it here for review by Head, Clerk, and Admin.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div>
+            <label className={labelCls}>
+              Associated Value / Amount (₹) <span className="text-slate-400 font-normal">(optional)</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-3.5 font-bold text-slate-400 text-sm">₹</span>
+              <input
+                id="non-cash-value"
+                type="number"
+                step="0.01"
+                min="0"
+                inputMode="decimal"
+                value={value.associated_value}
+                onChange={set('associated_value')}
+                placeholder="0.00"
+                disabled={disabled}
+                className={`${inputCls} pl-8 font-semibold`}
+              />
+            </div>
+            {valNum > 0 && (
+              <span className="text-[11px] font-medium text-emerald-700 mt-1 block">
+                Nominal value: {formatINR(valNum)} (Informational only · Not disbursed)
+              </span>
+            )}
+          </div>
+
+          <div>
+            <label className={labelCls}>
+              Adjustment Details / Nature <span className="text-slate-400 font-normal">(optional)</span>
+            </label>
+            <input
+              id="non-cash-notes"
+              type="text"
+              value={value.associated_notes}
+              onChange={set('associated_notes')}
+              placeholder="e.g. Adjusted against advance, barter, or write-off"
+              disabled={disabled}
+              className={inputCls}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

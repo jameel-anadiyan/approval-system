@@ -1,7 +1,7 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
 import { formatINR, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
-import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight } from 'lucide-react';
+import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -209,51 +209,83 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
     );
   }
 
-  const provides = (d.provides || []).map((p) => (p === 'other' && d.provides_other ? `Other: ${d.provides_other}` : PROVIDE_LABELS[p] || p));
-  return (
-    <div className="bg-white rounded-2xl border border-brand-200 p-5 sm:p-6 shadow-xs divide-y divide-slate-100">
-      <h3 className="text-sm font-bold text-slate-900 font-display pb-3 flex items-center gap-2">
-        <CalendarDays className="w-4 h-4 text-brand-600" /> Exhibition / event sponsorship
-      </h3>
-      <Section title="Event details">
-        <Row label="Event name" value={d.event_name} wide />
-        <Row label="Organiser contact" value={d.organiser_contact} wide />
-        <Row label="Venue" value={d.venue} />
-        <Row label="Event date(s)" value={d.event_dates} />
-        <Row label="Expected footfall" value={d.expected_footfall} />
-        <Row label="Stall size / location" value={d.stall_size_location} />
-      </Section>
-      <Section title="Sponsorship amount">
-        <Row label="Amount (excl. GST)" value={money(d.amount_excl_gst)} />
-        <Row label={`GST${d.gst_pct !== undefined ? ` @ ${d.gst_pct}%` : ''}`} value={money(d.gst_amount)} />
-        <Row label="Total (incl. GST)" value={money(d.total_incl_gst ?? request.amount)} />
-        <Row label="Payment mode & due date" value={d.payment_mode_due} />
-        <Row label="Organiser GSTIN" value={d.organiser_gstin} />
-        <Row label="GST invoice" value={d.gst_invoice === undefined ? undefined : d.gst_invoice ? 'Yes' : 'No'} />
-      </Section>
-      {provides.length > 0 && (
-        <Section title="Organiser provides">
-          <div className="col-span-2 flex flex-wrap gap-1.5">
-            {provides.map((p) => (
-              <span key={p} className="px-2 py-0.5 rounded-md bg-brand-50 text-brand-800 border border-brand-200 font-semibold">
-                {p}
-              </span>
-            ))}
+  if (t === 'non_cash') {
+    const val = Number(d.associated_value || 0);
+    const notes = d.associated_notes || null;
+    return (
+      <div className="bg-white rounded-2xl border border-emerald-200/80 p-5 sm:p-6 shadow-xs space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 font-display flex items-center gap-2">
+          <FileCheck className="w-4 h-4 text-emerald-600" /> Non-Cash Request Details
+        </h3>
+
+        <div className="p-3 bg-emerald-50/70 border border-emerald-200/60 rounded-xl text-xs text-emerald-900 flex items-center gap-2">
+          <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>Operational / administrative request. No direct cash payout or disbursement is required.</span>
+        </div>
+
+        {val > 0 || notes ? (
+          <Section title="Associated Value / Adjustment (Not Paid Directly)">
+            {val > 0 && <Row label="Associated Value" value={money(val)} />}
+            {notes && <Row label="Adjustment Nature / Details" value={notes} wide={!val} />}
+          </Section>
+        ) : (
+          <div className="text-xs text-slate-500 italic py-1">
+            No nominal cash, value, or adjustment was recorded for this request.
           </div>
+        )}
+      </div>
+    );
+  }
+
+  if (t === 'exhibition') {
+    const provides = (d.provides || []).map((p) => (p === 'other' && d.provides_other ? `Other: ${d.provides_other}` : PROVIDE_LABELS[p] || p));
+    return (
+      <div className="bg-white rounded-2xl border border-brand-200 p-5 sm:p-6 shadow-xs divide-y divide-slate-100">
+        <h3 className="text-sm font-bold text-slate-900 font-display pb-3 flex items-center gap-2">
+          <CalendarDays className="w-4 h-4 text-brand-600" /> Exhibition / event sponsorship
+        </h3>
+        <Section title="Event details">
+          <Row label="Event name" value={d.event_name} wide />
+          <Row label="Organiser contact" value={d.organiser_contact} wide />
+          <Row label="Venue" value={d.venue} />
+          <Row label="Event date(s)" value={d.event_dates} />
+          <Row label="Expected footfall" value={d.expected_footfall} />
+          <Row label="Stall size / location" value={d.stall_size_location} />
         </Section>
-      )}
-      <Section title="Vouchers & lucky draw">
-        <Row label="₹1,000 vouchers" value={d.voucher_1000_qty ? `${d.voucher_1000_qty} pcs${d.voucher_1000_min ? ` · min bill ${formatINR(d.voucher_1000_min)}` : ''}` : undefined} />
-        <Row label="₹500 vouchers" value={d.voucher_500_qty ? `${d.voucher_500_qty} pcs${d.voucher_500_min ? ` · min bill ${formatINR(d.voucher_500_min)}` : ''}` : undefined} />
-        <Row label="Voucher validity" value={d.voucher_validity} />
-        <Row label="Lucky draw" value={d.lucky_draw} />
-        <Row label="Winners draw" value={d.winners_draw} />
-      </Section>
-      <Section title="Budget">
-        <Row label="Other costs" value={money(d.other_costs)} />
-        <Row label="Total budget" value={money(d.total_budget)} />
-        <Row label="Purpose / expected benefit" value={d.purpose} wide />
-      </Section>
-    </div>
-  );
+        <Section title="Sponsorship amount">
+          <Row label="Amount (excl. GST)" value={money(d.amount_excl_gst)} />
+          <Row label={`GST${d.gst_pct !== undefined ? ` @ ${d.gst_pct}%` : ''}`} value={money(d.gst_amount)} />
+          <Row label="Total (incl. GST)" value={money(d.total_incl_gst ?? request.amount)} />
+          <Row label="Payment mode & due date" value={d.payment_mode_due} />
+          <Row label="Organiser GSTIN" value={d.organiser_gstin} />
+          <Row label="GST invoice" value={d.gst_invoice === undefined ? undefined : d.gst_invoice ? 'Yes' : 'No'} />
+        </Section>
+        {provides.length > 0 && (
+          <Section title="Organiser provides">
+            <div className="col-span-2 flex flex-wrap gap-1.5">
+              {provides.map((p) => (
+                <span key={p} className="px-2 py-0.5 rounded-md bg-brand-50 text-brand-800 border border-brand-200 font-semibold">
+                  {p}
+                </span>
+              ))}
+            </div>
+          </Section>
+        )}
+        <Section title="Vouchers & lucky draw">
+          <Row label="₹1,000 vouchers" value={d.voucher_1000_qty ? `${d.voucher_1000_qty} pcs${d.voucher_1000_min ? ` · min bill ${formatINR(d.voucher_1000_min)}` : ''}` : undefined} />
+          <Row label="₹500 vouchers" value={d.voucher_500_qty ? `${d.voucher_500_qty} pcs${d.voucher_500_min ? ` · min bill ${formatINR(d.voucher_500_min)}` : ''}` : undefined} />
+          <Row label="Voucher validity" value={d.voucher_validity} />
+          <Row label="Lucky draw" value={d.lucky_draw} />
+          <Row label="Winners draw" value={d.winners_draw} />
+        </Section>
+        <Section title="Budget">
+          <Row label="Other costs" value={money(d.other_costs)} />
+          <Row label="Total budget" value={money(d.total_budget)} />
+          <Row label="Purpose / expected benefit" value={d.purpose} wide />
+        </Section>
+      </div>
+    );
+  }
+
+  return null;
 };
