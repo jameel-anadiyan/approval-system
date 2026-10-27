@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useRequests } from '../../context/RequestContext';
+import { useRequests, errMsg } from '../../context/RequestContext';
 import { RequestFile, RequestType, RequestDetails } from '../../types/database';
 import { FileUploader } from '../../components/requests/FileUploader';
 import { VoiceRecorder } from '../../components/requests/VoiceRecorder';
@@ -262,6 +262,9 @@ export const NewRequestPage: React.FC = () => {
       navigate(`/requests/${draftRes.id}`, submitRes.success ? undefined : {
         state: { notice: `Saved as a draft but not submitted: ${submitRes.error}` },
       });
+    } catch (err: unknown) {
+      console.error('Save request unexpected failure:', err);
+      setError(errMsg(err));
     } finally {
       setIsSubmitting(false);
       setIsSavingDraft(false);

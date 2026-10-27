@@ -551,5 +551,323 @@ begin
     );
   end if;
 end $function$;
+revoke execute on function public._build_details(public.request_type, numeric, jsonb) from public, anon;
+grant execute on function public._build_details(public.request_type, numeric, jsonb) to authenticated;
+
+-- 7. Fix requests amount check constraint to allow 0 for non_cash requests -----
+alter table public.requests drop constraint if exists requests_amount_check;
+alter table public.requests add constraint requests_amount_check check (amount >= 0);
+
+-- 8. Ensure shop helper functions are executable by authenticated users --------
+grant execute on function public._user_shop_ids(uuid) to authenticated;
+grant execute on function public._resolve_request_shop(public.profiles, jsonb) to authenticated;
+
+-- 9. Complete create_typed_draft (supports non_cash cleanly and records shop) --
+create or replace function public.create_typed_draft(
+  p_type public.request_type,
+  p_title text,
+  p_amount numeric,
+  p_notes text default null::text,
+  p_details jsonb default null::jsonb,
+  p_target_head_id uuid default null::uuid
+)
+returns uuid language plpgsql security definer set search_path to '' as $function$
+declare
+  me public.profiles;
+  v jsonb;
+  v_id uuid;
+  v_title text;
+  v_shop text;
+  v_shop_id uuid;
+  v_amount numeric;
+  v_target_head public.profiles;
+  v_dept_id uuid;
+  v_owner_head_id uuid;
+  v_owner_head_name text;
+  v_region_id uuid;
+  v_region_name text;
+  v_is_waitlist boolean;
+  v_clean_details jsonb;
+begin
+  me := public._me();
+  if me.role not in ('employee','clerk','head','regional_head') then
+    raise exception 'Your role cannot raise requests';
+  end if;
+  if not (p_type = any(me.allowed_types) or (p_type = 'asset_below_20k' and 'asset'::public.request_type = any(me.allowed_types)) or me.role in ('admin', 'head')) then
+    raise exception 'You are not allowed to raise % requests', p_type;
+  end if;
+
+  -- The shop choice travels inside p_details; never store it in the typed details.
+  v_clean_details := coalesce(p_details, '{}'::jsonb) - 'shop_id' - 'shop_name';
+
+  if p_type = 'non_cash' then
+    v_amount := 0;
+  else
+    v := public._build_details(p_type, p_amount, v_clean_details);
+    v_amount := (v->>'amount')::numeric;
+  end if;
+
+  if p_type = 'asset_below_20k' and v_amount > 20000 then
+    raise exception 'Amount cannot exceed ₹20,000 for Asset Buying Below 20k';
+  end if;
+
+  v_title := nullif(btrim(coalesce(p_title, '')), '');
+  if v_title is null and p_type = 'exhibition' then v_title := 'Exhibition: ' || (v->'details'->>'event_name'); end if;
+  if v_title is null and (p_type = 'asset' or p_type = 'asset_below_20k') then v_title := 'Asset: ' || (v->'details'->>'asset_name'); end if;
+  if v_title is null and p_type = 'non_cash' then v_title := 'Non-Cash Request'; end if;
+  if v_title is null and p_type = 'stock_transfer' then
+    v_title := 'Stock Transfer: ' || coalesce(v->'details'->>'from_shop_name', 'Shop') || ' → ' || coalesce(v->'details'->>'to_shop_name', 'Shop');
+  end if;
+  if v_title is null then raise exception 'Title is required'; end if;
+
+  -- Routing rules:
+  -- For exhibition requests: STRICTLY to Main Head only, NO choosing.
+  if p_type = 'exhibition' then
+    if me.default_head_id is not null then
+      select * into v_target_head from public.profiles
+      where id = me.default_head_id and role = 'head' and is_active;
+    end if;
+    if v_target_head.id is null and me.department_id is not null then
+      select * into v_target_head from public.profiles
+      where department_id = me.department_id and role = 'head' and is_active limit 1;
+    end if;
+    if v_target_head.id is not null then
+      v_dept_id := v_target_head.department_id;
+      v_owner_head_id := v_target_head.id;
+      v_owner_head_name := v_target_head.full_name;
+    else
+      v_dept_id := me.department_id;
+    end if;
+  elsif p_target_head_id is not null then
+    select * into v_target_head from public.profiles
+    where id = p_target_head_id and role = 'head' and is_active;
+    if v_target_head.id is null then raise exception 'The selected Head is not active or not found'; end if;
+    v_dept_id := v_target_head.department_id;
+    v_owner_head_id := v_target_head.id;
+    v_owner_head_name := v_target_head.full_name;
+  elsif me.default_head_id is not null then
+    select * into v_target_head from public.profiles
+    where id = me.default_head_id and role = 'head' and is_active;
+    if v_target_head.id is not null then
+      v_dept_id := v_target_head.department_id;
+      v_owner_head_id := v_target_head.id;
+      v_owner_head_name := v_target_head.full_name;
+    else
+      v_dept_id := me.department_id;
+    end if;
+  else
+    v_dept_id := me.department_id;
+  end if;
+
+  -- Shop assignment
+  if p_type in ('general', 'non_cash') then
+    v_shop_id := public._resolve_request_shop(me, p_details);
+  else
+    v_shop_id := me.shop_id;
+  end if;
+  if v_shop_id is not null then
+    select name into v_shop from public.shops where id = v_shop_id;
+  end if;
+
+  if p_type = 'stock_transfer' and (v->'details'->>'from_shop_id') ~ '^[0-9a-fA-F-]{36}$' then
+    v_shop_id := (v->'details'->>'from_shop_id')::uuid;
+    v_shop := coalesce(v->'details'->>'from_shop_name', (select name from public.shops where id = v_shop_id));
+  end if;
+
+  v_region_id := null;
+  v_region_name := null;
+  v_is_waitlist := false;
+  if p_type = 'exhibition' then
+    v_region_id := coalesce(
+      me.region_id,
+      (select p.region_id from public.profiles p where p.id = me.regional_head_id),
+      case when p_details ? 'region_id' and p_details->>'region_id' ~ '^[0-9a-fA-F-]{36}$'
+           then (p_details->>'region_id')::uuid else null end
+    );
+    if v_region_id is not null then
+      select name into v_region_name from public.regions where id = v_region_id;
+    end if;
+    v_is_waitlist := coalesce((p_details->>'is_waitlist')::boolean, false);
+  end if;
+
+  insert into public.requests (
+    requester_id, requester_name, requester_role, department_id, title, notes, amount,
+    request_type, shop_id, shop_name, details, owner_head_id, owner_head_name,
+    region_id, region_name, is_waitlist
+  )
+  values (
+    me.id, me.full_name, me.role, v_dept_id, left(v_title, 200), nullif(btrim(p_notes), ''),
+    v_amount, p_type, v_shop_id, v_shop, case when p_type = 'non_cash' then v_clean_details else v->'details' end,
+    v_owner_head_id, v_owner_head_name,
+    v_region_id, v_region_name, v_is_waitlist
+  )
+  returning id into v_id;
+  return v_id;
+end $function$;
+revoke execute on function public.create_typed_draft(public.request_type, text, numeric, text, jsonb, uuid) from public, anon;
+grant execute on function public.create_typed_draft(public.request_type, text, numeric, text, jsonb, uuid) to authenticated;
+
+-- 10. Complete submit_request with shop auto-assign prior to null check --------
+create or replace function public.submit_request(p_request_id uuid)
+ returns void language plpgsql security definer set search_path to '' as $function$
+declare
+  me public.profiles; r public.requests; rh public.profiles; v_no text; n int; v_rh_count int;
+  v_next public.request_status; v_cat_ok boolean; v_shop_ids uuid[];
+begin
+  me := public._me();
+  select * into r from public.requests where id = p_request_id for update;
+  if r.id is null or r.requester_id <> me.id then raise exception 'Not found'; end if;
+  if r.status not in ('draft','returned') then raise exception 'This request cannot be submitted'; end if;
+
+  -- General / Non-Cash: one associated shop is auto-assigned; several need a choice.
+  if r.request_type in ('general', 'non_cash') and r.shop_id is null then
+    v_shop_ids := public._user_shop_ids(me.id);
+    if cardinality(v_shop_ids) = 1 then
+      update public.requests
+         set shop_id = v_shop_ids[1],
+             shop_name = (select s.name from public.shops s where s.id = v_shop_ids[1])
+       where id = r.id;
+      r.shop_id := v_shop_ids[1];
+    elsif cardinality(v_shop_ids) > 1 then
+      raise exception 'Select the shop for this request (you are assigned to more than one shop)';
+    end if;
+  end if;
+
+  -- Requester profile must be complete (shop required for employee unless stock transfer specifies it)
+  if r.shop_id is null and me.shop_id is null and me.role = 'employee' and r.request_type <> 'stock_transfer' then
+    raise exception 'Your shop is not assigned yet. Contact your Department Head before submitting';
+  end if;
+
+  -- Title and amount sanity (non_cash and stock_transfer are exempt from monetary payment requirement)
+  if r.request_type not in ('non_cash', 'stock_transfer') and (r.amount is null or r.amount <= 0) then
+    raise exception 'Amount must be greater than zero';
+  end if;
+
+  if not (r.request_type = any(me.allowed_types) or (r.request_type = 'asset_below_20k' and 'asset'::public.request_type = any(me.allowed_types)) or me.role in ('admin', 'head')) then
+    raise exception 'You are no longer allowed to raise % requests', r.request_type;
+  end if;
+
+  if r.request_type = 'general' and not exists (
+       select 1 from public.request_files where request_id = r.id and kind = 'document') then
+    raise exception 'Attach at least one document';
+  end if;
+
+  if r.request_type = 'discount' and not exists (
+       select 1 from public.request_files
+        where request_id = r.id and kind = 'document' and mime_type = 'application/pdf' and added_by is null) then
+    raise exception 'Attach the discount PDF to submit';
+  end if;
+
+  -- Work category (only needed when several clerks split the target department's work).
+  v_cat_ok := r.category_id is not null and exists (
+    select 1 from public.work_categories c
+     where c.id = r.category_id and c.department_id = r.department_id and c.is_active);
+  if me.role <> 'head' and public._category_required(r.department_id) then
+    if r.category_id is null then raise exception 'Select the work category for this request'; end if;
+    if not v_cat_ok then raise exception 'The selected work category is no longer available. Pick another one'; end if;
+  elsif r.category_id is not null and not v_cat_ok then
+    update public.requests set category_id = null, category_name = null where id = r.id;
+    r.category_id := null;
+  end if;
+
+  -- Asset Buying (regular): min 2 bills or quotations
+  if r.request_type = 'asset' then
+    select count(*) into n from public.request_files
+     where request_id = r.id and kind = 'document' and added_by is null
+       and quote_amount is not null and nullif(btrim(coalesce(quote_vendor, '')), '') is not null;
+    if n < 2 then raise exception 'Attach at least 2 bills or quotations, each with vendor name and amount (% so far)', n; end if;
+    update public.request_files set quote_status = 'pending' where request_id = r.id and quote_amount is not null;
+    update public.requests set selected_quote_id = null, quote_selected_by = null, quote_selected_by_name = null,
+      quote_selected_at = null where id = r.id;
+    perform public._sync_asset_amount(r.id);
+  end if;
+
+  -- Asset Buying Below 20k: amount max 20000, min 1 bill or quotation
+  if r.request_type = 'asset_below_20k' then
+    if r.amount > 20000 then
+      raise exception 'Amount cannot exceed ₹20,000 for Asset Buying Below 20k';
+    end if;
+    select count(*) into n from public.request_files
+     where request_id = r.id and kind = 'document' and added_by is null
+       and quote_amount is not null and nullif(btrim(coalesce(quote_vendor, '')), '') is not null;
+    if n < 1 then raise exception 'Attach at least 1 bill or quotation with vendor name and amount'; end if;
+    update public.request_files set quote_status = 'pending' where request_id = r.id and quote_amount is not null;
+    update public.requests set selected_quote_id = null, quote_selected_by = null, quote_selected_by_name = null,
+      quote_selected_at = null where id = r.id;
+    perform public._sync_asset_amount(r.id);
+  end if;
+
+  -- Routing target for employees: check Regional Head
+  if me.role = 'employee' then
+    if me.regional_head_id is not null then
+      select * into rh from public.profiles p
+       where p.id = me.regional_head_id and p.role = 'regional_head' and p.is_active;
+    end if;
+
+    if rh.id is null and me.shop_id is not null then
+      select count(*) into v_rh_count from public.profiles p
+        join public.regional_head_shops s on s.regional_head_id = p.id
+       where p.role = 'regional_head' and p.is_active
+         and s.shop_id = me.shop_id;
+      if v_rh_count = 1 then
+        select p.* into rh from public.profiles p
+          join public.regional_head_shops s on s.regional_head_id = p.id
+         where p.role = 'regional_head' and p.is_active
+           and s.shop_id = me.shop_id;
+      elsif v_rh_count > 1 then
+        raise exception 'Your Regional Head is not assigned yet. Ask your Head to assign one before submitting';
+      end if;
+    end if;
+    v_next := case when rh.id is not null then 'pending_regional_review' else 'submitted' end;
+  else
+    v_next := 'submitted';
+  end if;
+
+  v_no := coalesce(r.request_no, public.next_number(
+    coalesce((select value #>> '{}' from public.app_settings where key = 'request_prefix'), 'REQ')));
+
+  if me.role = 'head' then
+    update public.requests set
+      status = 'pending_admin_approval',
+      request_no = v_no,
+      route = 'A',
+      routed_by = me.id,
+      routed_at = now(),
+      reviewed_by = me.id,
+      reviewed_by_name = me.full_name,
+      reviewed_at = now(),
+      regional_head_id = null,
+      regional_head_name = null,
+      regional_forwarded_at = null,
+      submitted_at = coalesce(submitted_at, now()),
+      updated_at = now()
+    where id = r.id;
+
+    perform public._log_action(r.id, me, 'submitted', r.status, 'pending_admin_approval',
+      'Department Head request routed directly to Admin for approval', true);
+    perform public.notify_next_actor(r.id, 'pending_admin_approval');
+  else
+    update public.requests set
+      status = v_next,
+      request_no = v_no,
+      route = null,
+      routed_by = null,
+      routed_at = null,
+      reviewed_by = null,
+      reviewed_by_name = null,
+      reviewed_at = null,
+      regional_head_id = rh.id,
+      regional_head_name = rh.full_name,
+      regional_forwarded_at = null,
+      submitted_at = coalesce(submitted_at, now()),
+      updated_at = now()
+    where id = r.id;
+
+    perform public._log_action(r.id, me, 'submitted', r.status, v_next, null, true);
+    perform public.notify_next_actor(r.id, v_next);
+  end if;
+end $function$;
+revoke execute on function public.submit_request(uuid) from public, anon;
+grant execute on function public.submit_request(uuid) to authenticated;
 
 notify pgrst, 'reload schema';

@@ -166,11 +166,24 @@ const LOCAL_STORAGE_REQ_KEY = 'approval_app_requests_store';
 
 export const errMsg = (err: unknown): string => {
   if (!err) return 'An unexpected error occurred';
-  if (typeof err === 'string') return err;
-  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') {
+    if (err.includes('Failed to fetch')) {
+      return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
+    }
+    return err;
+  }
+  if (err instanceof Error) {
+    if (err.message.includes('Failed to fetch')) {
+      return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
+    }
+    return err.message;
+  }
   if (typeof err === 'object') {
     const o = err as Record<string, any>;
     if (typeof o.message === 'string' && o.message.trim()) {
+      if (o.message.includes('Failed to fetch')) {
+        return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
+      }
       return o.hint ? `${o.message} (${o.hint})` : o.message;
     }
     if (typeof o.error_description === 'string' && o.error_description.trim()) return o.error_description;
@@ -183,7 +196,11 @@ export const errMsg = (err: unknown): string => {
       // ignore
     }
   }
-  return String(err);
+  const str = String(err);
+  if (str.includes('Failed to fetch')) {
+    return 'Network / connection error: Unable to reach the server. Please check your internet connection or verify your session.';
+  }
+  return str;
 };
 
 /** Newest action first, files in upload order, resolve owner head. */
@@ -522,10 +539,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
 
         await uploadFiles(requestId, data.files || []);
-        await loadRequests();
+        try {
+          await loadRequests();
+        } catch (loadErr) {
+          console.warn('loadRequests failed after draft creation:', loadErr);
+        }
         return { success: true, id: requestId };
       } catch (err: unknown) {
-        if (requestId) await loadRequests();
+        if (requestId) {
+          try {
+            await loadRequests();
+          } catch {
+            /* ignore */
+          }
+        }
         // The draft (if created) stays in My Requests so attachments can be retried.
         return { success: false, id: requestId, error: errMsg(err) };
       }
@@ -740,7 +767,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         if (error) throw error;
         const { data: row } = await supabase.from('requests').select('request_no').eq('id', id).maybeSingle();
-        await loadRequests();
+        try {
+          await loadRequests();
+        } catch (loadErr) {
+          console.warn('loadRequests failed after submit:', loadErr);
+        }
         return { success: true, request_no: row?.request_no ?? undefined };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
