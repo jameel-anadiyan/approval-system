@@ -5,13 +5,14 @@ import { formatINR, formatINRWhole, TYPE_LABELS, typeOf } from '../../lib/format
 import { errMsg } from '../../lib/errorUtils';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
-import { ShieldAlert, ArrowRight, UserCheck, Lock, Award } from 'lucide-react';
+import { ShieldAlert, ArrowRight, UserCheck, Lock, Award, Wallet } from 'lucide-react';
+import { useDirectory } from '../../lib/directory';
 
 interface RouteModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onRoute: (route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<void>;
+  onRoute: (route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null, assignedEntryUserId?: string) => Promise<void>;
 }
 
 export const RouteModal: React.FC<RouteModalProps> = ({
@@ -42,10 +43,27 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   const isRouteBDisabled = isHighValue || isRequesterHead || typeLock === 'A';
   const isRouteADisabled = typeLock === 'B';
 
+  const { users } = useDirectory();
+  const entryOfficers = users.filter(
+    (u) =>
+      u.is_active &&
+      (u.role === 'admin' || (u.role === 'disbursement' && (u.disbursement_type === 'entry_only' || !u.disbursement_type)))
+  );
+  const needsPayment = type !== 'discount' && type !== 'stock_transfer' && type !== 'non_cash';
+  const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>(
+    request.assigned_entry_user_id || (entryOfficers[0]?.id ?? '')
+  );
+
   React.useEffect(() => {
     if (typeLock) setSelectedRoute(typeLock);
     else if (isRouteBDisabled) setSelectedRoute('A');
   }, [isRouteBDisabled, typeLock]);
+
+  React.useEffect(() => {
+    if (!assignedEntryUserId && entryOfficers.length > 0) {
+      setAssignedEntryUserId(entryOfficers[0].id);
+    }
+  }, [entryOfficers, assignedEntryUserId]);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +72,10 @@ export const RouteModal: React.FC<RouteModalProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      await onRoute(selectedRoute, remarks, voice);
+      if (needsPayment && entryOfficers.length > 0 && !assignedEntryUserId) {
+        throw new Error('Please select a Disbursement Entry Only account for this payment-needed request.');
+      }
+      await onRoute(selectedRoute, remarks, voice, assignedEntryUserId || undefined);
       onClose();
     } catch (err) {
       setError(errMsg(err));
@@ -218,6 +239,34 @@ export const RouteModal: React.FC<RouteModalProps> = ({
             </div>
           </label>
         </div>
+        )}
+
+        {/* Disbursement Entry Only Account Selection (for payment-needed requests) */}
+        {needsPayment && (
+          <div className="p-3.5 bg-sky-50/70 border border-sky-200 rounded-xl space-y-2">
+            <label htmlFor="route-entry-user" className="text-xs font-bold text-sky-950 flex items-center gap-1.5">
+              <Wallet className="w-3.5 h-3.5 text-sky-600" />
+              <span>Assign Disbursement Entry Only Account</span>
+              <span className="text-rose-500">*</span>
+            </label>
+            <select
+              id="route-entry-user"
+              required
+              value={assignedEntryUserId}
+              onChange={(e) => setAssignedEntryUserId(e.target.value)}
+              className="w-full text-xs p-2.5 rounded-xl border border-sky-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-hidden bg-white"
+            >
+              <option value="">Select Entry Only Officer…</option>
+              {entryOfficers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name} (@{u.username})
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-sky-800 leading-snug">
+              Only the selected Entry Only account will receive and record payment entries for this request. (Can be modified by Clerk/Head before the first entry is created).
+            </p>
+          </div>
         )}
 
         {/* Remarks Input */}

@@ -90,9 +90,23 @@ export const Navigation: React.FC = () => {
     (r) => r.status === 'pending_admin_approval' || (r.status === 'approving' && (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
   ).length;
 
-  const disbAwaitingCount = requests.filter(
-    (r) => r.status === 'approved' && r.request_type !== 'discount' && r.request_type !== 'non_cash' && r.request_type !== 'stock_transfer'
-  ).length;
+  const entryApprovalsCount = requests.reduce((count, r) => {
+    const pendingInReq = (r.disbursement_entries || []).filter(
+      (e) => e.status === 'pending_approval'
+    ).length;
+    return count + pendingInReq;
+  }, 0);
+
+  const isEntryOnlyUser = role === 'disbursement' && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
+  const disbAwaitingCount = requests.filter((r) => {
+    if (r.status !== 'approved' || r.request_type === 'discount' || r.request_type === 'non_cash' || r.request_type === 'stock_transfer') {
+      return false;
+    }
+    if (isEntryOnlyUser) {
+      return r.assigned_entry_user_id === user?.id;
+    }
+    return true;
+  }).length;
 
   let mainNavItems: NavItem[] = [];
   let moreNavItems: NavItem[] = [];
@@ -207,6 +221,7 @@ export const Navigation: React.FC = () => {
         { label: 'Product Categories', path: '/admin/product-categories', icon: Tag },
         { label: 'Staff & Employees', path: '/admin/staff', icon: Users },
         { label: 'Dept Heads', path: '/admin/heads', icon: UserCheck },
+        { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
         { label: 'Disbursement Users', path: '/admin/disbursement', icon: Wallet },
         { label: 'Seal & Signature', path: '/admin/credentials', icon: FileCheck2 },
         { label: 'Settings', path: '/admin/settings', icon: Settings },
@@ -223,6 +238,20 @@ export const Navigation: React.FC = () => {
           { label: 'Transfer Report', path: '/reports/stock-transfers', icon: FileSpreadsheet },
         ];
         moreNavItems = [
+          { label: 'Profile', path: '/profile', icon: UserCheck },
+        ];
+        break;
+      }
+      if (user?.disbursement_type === 'entry_approver') {
+        mainNavItems = [
+          { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
+          { label: 'Search', path: '/disbursement', icon: Search },
+          { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
+          { label: 'Approved', path: '/approved', icon: CheckCircle2 },
+        ];
+        moreNavItems = [
+          { label: 'Verify Scan', path: '/disbursement/verify', icon: ShieldCheck },
+          ...stockReportItem,
           { label: 'Profile', path: '/profile', icon: UserCheck },
         ];
         break;

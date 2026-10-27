@@ -27,6 +27,12 @@ const DISB_TYPE_STYLES: Record<DisbursementAccountType, { badge: string; active:
     text: 'text-emerald-700',
     help: 'Can pay amount against each entry (max = entry amount). Cannot create entries.',
   },
+  entry_approver: {
+    badge: 'bg-amber-50 text-amber-800 border-amber-300',
+    active: 'bg-amber-600 text-white shadow-xs',
+    text: 'text-amber-700',
+    help: 'Reviews and approves/rejects entries made by Entry accounts before they go to Payment. Cannot create or pay.',
+  },
   stock_transfer_monitor: {
     badge: 'bg-indigo-50 text-indigo-800 border-indigo-300',
     active: 'bg-indigo-600 text-white shadow-xs',
@@ -407,8 +413,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     </span>
                     <p className="text-[11px] text-sky-800/80 mt-0.5">{DISB_TYPE_STYLES[disbType(u)].help}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(['entry_only', 'payment_only', 'stock_transfer_monitor'] as DisbursementAccountType[]).map((t) => (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {(['entry_only', 'payment_only', 'entry_approver', 'stock_transfer_monitor'] as DisbursementAccountType[]).map((t) => (
                       <button
                         key={t}
                         type="button"
@@ -421,10 +427,51 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                             : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        {t === 'stock_transfer_monitor' ? 'Stock Transfer Monitor' : DISBURSEMENT_TYPE_LABELS[t]}
+                        {t === 'stock_transfer_monitor' ? 'Stock Transfer' : DISBURSEMENT_TYPE_LABELS[t]}
                       </button>
                     ))}
                   </div>
+
+                  {disbType(u) === 'payment_only' && (
+                    <div className="pt-2.5 border-t border-sky-200/80 space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[11px] font-bold text-sky-950">
+                          Dealer Mode:
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {(['both', 'cash', 'bank'] as const).map((dm) => (
+                            <button
+                              key={dm}
+                              type="button"
+                              disabled={busyId === u.id || (u.payment_dealer_type || 'both') === dm}
+                              onClick={async () => {
+                                setBusyId(u.id);
+                                const entryIds = (u.connected_entry_accounts || []).map((a) => a.entry_user_id);
+                                const res = await dir.setPaymentDealerConfig(u.id, dm, entryIds);
+                                setBusyId(null);
+                                if (res.success) show(`Dealer mode updated to ${dm.toUpperCase()} for @${u.username}.`);
+                              }}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase transition-all ${
+                                (u.payment_dealer_type || 'both') === dm
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              {dm}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-sky-900/80 flex items-center justify-between gap-2">
+                        <span>Connected Entry Accs:</span>
+                        <strong className="text-slate-700">
+                          {(u.connected_entry_accounts || []).length > 0
+                            ? `${(u.connected_entry_accounts || []).length} assigned`
+                            : 'All accounts'}
+                        </strong>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -497,6 +544,18 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       }`} />
                     </button>
                   </label>
+                </div>
+              )}
+
+              {u.role === 'head' && u.mandatory_head_consultation && (
+                <div className="p-2.5 rounded-xl border border-amber-200 bg-amber-50/70 text-xs text-amber-900">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Mandatory Consultation Required:</span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-amber-800">
+                    Must consult with: <strong>{u.mandatory_consultation_head_name || dir.users.find((h) => h.id === u.mandatory_consultation_head_id)?.full_name || 'Designated Head'}</strong>
+                  </p>
                 </div>
               )}
 

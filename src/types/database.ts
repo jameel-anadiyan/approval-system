@@ -60,6 +60,8 @@ export interface DiscountDetails {
   discount_pct?: number;
   customer_name?: string | null;
   reference?: string | null;
+  invoice_no?: string | null;
+  bill_date?: string | null;
 }
 
 export type ExhibitionProvide =
@@ -204,13 +206,28 @@ export interface Profile {
   default_head_id?: string | null;
   /** Heads assigned to this employee / regional head */
   user_heads?: { head_id: string; is_default: boolean }[];
-  /** Disbursement role only: Entry Only vs Payment Only vs Stock Transfer Monitor */
+  /** Disbursement role only: Entry Only vs Payment Only vs Stock Transfer Monitor vs Entry Approver */
   disbursement_type?: DisbursementAccountType | null;
   /** Granted by Admin to open the Stock Transfer Report (Admin / Monitor always have it) */
   can_view_stock_transfer_report?: boolean;
+  /** Payment Only accounts: cash dealer, bank dealer, or both */
+  payment_dealer_type?: PaymentDealerType | null;
+  /** Payment Only accounts: connected entry account mappings */
+  connected_entry_accounts?: ConnectedEntryAccount[];
+  /** Department Head: whether consultation with a designated head is mandatory before approval/forwarding */
+  mandatory_head_consultation?: boolean;
+  mandatory_consultation_head_id?: string | null;
+  mandatory_consultation_head_name?: string | null;
 }
 
-export type DisbursementAccountType = 'entry_only' | 'payment_only' | 'stock_transfer_monitor';
+export interface ConnectedEntryAccount {
+  entry_user_id: string;
+  entry_user_name?: string;
+}
+
+export type DisbursementAccountType = 'entry_only' | 'payment_only' | 'stock_transfer_monitor' | 'entry_approver';
+
+export type PaymentDealerType = 'cash' | 'bank' | 'both';
 
 /** A shop the signed-in user may tag a General / Non-Cash request with. */
 export interface RequestShopOption {
@@ -318,6 +335,11 @@ export interface RequestRecord {
   is_waitlist?: boolean;
   waitlist_approved_by?: string | null;
   waitlist_approved_at?: string | null;
+  /** Assigned Entry Only account for payment-needed requests */
+  assigned_entry_user_id?: string | null;
+  assigned_entry_user_name?: string | null;
+  assigned_entry_at?: string | null;
+  assigned_entry_by?: string | null;
   /** Disbursement entries (for entry-only / payment-only accounts) */
   disbursement_entries?: DisbursementEntry[];
   /** Stock transfer: marked complete by the Stock Transfer Monitor account (or Admin) */
@@ -327,17 +349,27 @@ export interface RequestRecord {
   transfer_completed_remarks?: string | null;
 }
 
+export type DisbursementEntryStatus = 'pending' | 'pending_approval' | 'approved' | 'rejected' | 'paid' | 'cancelled';
+
 export interface DisbursementEntry {
   id: string;
   request_id: string;
   entry_no: number;
   amount: number;
+  entry_type: 'cash' | 'bank';
   tds_cut: boolean;
-  status: 'pending' | 'paid' | 'cancelled';
+  status: DisbursementEntryStatus;
   notes?: string | null;
   created_by?: string | null;
   created_by_name?: string | null;
   created_at: string;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  approved_by_name?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
+  rejected_by_name?: string | null;
+  rejection_reason?: string | null;
   paid_at?: string | null;
   paid_by?: string | null;
   paid_by_name?: string | null;

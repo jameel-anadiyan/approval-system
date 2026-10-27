@@ -71,6 +71,7 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
           ["Requested by", txt(r.requester_name)], ["Outlet / Shop", txt(r.shop_name)],
           ["Department", txt(r.department)], ["Subject", txt(r.title)],
           ["Customer", txt(d.customer_name)], ["Bill / Ref No", txt(d.reference)],
+          ["Invoice No", txt(d.invoice_no)], ["Date of Bill", txt(d.bill_date)],
         ] },
         { title: "Discount", rows: [
           ["Amount before discount", money(d.before_amount)], ["Amount after discount", money(d.after_amount)],

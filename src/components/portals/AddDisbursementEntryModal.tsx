@@ -3,13 +3,13 @@ import { Modal } from '../common/Modal';
 import { DisbursementEntry, RequestRecord, entriesTotal, entryAvailable } from '../../types/database';
 import { formatINR } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
-import { PlusCircle, ShieldAlert, Check, FileText, Percent, AlertCircle, RotateCcw, Banknote, CheckCircle2 } from 'lucide-react';
+import { PlusCircle, ShieldAlert, Check, FileText, Percent, AlertCircle, RotateCcw, Banknote, Landmark, CheckCircle2 } from 'lucide-react';
 
 interface AddDisbursementEntryModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onAddEntry: (amount: number, tdsCut: boolean, notes?: string, adjustment?: number) => Promise<void>;
+  onAddEntry: (amount: number, tdsCut: boolean, notes?: string, adjustment?: number, entryType?: 'cash' | 'bank') => Promise<void>;
 }
 
 export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps> = ({
@@ -30,6 +30,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
   // Balance available for new entries = approved - paid/adjusted - unpaid entries
   const remainingUnentered = entryAvailable(request);
 
+  const [entryType, setEntryType] = useState<'cash' | 'bank'>('bank');
   const [amountStr, setAmountStr] = useState<string>(
     remainingUnentered > 0 ? remainingUnentered.toFixed(2) : ''
   );
@@ -83,7 +84,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
 
     setIsSubmitting(true);
     try {
-      await onAddEntry(parsedAmount, tdsCut, notes.trim() || undefined, parsedAdjustment);
+      await onAddEntry(parsedAmount, tdsCut, notes.trim() || undefined, parsedAdjustment, entryType);
       onClose();
     } catch (err: unknown) {
       setError(errMsg(err));
@@ -151,6 +152,42 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </div>
           <span className="px-2.5 py-1 rounded-lg bg-sky-600 text-white font-mono font-extrabold text-xs shadow-xs">
             Entry #{nextEntryNo}
+          </span>
+        </div>
+
+        {/* Payment Entry Mode (Cash vs Bank) */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+            Payment Dealing Mode <span className="text-rose-500">*</span>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setEntryType('cash')}
+              className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                entryType === 'cash'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-1 ring-emerald-500'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Banknote className="w-4 h-4" />
+              <span>Cash Entry</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryType('bank')}
+              className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                entryType === 'bank'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-500'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Landmark className="w-4 h-4" />
+              <span>Bank Entry</span>
+            </button>
+          </div>
+          <span className="text-[10px] text-slate-400 mt-1 block">
+            This entry will route to the associated {entryType === 'cash' ? 'Cash' : 'Bank'} payment desk once approved by the Entry Approver.
           </span>
         </div>
 

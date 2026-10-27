@@ -137,7 +137,7 @@ export const DiscountReportPage: React.FC = () => {
       if (lo !== null && r.discount_pct < lo) return false;
       if (hi !== null && r.discount_pct > hi) return false;
       if (q) {
-        const hay = [r.request_no, r.title, r.customer_name, r.reference, r.requester_name, r.shop_name].join(' ').toLowerCase();
+        const hay = [r.request_no, r.title, r.customer_name, r.reference, r.invoice_no, r.bill_date, r.requester_name, r.shop_name].join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -206,11 +206,11 @@ export const DiscountReportPage: React.FC = () => {
 
   const exportCsv = () => {
     const head = ['Request No', 'Submitted', 'Decided', 'Status', 'Shop', 'Department', 'Employee', 'Approver',
-      'Customer', 'Reference', 'Before (INR)', 'After (INR)', 'Discount (INR)', 'Discount %', 'Subject'];
+      'Invoice No', 'Bill Date', 'Customer', 'Reference', 'Before (INR)', 'After (INR)', 'Discount (INR)', 'Discount %', 'Subject'];
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = sortedRows.map((r) => [
       r.request_no, r.submitted_at ? formatISTDate(r.submitted_at, false) : '', r.decided_at ? formatISTDate(r.decided_at, false) : '',
-      r.status, r.shop_name, r.department_name, r.requester_name, r.approver_name, r.customer_name, r.reference,
+      r.status, r.shop_name, r.department_name, r.requester_name, r.approver_name, r.invoice_no, r.bill_date, r.customer_name, r.reference,
       r.before_amount.toFixed(2), r.after_amount.toFixed(2), r.discount_amount.toFixed(2), r.discount_pct.toFixed(2), r.title,
     ].map(esc).join(','));
     const blob = new Blob([[head.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -561,8 +561,9 @@ export const DiscountReportPage: React.FC = () => {
                             {r.department_name && <div className="text-[10px] text-slate-400 flex items-center gap-1"><Building2 className="w-2.5 h-2.5" />{r.department_name}</div>}
                           </td>
                           <td className="px-3 py-2.5 text-slate-600">
-                            {r.customer_name || '—'}
-                            {r.reference && <div className="text-[10px] text-slate-400 font-mono">{r.reference}</div>}
+                            <div className="font-medium text-slate-800">{r.customer_name || '—'}</div>
+                            {r.invoice_no && <div className="text-[10px] text-indigo-700 font-semibold font-mono">Inv: {r.invoice_no}{r.bill_date ? ` (${r.bill_date})` : ''}</div>}
+                            {r.reference && <div className="text-[10px] text-slate-400 font-mono">Ref: {r.reference}</div>}
                           </td>
                           <td className="px-3 py-2.5 text-right text-slate-600">{formatINRWhole(r.before_amount)}</td>
                           <td className="px-3 py-2.5 text-right text-slate-600">{formatINRWhole(r.after_amount)}</td>
@@ -600,6 +601,7 @@ export const DiscountReportPage: React.FC = () => {
                           <div className="text-sm font-semibold text-slate-800 truncate">{r.shop_name}</div>
                           <div className="text-[11px] text-slate-500 truncate">
                             {r.requester_name}{r.customer_name ? ` · ${r.customer_name}` : ''}
+                            {r.invoice_no && <span className="text-indigo-600 ml-1 font-mono">· Inv: {r.invoice_no}</span>}
                           </div>
                         </div>
                         <div className="text-right shrink-0">

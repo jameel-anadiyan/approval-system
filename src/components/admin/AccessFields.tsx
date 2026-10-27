@@ -414,10 +414,14 @@ export const AccessModal: React.FC<{
     regional_head_id?: string | null;
     head_ids?: string[];
     default_head_id?: string | null;
+    mandatory_head_consultation?: boolean;
+    mandatory_consultation_head_id?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
 }> = ({ target, shops, regions = [], users = [], categories = [], onClose, onSave }) => {
   const [shopId, setShopId] = useState(target.shop_id ?? '');
   const [types, setTypes] = useState<RequestType[]>(target.allowed_types?.length ? target.allowed_types : ['general']);
+  const [mandatoryHeadConsultation, setMandatoryHeadConsultation] = useState(!!target.mandatory_head_consultation);
+  const [mandatoryConsultationHeadId, setMandatoryConsultationHeadId] = useState(target.mandatory_consultation_head_id || '');
 
   const initialHeadIds = (target.user_heads || []).map((uh) => uh.head_id);
   const fallbackHeadId =
@@ -448,6 +452,10 @@ export const AccessModal: React.FC<{
   const regionalHeadId = covering.some((u) => u.id === extra.regionalHeadId) ? extra.regionalHeadId : '';
 
   const save = async () => {
+    if (target.role === 'head' && mandatoryHeadConsultation && !mandatoryConsultationHeadId) {
+      setError('Please choose the mandatory Department Head required for consultation.');
+      return;
+    }
     const err = validateAccess(target.role, shopId, types, { ...extra, regionalHeadId, coveringCount: covering.length });
     if (err) return setError(err);
     setBusy(true);
@@ -456,7 +464,11 @@ export const AccessModal: React.FC<{
       shop_id: target.role === 'regional_head' ? null : shopId || null,
       allowed_types: types,
       ...(target.role === 'regional_head' ? { shop_ids: extra.shopIds, region_id: extra.regionId || null } : {}),
-      ...(target.role === 'head' ? { region_id: extra.regionId || null } : {}),
+      ...(target.role === 'head' ? {
+        region_id: extra.regionId || null,
+        mandatory_head_consultation: mandatoryHeadConsultation,
+        mandatory_consultation_head_id: mandatoryHeadConsultation ? mandatoryConsultationHeadId || null : null,
+      } : {}),
       ...(target.role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
       ...(target.role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
       ...(target.role === 'employee' || target.role === 'regional_head'
@@ -500,6 +512,53 @@ export const AccessModal: React.FC<{
           extra={{ ...extra, regionalHeadId }}
           onExtraChange={setExtra}
         />
+        {target.role === 'head' && (
+          <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/50 space-y-2.5">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mandatoryHeadConsultation}
+                onChange={(e) => {
+                  setMandatoryHeadConsultation(e.target.checked);
+                  if (!e.target.checked) setMandatoryConsultationHeadId('');
+                }}
+                className="mt-0.5 rounded-sm text-amber-600 focus:ring-amber-500"
+              />
+              <div>
+                <span className="text-xs font-bold text-amber-950 block">
+                  Mandatory Consultation with another Department Head
+                </span>
+                <span className="text-[11px] text-amber-800/80 block leading-tight mt-0.5">
+                  This Department Head cannot approve or forward any request without the designated head&apos;s agreed consultation.
+                </span>
+              </div>
+            </label>
+
+            {mandatoryHeadConsultation && (
+              <div className="pt-2 border-t border-amber-200/80">
+                <label htmlFor="modal-mandatory-head-select" className="text-xs font-bold text-amber-950 block mb-1">
+                  Designated Head to Consult <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  id="modal-mandatory-head-select"
+                  required={mandatoryHeadConsultation}
+                  value={mandatoryConsultationHeadId}
+                  onChange={(e) => setMandatoryConsultationHeadId(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-amber-300 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden bg-white"
+                >
+                  <option value="">Select Department Head…</option>
+                  {users
+                    .filter((u) => u.role === 'head' && u.is_active && u.id !== target.id)
+                    .map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.full_name} (@{h.username})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
           <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50">
             Cancel

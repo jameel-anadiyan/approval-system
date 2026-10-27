@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -19,6 +19,8 @@ import { isMyRoutingRequest } from '../../lib/workflow';
 import { supabase } from '../../lib/supabase';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { AddDisbursementEntryModal } from '../../components/portals/AddDisbursementEntryModal';
+import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
+import { EditDisbursementEntryModal } from '../../components/portals/EditDisbursementEntryModal';
 import { ConsultHeadsModal } from '../../components/portals/ConsultHeadsModal';
 import { RespondConsultationModal } from '../../components/portals/RespondConsultationModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
@@ -29,6 +31,7 @@ import { DisbursementClarificationSection } from '../../components/requests/Disb
 import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
 import { UserAvatar } from '../../components/common/UserAvatar';
 import { CompleteTransferModal } from '../../components/portals/CompleteTransferModal';
+import { errMsg } from '../../lib/errorUtils';
 import {
   formatINR,
   formatINRWhole,
@@ -89,17 +92,37 @@ export const RequestDetailPage: React.FC = () => {
     approveRequest,
     markAsPaid,
     addDisbursementEntry,
+    editRejectedDisbursementEntry,
     cancelApprovedRequest,
     selectQuote,
     decideExhibitionWaitlist,
     deleteSpecificRequest,
     markTransferComplete,
+    requestHeadConsultations,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
-    'route' | 'approve' | 'return' | 'reject' | 'forward' | 'regional_forward' | 'pay' | 'add_disb_entry' | 'edit' | 'consult' | 'consult_respond' | 'disb_clarify' | 'disb_respond' | 'cancel' | 'complete_transfer' | null
+    | 'route'
+    | 'approve'
+    | 'return'
+    | 'reject'
+    | 'forward'
+    | 'regional_forward'
+    | 'pay'
+    | 'add_disb_entry'
+    | 'edit'
+    | 'consult'
+    | 'consult_respond'
+    | 'disb_clarify'
+    | 'disb_respond'
+    | 'cancel'
+    | 'complete_transfer'
+    | 'assign_entry_user'
+    | 'edit_rejected_entry'
+    | null
   >(null);
   const [selectedEntry, setSelectedEntry] = useState<DisbursementEntry | null>(null);
+  const [entryToEdit, setEntryToEdit] = useState<DisbursementEntry | null>(null);
   const [consultInitialStatus, setConsultInitialStatus] = useState<'agreed' | 'disagreed' | null>(null);
   const [copiedNo, setCopiedNo] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -200,21 +223,51 @@ export const RequestDetailPage: React.FC = () => {
     ((Boolean(request.owner_head_id) && user?.id === request.owner_head_id) ||
       (Boolean(user?.department_id) && user?.department_id === request.department_id));
 
+  // Mandatory designated head consultation check
+  const designatedConsultation = user?.mandatory_consultation_head_id
+    ? consultations.find((c) => c.head_id === user.mandatory_consultation_head_id)
+    : null;
+  const isMandatoryHeadBlocked = Boolean(
+    role === 'head' &&
+    isOwningHead &&
+    user?.mandatory_head_consultation &&
+    user?.mandatory_consultation_head_id &&
+    designatedConsultation?.status !== 'agreed'
+  );
+  const designatedHeadName =
+    user?.mandatory_consultation_head_name ||
+    designatedConsultation?.head_name ||
+    'designated department head';
+
+  let mandatoryBlockReason = '';
+  if (isMandatoryHeadBlocked) {
+    if (!designatedConsultation) {
+      mandatoryBlockReason = `Approval & Forwarding blocked: Mandatory consultation with ${designatedHeadName} is required before you can approve or forward.`;
+    } else if (designatedConsultation.status === 'pending') {
+      mandatoryBlockReason = `Approval & Forwarding blocked: Awaiting agreed response from designated Head (${designatedHeadName}).`;
+    } else if (designatedConsultation.status === 'disagreed') {
+      mandatoryBlockReason = `Approval & Forwarding blocked: Designated Head (${designatedHeadName}) disagreed with this request.`;
+    }
+  }
+
   // If any consultation is pending or disagreed, forwarding to Admin and Approval are blocked!
   const pendingConsultations = consultations.filter((c) => c.status === 'pending');
   const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
   const hasPendingConsultations = pendingConsultations.length > 0;
   const hasDisagreedConsultations = disagreedConsultations.length > 0;
-  const isConsultationBlocked = hasPendingConsultations || hasDisagreedConsultations;
+  const isInterDeptBlocked = hasPendingConsultations || hasDisagreedConsultations;
 
-  let consultationBlockReason = '';
+  let interDeptBlockReason = '';
   if (hasPendingConsultations && hasDisagreedConsultations) {
-    consultationBlockReason = `Approval & Forwarding blocked: Awaiting review response from ${pendingConsultations.map((c) => c.head_name).join(', ')}, and disagreed by ${disagreedConsultations.map((c) => c.head_name).join(', ')}.`;
+    interDeptBlockReason = `Approval & Forwarding blocked: Awaiting review response from ${pendingConsultations.map((c) => c.head_name).join(', ')}, and disagreed by ${disagreedConsultations.map((c) => c.head_name).join(', ')}.`;
   } else if (hasPendingConsultations) {
-    consultationBlockReason = `Approval & Forwarding blocked: Awaiting review response from ${pendingConsultations.map((c) => c.head_name).join(', ')}.`;
+    interDeptBlockReason = `Approval & Forwarding blocked: Awaiting review response from ${pendingConsultations.map((c) => c.head_name).join(', ')}.`;
   } else if (hasDisagreedConsultations) {
-    consultationBlockReason = `Approval & Forwarding blocked: One or more consulted department heads (${disagreedConsultations.map((c) => c.head_name).join(', ')}) disagreed with this request.`;
+    interDeptBlockReason = `Approval & Forwarding blocked: One or more consulted department heads (${disagreedConsultations.map((c) => c.head_name).join(', ')}) disagreed with this request.`;
   }
+
+  const isConsultationBlocked = isInterDeptBlocked || isMandatoryHeadBlocked;
+  const consultationBlockReason = isMandatoryHeadBlocked ? mandatoryBlockReason : interDeptBlockReason;
 
   const isFinalized = ['approved', 'rejected', 'paid', 'withdrawn', 'cancelled'].includes(request.status);
   const canRequestConsultation =
@@ -223,6 +276,7 @@ export const RequestDetailPage: React.FC = () => {
     !isFinalized;
 
   const rType = typeOf(request);
+  const isPaymentNeeded = rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer';
   const isDisbursement = role === 'disbursement';
   const isStockMonitorUser = isDisbursement && user?.disbursement_type === 'stock_transfer_monitor';
   const isEntryOnly = isDisbursement && !isStockMonitorUser && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
@@ -232,22 +286,31 @@ export const RequestDetailPage: React.FC = () => {
   const isApprovedTransfer = rType === 'stock_transfer' && request.status === 'approved';
   const canCompleteTransfer = isApprovedTransfer && !request.transfer_completed_at && (role === 'admin' || isStockMonitorUser);
 
-  const entries: DisbursementEntry[] = useMemo(() => {
-    return (request.disbursement_entries || []).filter((e) => e.status !== 'cancelled');
-  }, [request.disbursement_entries]);
+  const paymentDealerType = user?.payment_dealer_type || 'both';
+  const connectedEntryIds = (user?.connected_entry_accounts || []).map((c) =>
+    typeof c === 'string' ? c : c.entry_user_id
+  );
 
-  const pendingEntries = useMemo(() => {
-    return entries.filter((e) => e.status === 'pending');
-  }, [entries]);
+  const isEntryForThisCashier = (ent: DisbursementEntry) => {
+    if (role === 'admin') return true;
+    if (!isPaymentOnly) return true;
+    const mode = ent.entry_type || 'bank';
+    if (paymentDealerType !== 'both' && paymentDealerType !== mode) return false;
+    if (connectedEntryIds.length > 0 && ent.created_by && !connectedEntryIds.includes(ent.created_by)) return false;
+    return true;
+  };
 
-  const totalEntered = useMemo(() => entriesTotal(entries), [entries]);
+  const isEntryReadyForPayment = (ent: DisbursementEntry) => {
+    return ent.status === 'approved' || ent.status === 'pending';
+  };
 
-  // Balance available for new entries (entry amount + adjustment)
-  const remainingUnentered = useMemo(() => entryAvailable(request), [request]);
-
-  const nextEntryNo = useMemo(() => {
-    return entries.reduce((m, e) => Math.max(m, e.entry_no || 0), 0) + 1;
-  }, [entries]);
+  const entries: DisbursementEntry[] = (request.disbursement_entries || []).filter(
+    (e) => e.status !== 'cancelled'
+  );
+  const pendingEntries = entries.filter((e) => e.status === 'pending');
+  const totalEntered = entriesTotal(entries);
+  const remainingUnentered = entryAvailable(request);
+  const nextEntryNo = entries.reduce((m, e) => Math.max(m, e.entry_no || 0), 0) + 1;
 
   const firstPendingEntry = pendingEntries[0] || null;
 
@@ -311,11 +374,9 @@ export const RequestDetailPage: React.FC = () => {
     request.status !== 'withdrawn' &&
     (role === 'admin' || (role === 'head' && user?.can_view_exhibition_waitlist));
 
-  const latestReturnAction = useMemo(() => {
-    return (request.actions || [])
-      .filter((a) => a.action === 'returned')
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-  }, [request.actions]);
+  const latestReturnAction = (request.actions || [])
+    .filter((a) => a.action === 'returned')
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
   const copyApprovalNo = (no: string) => {
     navigator.clipboard.writeText(no);
@@ -929,6 +990,40 @@ export const RequestDetailPage: React.FC = () => {
             </div>
           )}
 
+          {/* Pre-approval Entry Officer Assignment Card */}
+          {isPaymentNeeded && request.status !== 'draft' && request.status !== 'approved' && request.status !== 'paid' && request.status !== 'cancelled' && (
+            <div className="bg-white rounded-2xl border border-indigo-100 p-4 sm:p-5 shadow-xs text-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+                    <UserCheck className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+                      Disbursement Entry Account (Pre-assignment)
+                    </p>
+                    <p className="text-xs font-bold text-slate-900 truncate">
+                      {request.assigned_entry_user_name ? (
+                        <span className="text-indigo-950 font-extrabold">{request.assigned_entry_user_name}</span>
+                      ) : (
+                        <span className="text-amber-700 font-semibold italic">Not assigned yet (selected during routing or by Head)</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                {(role === 'admin' || role === 'clerk' || isOwningHead) && (
+                  <button
+                    type="button"
+                    onClick={() => setModalState('assign_entry_user')}
+                    className="self-end sm:self-auto px-3 py-1.5 text-xs font-bold rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer shadow-2xs"
+                  >
+                    {request.assigned_entry_user_id ? 'Change Entry Officer' : 'Assign Entry Officer'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && (pay.paid > 0 || (request.disbursement_entries?.length || 0) > 0))) && (
             <div className="bg-white rounded-2xl border border-teal-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -959,6 +1054,44 @@ export const RequestDetailPage: React.FC = () => {
                 <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-center min-w-0">
                   <p className="text-[10px] text-amber-600 uppercase">Balance</p>
                   <p className="font-bold text-amber-800 truncate">{formatINR(pay.balance)}</p>
+                </div>
+              </div>
+
+              {/* Assigned Entry Account Status & Re-assign */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+                    <UserCheck className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+                      Assigned Disbursement Entry Account
+                    </p>
+                    <p className="text-xs font-bold text-slate-900 truncate">
+                      {request.assigned_entry_user_name ? (
+                        <span className="text-indigo-950 font-extrabold">{request.assigned_entry_user_name}</span>
+                      ) : (
+                        <span className="text-amber-700 font-semibold italic">Not assigned yet</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                  {entries.length === 0 ? (
+                    (role === 'admin' || role === 'clerk' || isOwningHead) && (
+                      <button
+                        type="button"
+                        onClick={() => setModalState('assign_entry_user')}
+                        className="px-2.5 py-1 text-xs font-bold rounded-lg border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 shadow-2xs transition-colors cursor-pointer"
+                      >
+                        {request.assigned_entry_user_id ? 'Change Entry Officer' : 'Assign Entry Officer'}
+                      </button>
+                    )
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 border border-slate-300">
+                      Locked ({entries.length} {entries.length === 1 ? 'entry' : 'entries'} created)
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1011,74 +1144,164 @@ export const RequestDetailPage: React.FC = () => {
                       )}
                     </div>
                   ) : (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {entries.map((ent) => {
-                        const isEntryPending = ent.status === 'pending';
+                        const isPendingApproval = ent.status === 'pending_approval';
+                        const isRejected = ent.status === 'rejected';
+                        const isReadyForPay = isEntryReadyForPayment(ent);
+                        const isCash = ent.entry_type === 'cash';
+
                         return (
                           <div
                             key={ent.id}
-                            className={`p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-colors ${
-                              isEntryPending ? 'bg-sky-50/40 border-sky-200' : 'bg-slate-50/70 border-slate-200'
+                            className={`p-3 rounded-xl border flex flex-col gap-2 text-xs transition-colors ${
+                              isRejected
+                                ? 'bg-rose-50/50 border-rose-200'
+                                : isPendingApproval
+                                ? 'bg-amber-50/40 border-amber-200'
+                                : isReadyForPay
+                                ? 'bg-sky-50/40 border-sky-200'
+                                : 'bg-slate-50/70 border-slate-200'
                             }`}
                           >
-                            <div className="flex items-center gap-2 flex-wrap min-w-0">
-                              <span className="font-mono font-extrabold text-sky-900 bg-sky-100/90 px-2 py-0.5 rounded-md text-[11px]">
-                                Entry #{ent.entry_no}
-                              </span>
-                              <span className="font-extrabold text-slate-900 font-mono text-xs">
-                                {formatINR(ent.amount)}
-                              </span>
-                              <span
-                                className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
-                                  ent.tds_cut
-                                    ? 'bg-amber-100 text-amber-900 border-amber-300'
-                                    : 'bg-slate-200 text-slate-700 border-slate-300'
-                                }`}
-                              >
-                                {ent.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
-                              </span>
-                              {ent.notes && (
-                                <span className="text-[11px] text-slate-500 italic truncate max-w-xs">
-                                  · {ent.notes}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                <span className="font-mono font-extrabold text-sky-900 bg-sky-100/90 px-2 py-0.5 rounded-md text-[11px]">
+                                  Entry #{ent.entry_no}
                                 </span>
-                              )}
-                              {Number(ent.adjustment_amount || 0) > 0 && (
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
-                                  + Old balance / advance adjusted {formatINR(Number(ent.adjustment_amount))}
+                                <span className="font-extrabold text-slate-900 font-mono text-xs">
+                                  {formatINR(ent.amount)}
                                 </span>
-                              )}
+
+                                {/* Cash vs Bank Badge */}
+                                {isCash ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                    <Banknote className="w-3 h-3 text-emerald-700" /> Cash
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                                    <Building2 className="w-3 h-3 text-blue-700" /> Bank
+                                  </span>
+                                )}
+
+                                <span
+                                  className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
+                                    ent.tds_cut
+                                      ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                      : 'bg-slate-200 text-slate-700 border-slate-300'
+                                  }`}
+                                >
+                                  {ent.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
+                                </span>
+
+                                {/* Approver / Review Status Badge */}
+                                {isPendingApproval && (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                                    Awaiting Approver
+                                  </span>
+                                )}
+                                {ent.status === 'approved' && (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-sky-100 text-sky-900 border border-sky-300">
+                                    Approved for Payment
+                                  </span>
+                                )}
+                                {isRejected && (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
+                                    Rejected
+                                  </span>
+                                )}
+
+                                {ent.notes && (
+                                  <span className="text-[11px] text-slate-500 italic truncate max-w-xs">
+                                    · {ent.notes}
+                                  </span>
+                                )}
+                                {Number(ent.adjustment_amount || 0) > 0 && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
+                                    + Old balance / advance adjusted {formatINR(Number(ent.adjustment_amount))}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                                {isPendingApproval ? (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                    Awaiting Approver
+                                  </span>
+                                ) : isRejected ? (
+                                  (isEntryOnly || role === 'admin') ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEntryToEdit(ent);
+                                        setModalState('edit_rejected_entry');
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer shadow-2xs"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                      <span>Edit &amp; Resubmit</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                                      Correction Needed
+                                    </span>
+                                  )
+                                ) : isReadyForPay ? (
+                                  canDisbursePayment && isEntryForThisCashier(ent) && !isPendingDisbursementClarification && request.status === 'approved' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedEntry(ent);
+                                        setModalState('pay');
+                                      }}
+                                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95 ${
+                                        isCash ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-teal-600 hover:bg-teal-700'
+                                      }`}
+                                    >
+                                      <Banknote className="w-3.5 h-3.5" />
+                                      <span>{isCash ? 'Settle Cash Entry' : 'Pay Entry'} #{ent.entry_no} ({formatINR(entryPayable(ent))})</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                                      {isPendingDisbursementClarification
+                                        ? 'On Hold'
+                                        : isPaymentOnly && !isEntryForThisCashier(ent)
+                                        ? `Routed to ${isCash ? 'Cash' : 'Bank'} Dealer`
+                                        : isEntryOnly
+                                        ? 'Ready for Payment'
+                                        : 'Pending Payment'}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                    <span>{entryPayable(ent) === 0 && Number(ent.adjustment_amount || 0) > 0 ? 'Adjusted' : 'Paid'}</span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                              {isEntryPending ? (
-                                canDisbursePayment && !isPendingDisbursementClarification && request.status === 'approved' ? (
+                            {/* Rejection Banner for Entry Officer */}
+                            {isRejected && (
+                              <div className="pt-2 border-t border-rose-200/70 flex items-center justify-between gap-2 flex-wrap text-rose-900">
+                                <div className="flex items-center gap-1.5">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                  <span><strong>Approver Rejection:</strong> {ent.rejection_reason || 'Correction requested by approver'}</span>
+                                </div>
+                                {(isEntryOnly || role === 'admin') && (
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setSelectedEntry(ent);
-                                      setModalState('pay');
+                                      setEntryToEdit(ent);
+                                      setModalState('edit_rejected_entry');
                                     }}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95"
+                                    className="font-bold underline hover:text-rose-700 cursor-pointer"
                                   >
-                                    <Banknote className="w-3.5 h-3.5" />
-                                    <span>Pay Entry #{ent.entry_no} ({formatINR(entryPayable(ent))})</span>
+                                    Click here to edit and resubmit &rarr;
                                   </button>
-                                ) : (
-                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                                    {isPendingDisbursementClarification
-                                      ? 'On Hold'
-                                      : isEntryOnly
-                                      ? 'Awaiting Payment'
-                                      : 'Pending'}
-                                  </span>
-                                )
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                  <span>{entryPayable(ent) === 0 && Number(ent.adjustment_amount || 0) > 0 ? 'Adjusted' : 'Paid'}</span>
-                                </span>
-                              )}
-                            </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -1178,10 +1401,36 @@ export const RequestDetailPage: React.FC = () => {
             {isConsultationBlocked && (isOwningHead || role === 'admin') && (
               <div
                 role="status"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-semibold max-w-md"
+                className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-semibold max-w-lg shadow-2xs"
               >
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>{consultationBlockReason}</span>
+                <div className="flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{consultationBlockReason}</span>
+                </div>
+                {isMandatoryHeadBlocked && !designatedConsultation && user?.mandatory_consultation_head_id && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await requestHeadConsultations(
+                          request.id,
+                          [user.mandatory_consultation_head_id!],
+                          'Mandatory department head consultation before approval/forwarding'
+                        );
+                        if (res.success) {
+                          setBanner({ ok: true, text: `Consultation request sent to ${designatedHeadName}.` });
+                        } else {
+                          setBanner({ ok: false, text: res.error || 'Failed to request consultation' });
+                        }
+                      } catch (err: unknown) {
+                        setBanner({ ok: false, text: errMsg(err) });
+                      }
+                    }}
+                    className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] transition-colors cursor-pointer"
+                  >
+                    Request Now
+                  </button>
+                )}
               </div>
             )}
 
@@ -1805,16 +2054,52 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onAddEntry={async (amount, tdsCut, notes, adjustment = 0) => {
-            const res = await addDisbursementEntry(request.id, amount, tdsCut, notes, adjustment);
+          onAddEntry={async (amount, tdsCut, notes, adjustment = 0, entryType = 'bank') => {
+            const res = await addDisbursementEntry(request.id, amount, tdsCut, notes, adjustment, entryType);
             if (!res.success) throw new Error(res.error || 'Failed to add entry');
             const adjText = adjustment > 0 ? ` · Old balance adjusted ${formatINR(adjustment)}` : '';
+            const typeText = entryType === 'cash' ? ' (Cash Entry)' : ' (Bank Entry)';
             setBanner({
               ok: true,
               text:
                 amount <= 0
                   ? `Entry recorded${adjText}. Nothing to pay — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
-                  : `Disbursement entry created: ${formatINR(amount)} to pay (${tdsCut ? 'TDS Cut' : 'TDS Not Cut'})${adjText}. Ready for payment.`,
+                  : `Disbursement entry created: ${formatINR(amount)} to pay${typeText} (${tdsCut ? 'TDS Cut' : 'TDS Not Cut'})${adjText}. Sent for Entry Approver review.`,
+            });
+          }}
+        />
+      )}
+
+      {modalState === 'assign_entry_user' && request && (
+        <AssignEntryAccountModal
+          isOpen={true}
+          onClose={() => setModalState(null)}
+          request={request}
+        />
+      )}
+
+      {modalState === 'edit_rejected_entry' && request && entryToEdit && (
+        <EditDisbursementEntryModal
+          isOpen={true}
+          onClose={() => {
+            setModalState(null);
+            setEntryToEdit(null);
+          }}
+          request={request}
+          entry={entryToEdit}
+          onResubmit={async (entryId, amount, entryType, tdsCut, notes, adjustment) => {
+            const res = await editRejectedDisbursementEntry(
+              entryId,
+              amount,
+              entryType,
+              tdsCut,
+              notes,
+              adjustment
+            );
+            if (!res.success) throw new Error(res.error || 'Failed to update entry');
+            setBanner({
+              ok: true,
+              text: `Entry #${entryToEdit.entry_no} resubmitted for approver review.`,
             });
           }}
         />

@@ -93,8 +93,8 @@ export const ClerkInboxPage: React.FC = () => {
             setActiveRequest(null);
           }}
           request={activeRequest}
-          onRoute={async (rt, rm, v) => {
-            const res = await routeRequest(activeRequest.id, rt, rm, v);
+          onRoute={async (rt, rm, v, entryUserId) => {
+            const res = await routeRequest(activeRequest.id, rt, rm, v, entryUserId);
             if (!res.success) throw new Error(res.error || 'Routing failed');
           }}
         />

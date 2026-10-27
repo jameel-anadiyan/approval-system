@@ -1,6 +1,6 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
-import { formatINR, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
+import { formatINR, formatISTDate, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
 import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
@@ -74,6 +74,8 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
         <div className="grid grid-cols-2 gap-3 text-xs">
           <Row label="Discount value" value={money(d.discount_amount ?? request.amount)} />
           <Row label="Customer" value={d.customer_name} />
+          <Row label="Invoice Number" value={d.invoice_no} />
+          <Row label="Date of Bill" value={d.bill_date ? formatISTDate(d.bill_date, false) : undefined} />
           <Row label="Bill / reference" value={d.reference} wide />
         </div>
       </div>

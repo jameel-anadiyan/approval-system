@@ -233,15 +233,20 @@ export const ACTION_LABELS: Record<string, string> = {
   quote_selected: 'Best quotation selected',
   regional_forwarded: 'Regional Head checked and forwarded to Clerk',
   disbursement_entry_created: 'Disbursement: Payment entry created',
+  disbursement_entry_approved: 'Disbursement: Entry approved by Approver',
+  disbursement_entry_rejected: 'Disbursement: Entry returned for correction',
+  disbursement_entry_corrected: 'Disbursement: Entry corrected & resubmitted',
   disbursement_entry_paid: 'Disbursement: Payment entry settled',
   disbursement_entry_cancelled: 'Disbursement: Payment entry cancelled',
+  assigned_entry_account: 'Disbursement: Assigned Entry Only account',
   transfer_completed: 'Stock transfer completed',
 };
 
-export const DISBURSEMENT_TYPE_LABELS: Record<'entry_only' | 'payment_only' | 'stock_transfer_monitor', string> = {
+export const DISBURSEMENT_TYPE_LABELS: Record<'entry_only' | 'payment_only' | 'stock_transfer_monitor' | 'entry_approver', string> = {
   entry_only: 'Entry Only',
   payment_only: 'Payment Only',
   stock_transfer_monitor: 'Stock Transfer Monitor',
+  entry_approver: 'Entry Approver',
 };
 
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'];

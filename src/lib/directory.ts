@@ -6,7 +6,7 @@ import { supabase, invokeEdgeFunction } from './supabase';
 import { errMsg } from './errorUtils';
 import { useAuth } from '../context/AuthContext';
 import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS, MOCK_REQUESTS, MOCK_PRODUCT_CATEGORIES } from './mockData';
-import type { AppRole, AuditLogEntry, Department, DisbursementAccountType, ProductCategory, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
+import type { AppRole, AuditLogEntry, ConnectedEntryAccount, Department, DisbursementAccountType, ProductCategory, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
 
 type Result = { success: boolean; error?: string };
 
@@ -33,6 +33,14 @@ export interface NewUserInput {
   default_head_id?: string | null;
   /** Disbursement: Entry Only vs Payment Only */
   disbursement_type?: DisbursementAccountType | null;
+  /** Payment Only: cash, bank, or both */
+  payment_dealer_type?: 'cash' | 'bank' | 'both' | null;
+  /** Payment Only: connected Entry Only accounts */
+  connected_entry_accounts?: string[];
+  /** Department Head: whether consultation is mandatory */
+  mandatory_head_consultation?: boolean;
+  /** Department Head: designated consultation head id */
+  mandatory_consultation_head_id?: string | null;
 }
 
 export interface AccessInput {
@@ -45,7 +53,17 @@ export interface AccessInput {
   head_ids?: string[];
   default_head_id?: string | null;
   disbursement_type?: DisbursementAccountType | null;
+  payment_dealer_type?: 'cash' | 'bank' | 'both' | null;
+  connected_entry_accounts?: string[];
+  mandatory_head_consultation?: boolean;
+  mandatory_consultation_head_id?: string | null;
 }
+
+const toAccountObjs = (ids: string[] = [], userList: Profile[] = []): ConnectedEntryAccount[] =>
+  ids.map((id) => ({
+    entry_user_id: id,
+    entry_user_name: userList.find((u) => u.id === id)?.full_name || undefined,
+  }));
 
 export function useDirectory() {
   const { isBackendConnected, user } = useAuth();
@@ -86,6 +104,19 @@ export function useDirectory() {
         const loadedRegions = (rRes.data as Region[]) || [];
         const activeRegionList = loadedRegions.length > 0 ? loadedRegions : MOCK_REGIONS;
         setRegions(activeRegionList);
+        let mappingsData: Array<{ payment_user_id: string; entry_user_id: string }> = [];
+        try {
+          const mRes = await supabase.from('payment_entry_account_mappings').select('*');
+          if (mRes.data) mappingsData = mRes.data as Array<{ payment_user_id: string; entry_user_id: string }>;
+        } catch {
+          // ignore if table not yet migrated
+        }
+        const mappingByPayment: Record<string, string[]> = {};
+        mappingsData.forEach((m) => {
+          if (!mappingByPayment[m.payment_user_id]) mappingByPayment[m.payment_user_id] = [];
+          mappingByPayment[m.payment_user_id].push(m.entry_user_id);
+        });
+
         if (p.error) {
           console.warn('Profiles load with embeds failed, using multi-query fallback:', p.error.message);
           try {
@@ -122,6 +153,7 @@ export function useDirectory() {
                 rh_shops: rhMap[u.id] || [],
                 clerk_cats: catMap[u.id] || [],
                 user_heads: headMap[u.id] || [],
+                connected_entry_accounts: mappingByPayment[u.id] ? toAccountObjs(mappingByPayment[u.id]) : (u.connected_entry_accounts || []),
               };
             });
             setUsers(merged);
@@ -134,6 +166,7 @@ export function useDirectory() {
             const basicMapped = ((basic.data as Profile[]) ?? []).map((u) => ({
               ...u,
               region: u.region ?? (u.region_id ? activeRegionList.find((rg) => rg.id === u.region_id) || null : null),
+              connected_entry_accounts: mappingByPayment[u.id] ? toAccountObjs(mappingByPayment[u.id]) : (u.connected_entry_accounts || []),
             }));
             setUsers(basicMapped);
           }
@@ -141,6 +174,7 @@ export function useDirectory() {
           const merged = ((p.data as Profile[]) ?? []).map((u) => ({
             ...u,
             region: u.region ?? (u.region_id ? activeRegionList.find((rg) => rg.id === u.region_id) || null : null),
+            connected_entry_accounts: mappingByPayment[u.id] ? toAccountObjs(mappingByPayment[u.id]) : (u.connected_entry_accounts || []),
           }));
           setUsers(merged);
         }
@@ -233,6 +267,21 @@ export function useDirectory() {
           p_user_id: data.id,
           p_type: input.disbursement_type,
         });
+        if (input.disbursement_type === 'payment_only') {
+          await supabase.rpc('set_payment_dealer_config', {
+            p_user_id: data.id,
+            p_dealer_type: input.payment_dealer_type || 'both',
+            p_entry_user_ids: (input.connected_entry_accounts || []).length > 0 ? input.connected_entry_accounts : null,
+          });
+        }
+      }
+
+      if (input.role === 'head' && input.mandatory_head_consultation && input.mandatory_consultation_head_id && data?.id) {
+        await supabase.rpc('set_head_mandatory_consultation', {
+          p_user_id: data.id,
+          p_enabled: true,
+          p_target_head_id: input.mandatory_consultation_head_id,
+        });
       }
 
       if (input.photo && data?.id) {
@@ -248,6 +297,7 @@ export function useDirectory() {
     const dept = departments.find((d) => d.id === input.department_id);
     const shop = shops.find((s) => s.id === input.shop_id) ?? null;
     const region = regions.find((r) => r.id === input.region_id) ?? null;
+    const targetConsultHead = input.mandatory_consultation_head_id ? users.find((u) => u.id === input.mandatory_consultation_head_id) : null;
     setUsers((prev) => [{
       id: `user-${Date.now()}`, username: input.username, full_name: input.full_name,
       designation: input.designation ?? null, role: input.role, department_id: input.department_id ?? null,
@@ -258,6 +308,11 @@ export function useDirectory() {
       allowed_types: input.allowed_types ?? ['general'],
       photo_path: input.photo || null,
       disbursement_type: input.role === 'disbursement' ? (input.disbursement_type || 'entry_only') : null,
+      payment_dealer_type: input.role === 'disbursement' && input.disbursement_type === 'payment_only' ? (input.payment_dealer_type || 'both') : null,
+      connected_entry_accounts: toAccountObjs(input.connected_entry_accounts || [], users),
+      mandatory_head_consultation: input.role === 'head' ? !!input.mandatory_head_consultation : false,
+      mandatory_consultation_head_id: input.role === 'head' && input.mandatory_head_consultation ? input.mandatory_consultation_head_id : null,
+      mandatory_consultation_head_name: input.role === 'head' && input.mandatory_head_consultation && targetConsultHead ? targetConsultHead.full_name : null,
       rh_shops: (input.shop_ids || []).map((shop_id) => ({ shop_id })),
       clerk_cats: (input.category_ids || []).map((category_id) => ({ category_id })),
       user_heads: (input.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === input.default_head_id })),
@@ -278,7 +333,25 @@ export function useDirectory() {
         await setDisbursementType(userId, access.disbursement_type);
       }
 
-      // 3. Invoke Edge Function for shop_ids, categories, heads
+      // 3. Persist payment_dealer_type & connected_entry_accounts if provided
+      if (access.payment_dealer_type !== undefined || access.connected_entry_accounts !== undefined) {
+        await setPaymentDealerConfig(
+          userId,
+          access.payment_dealer_type || 'both',
+          access.connected_entry_accounts || []
+        );
+      }
+
+      // 4. Persist mandatory_head_consultation if provided
+      if (access.mandatory_head_consultation !== undefined) {
+        await setHeadMandatoryConsultation(
+          userId,
+          !!access.mandatory_head_consultation,
+          access.mandatory_consultation_head_id || null
+        );
+      }
+
+      // 5. Invoke Edge Function for shop_ids, categories, heads
       const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
       if (error && access.region_id === undefined && access.disbursement_type === undefined) return { success: false, error: errMsg(error) };
 
@@ -294,6 +367,13 @@ export function useDirectory() {
       region_id: access.region_id !== undefined ? (access.region_id || null) : u.region_id,
       region: access.region_id !== undefined ? region : u.region,
       disbursement_type: access.disbursement_type !== undefined ? access.disbursement_type : u.disbursement_type,
+      payment_dealer_type: access.payment_dealer_type !== undefined ? access.payment_dealer_type : u.payment_dealer_type,
+      connected_entry_accounts: access.connected_entry_accounts !== undefined ? toAccountObjs(access.connected_entry_accounts, users) : u.connected_entry_accounts,
+      mandatory_head_consultation: access.mandatory_head_consultation !== undefined ? access.mandatory_head_consultation : u.mandatory_head_consultation,
+      mandatory_consultation_head_id: access.mandatory_consultation_head_id !== undefined ? access.mandatory_consultation_head_id : u.mandatory_consultation_head_id,
+      mandatory_consultation_head_name: access.mandatory_consultation_head_id !== undefined
+        ? (users.find((h) => h.id === access.mandatory_consultation_head_id)?.full_name || null)
+        : u.mandatory_consultation_head_name,
       rh_shops: (access.shop_ids || []).map((shop_id) => ({ shop_id })),
       clerk_cats: (access.category_ids || []).map((category_id) => ({ category_id })),
       user_heads: (access.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === access.default_head_id })),
@@ -363,6 +443,79 @@ export function useDirectory() {
       return { success: true };
     }
     setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, disbursement_type: type } : u)));
+    return { success: true };
+  };
+
+  /** Admin configures payment user dealer mode ('cash' | 'bank' | 'both') and mapped entry accounts. */
+  const setPaymentDealerConfig = async (
+    userId: string,
+    dealerType: 'cash' | 'bank' | 'both',
+    entryUserIds: string[] = []
+  ): Promise<Result> => {
+    if (live) {
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? { ...u, payment_dealer_type: dealerType, connected_entry_accounts: toAccountObjs(entryUserIds, users) }
+            : u
+        )
+      );
+      const { error: rpcErr } = await supabase.rpc('set_payment_dealer_config', {
+        p_user_id: userId,
+        p_dealer_type: dealerType,
+        p_entry_user_ids: entryUserIds.length > 0 ? entryUserIds : null,
+      });
+      if (rpcErr) {
+        console.warn('set_payment_dealer_config RPC error:', rpcErr.message);
+        await reload();
+        return { success: false, error: rpcErr.message };
+      }
+      await reload();
+      return { success: true };
+    }
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === userId
+          ? { ...u, payment_dealer_type: dealerType, connected_entry_accounts: toAccountObjs(entryUserIds, users) }
+          : u
+      )
+    );
+    return { success: true };
+  };
+
+  /** Admin configures mandatory other head consultation for a department head. */
+  const setHeadMandatoryConsultation = async (
+    userId: string,
+    enabled: boolean,
+    targetHeadId?: string | null
+  ): Promise<Result> => {
+    if (live) {
+      const { error: rpcErr } = await supabase.rpc('set_head_mandatory_consultation', {
+        p_user_id: userId,
+        p_enabled: enabled,
+        p_target_head_id: enabled && targetHeadId ? targetHeadId : null,
+      });
+      if (rpcErr) {
+        console.warn('set_head_mandatory_consultation RPC error:', rpcErr.message);
+        await reload();
+        return { success: false, error: rpcErr.message };
+      }
+      await reload();
+      return { success: true };
+    }
+    const targetHead = targetHeadId ? users.find((u) => u.id === targetHeadId) : null;
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === userId
+          ? {
+              ...u,
+              mandatory_head_consultation: enabled,
+              mandatory_consultation_head_id: enabled ? (targetHeadId || null) : null,
+              mandatory_consultation_head_name: enabled && targetHead ? targetHead.full_name : null,
+            }
+          : u
+      )
+    );
     return { success: true };
   };
 
@@ -906,7 +1059,7 @@ export function useDirectory() {
   return {
     departments, shops, regions, users, categories, productCategories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
     saveProductCategory, setProductCategoryActive,
-    createUser, updateAccess, setUserRegion, setDisbursementType, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
+    createUser, updateAccess, setUserRegion, setDisbursementType, setPaymentDealerConfig, setHeadMandatoryConsultation, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
   };
 }

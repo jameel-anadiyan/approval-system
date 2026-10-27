@@ -26,6 +26,8 @@ export interface DiscountRow {
   discount_pct: number;
   customer_name: string | null;
   reference: string | null;
+  invoice_no: string | null;
+  bill_date: string | null;
 }
 
 /** UI check only — the RPC enforces the same rule in the database. */
@@ -57,6 +59,8 @@ export function useDiscountReport(from: string, to: string) {
             after_amount: n(r.after_amount),
             discount_amount: n(r.discount_amount),
             discount_pct: n(r.discount_pct),
+            invoice_no: r.invoice_no ?? null,
+            bill_date: r.bill_date ?? null,
           }))
         );
       }
@@ -80,6 +84,7 @@ export function useDiscountReport(from: string, to: string) {
               before_amount: before, after_amount: n(r.details?.after_amount), discount_amount: n(r.amount),
               discount_pct: n(r.details?.discount_pct) || (before ? (n(r.amount) / before) * 100 : 0),
               customer_name: r.details?.customer_name ?? null, reference: r.details?.reference ?? null,
+              invoice_no: r.details?.invoice_no ?? null, bill_date: r.details?.bill_date ?? null,
             };
           })
       );

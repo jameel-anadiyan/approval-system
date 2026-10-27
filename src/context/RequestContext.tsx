@@ -80,7 +80,8 @@ interface RequestContextType {
   deleteDraft: (id: string) => Promise<Result>;
   submitRequest: (id: string) => Promise<{ success: boolean; request_no?: string; error?: string }>;
   withdrawRequest: (id: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
-  routeRequest: (id: string, route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
+  routeRequest: (id: string, route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null, assignedEntryUserId?: string) => Promise<{ success: boolean; error?: string }>;
+  assignDisbursementEntryUser: (requestId: string, entryUserId: string) => Promise<{ success: boolean; error?: string }>;
   forwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   /** Regional Head forwards an employee's request to the clerk (no approval). */
   regionalForwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<Result>;
@@ -104,9 +105,21 @@ interface RequestContextType {
     tdsCut: boolean,
     notes?: string,
     /** Old balance / old advance adjusted from this entry (auto-settled) */
-    adjustment?: number
+    adjustment?: number,
+    entryType?: 'cash' | 'bank'
   ) => Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }>;
   cancelDisbursementEntry: (entryId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
+  approveDisbursementEntry: (entryId: string, remarks?: string) => Promise<{ success: boolean; error?: string }>;
+  approveMultipleDisbursementEntries: (entryIds: string[]) => Promise<{ success: boolean; approved_count?: number; error?: string }>;
+  rejectDisbursementEntry: (entryId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  editRejectedDisbursementEntry: (
+    entryId: string,
+    amount: number,
+    entryType: 'cash' | 'bank',
+    tdsCut: boolean,
+    notes?: string,
+    adjustment?: number
+  ) => Promise<{ success: boolean; error?: string }>;
   payDisbursementEntry: (
     entryId: string,
     details: PaymentInput
@@ -841,7 +854,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     id: string,
     route: ApprovalRoute,
     remarks?: string,
-    voice?: ActionVoice | null
+    voice?: ActionVoice | null,
+    assignedEntryUserId?: string
   ): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
@@ -867,6 +881,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_request_id: id,
           p_route: route,
           p_remarks: remarks || null,
+          p_assigned_entry_user_id: assignedEntryUserId || null,
         });
         if (error) throw error;
         await loadRequests();
@@ -904,6 +919,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               ...r,
               status: nextStatus,
               route,
+              assigned_entry_user_id: assignedEntryUserId || r.assigned_entry_user_id,
+              assigned_entry_user_name: assignedEntryUserId ? 'Assigned Entry Officer' : r.assigned_entry_user_name,
+              assigned_entry_at: assignedEntryUserId ? new Date().toISOString() : r.assigned_entry_at,
+              assigned_entry_by: assignedEntryUserId ? user.id : r.assigned_entry_by,
               routed_by: user.id,
               routed_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -913,6 +932,52 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       )
     );
 
+    return { success: true };
+  };
+
+  const assignDisbursementEntryUser = async (
+    requestId: string,
+    entryUserId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!['clerk', 'head', 'admin'].includes(user.role)) {
+      return { success: false, error: 'Only Clerk, Head, or Admin can assign an Entry account.' };
+    }
+
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('assign_disbursement_entry_user', {
+          p_request_id: requestId,
+          p_entry_user_id: entryUserId,
+        });
+        if (error) throw error;
+        await loadRequests();
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    const req = getRequestById(requestId);
+    if (!req) return { success: false, error: 'Request not found' };
+    if ((req.disbursement_entries || []).length > 0) {
+      return { success: false, error: 'Cannot change Entry account after disbursement entries have already been made.' };
+    }
+
+    updateLocalRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              assigned_entry_user_id: entryUserId,
+              assigned_entry_user_name: 'Assigned Entry Officer',
+              assigned_entry_at: new Date().toISOString(),
+              assigned_entry_by: user.id,
+            }
+          : r
+      )
+    );
     return { success: true };
   };
 
@@ -1314,7 +1379,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     amount: number,
     tdsCut: boolean,
     notes?: string,
-    adjustment = 0
+    adjustment = 0,
+    entryType: 'cash' | 'bank' = 'bank'
   ): Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     const amt = Math.round(Math.max(0, amount || 0) * 100) / 100;
@@ -1329,10 +1395,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_tds_cut: tdsCut,
           p_notes: notes?.trim() || null,
           p_adjustment: adj,
+          p_entry_type: entryType,
         });
         if (error) {
           if (adj > 0 && (error.message.includes('p_adjustment') || error.message.includes('schema cache'))) {
-            throw new Error('Database migration required: run 0050_entry_old_balance_adjustment.sql in the Supabase SQL Editor.');
+            throw new Error('Database migration required: run 0051_disbursement_entry_routing_approver_and_mandatory_consultation.sql in the Supabase SQL Editor.');
           }
           throw error;
         }
@@ -1361,10 +1428,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       request_id: requestId,
       entry_no: nextNo,
       amount: amt,
+      entry_type: entryType,
       adjustment_amount: adj,
       adjustment_payment_id: paymentId,
       tds_cut: tdsCut,
-      status: fullyAdjusted ? 'paid' : 'pending',
+      status: fullyAdjusted ? 'paid' : 'pending_approval',
       notes: notes?.trim() || null,
       created_by: user.id,
       created_by_name: user.full_name,
@@ -1445,6 +1513,191 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             : {}),
         };
       })
+    );
+    return { success: true };
+  };
+
+  const approveDisbursementEntry = async (
+    entryId: string,
+    remarks?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('approve_disbursement_entry', {
+          p_entry_id: entryId,
+          p_remarks: remarks?.trim() || null,
+        });
+        if (error) throw error;
+        await loadRequests();
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    const now = new Date().toISOString();
+    updateLocalRequests((prev) =>
+      prev.map((r) => ({
+        ...r,
+        disbursement_entries: (r.disbursement_entries || []).map((e) =>
+          e.id === entryId
+            ? {
+                ...e,
+                status: 'approved',
+                approved_by: user.id,
+                approved_by_name: user.full_name,
+                approved_at: now,
+                rejection_reason: null,
+              }
+            : e
+        ),
+      }))
+    );
+    return { success: true };
+  };
+
+  const approveMultipleDisbursementEntries = async (
+    entryIds: string[]
+  ): Promise<{ success: boolean; approved_count?: number; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!entryIds.length) return { success: false, error: 'No entries selected' };
+
+    if (isBackendConnected) {
+      try {
+        const { data, error } = await supabase.rpc('approve_multiple_disbursement_entries', {
+          p_entry_ids: entryIds,
+        });
+        if (error) throw error;
+        await loadRequests();
+        const res = data as { approved_count?: number } | null;
+        return { success: true, approved_count: res?.approved_count ?? entryIds.length };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    const now = new Date().toISOString();
+    const idSet = new Set(entryIds);
+    updateLocalRequests((prev) =>
+      prev.map((r) => ({
+        ...r,
+        disbursement_entries: (r.disbursement_entries || []).map((e) =>
+          idSet.has(e.id)
+            ? {
+                ...e,
+                status: 'approved',
+                approved_by: user.id,
+                approved_by_name: user.full_name,
+                approved_at: now,
+                rejection_reason: null,
+              }
+            : e
+        ),
+      }))
+    );
+    return { success: true, approved_count: entryIds.length };
+  };
+
+  const rejectDisbursementEntry = async (
+    entryId: string,
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const rsn = reason.trim();
+    if (!rsn) return { success: false, error: 'Please enter a rejection reason' };
+
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('reject_disbursement_entry', {
+          p_entry_id: entryId,
+          p_reason: rsn,
+        });
+        if (error) throw error;
+        await loadRequests();
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    const now = new Date().toISOString();
+    updateLocalRequests((prev) =>
+      prev.map((r) => ({
+        ...r,
+        disbursement_entries: (r.disbursement_entries || []).map((e) =>
+          e.id === entryId
+            ? {
+                ...e,
+                status: 'rejected',
+                rejected_by: user.id,
+                rejected_by_name: user.full_name,
+                rejected_at: now,
+                rejection_reason: rsn,
+              }
+            : e
+        ),
+      }))
+    );
+    return { success: true };
+  };
+
+  const editRejectedDisbursementEntry = async (
+    entryId: string,
+    amount: number,
+    entryType: 'cash' | 'bank',
+    tdsCut: boolean,
+    notes?: string,
+    adjustment = 0
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const amt = Math.round(Math.max(0, amount || 0) * 100) / 100;
+    const adj = Math.round(Math.max(0, adjustment || 0) * 100) / 100;
+    if (amt + adj <= 0) return { success: false, error: 'Enter an amount or adjustment' };
+
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('edit_rejected_disbursement_entry', {
+          p_entry_id: entryId,
+          p_amount: amt,
+          p_entry_type: entryType,
+          p_tds_cut: tdsCut,
+          p_notes: notes?.trim() || null,
+          p_adjustment: adj,
+        });
+        if (error) throw error;
+        await loadRequests();
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    updateLocalRequests((prev) =>
+      prev.map((r) => ({
+        ...r,
+        disbursement_entries: (r.disbursement_entries || []).map((e) =>
+          e.id === entryId
+            ? {
+                ...e,
+                amount: amt,
+                entry_type: entryType,
+                tds_cut: tdsCut,
+                notes: notes?.trim() || null,
+                adjustment_amount: adj,
+                status: 'pending_approval',
+                rejection_reason: null,
+                rejected_by: null,
+                rejected_by_name: null,
+                rejected_at: null,
+              }
+            : e
+        ),
+      }))
     );
     return { success: true };
   };
@@ -2102,7 +2355,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         markAsPaid,
         addDisbursementEntry,
         cancelDisbursementEntry,
+        approveDisbursementEntry,
+        approveMultipleDisbursementEntries,
+        rejectDisbursementEntry,
+        editRejectedDisbursementEntry,
         payDisbursementEntry,
+        assignDisbursementEntryUser,
         markTransferComplete,
         requestHeadConsultations,
         respondHeadConsultation,

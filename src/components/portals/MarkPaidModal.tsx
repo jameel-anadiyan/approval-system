@@ -45,8 +45,13 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   useEffect(() => {
     setAmountStr(maxPayable.toFixed(2));
     setPaymentRemarks(entry ? `Disbursement for Entry #${entry.entry_no}` : '');
+    if (entry?.entry_type === 'cash') {
+      setPaymentMode('Cash');
+    } else {
+      setPaymentMode('NEFT');
+    }
     setError(null);
-  }, [entry?.id, maxPayable]);
+  }, [entry?.id, entry?.entry_type, maxPayable]);
 
   const amount = Math.round((parseFloat(amountStr) || 0) * 100) / 100;
   const isFull = amount >= balance && amount > 0;

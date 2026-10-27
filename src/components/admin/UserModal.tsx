@@ -34,6 +34,10 @@ interface UserModalProps {
     head_ids?: string[];
     default_head_id?: string | null;
     disbursement_type?: DisbursementAccountType | null;
+    payment_dealer_type?: 'cash' | 'bank' | 'both' | null;
+    connected_entry_accounts?: string[];
+    mandatory_head_consultation?: boolean;
+    mandatory_consultation_head_id?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -54,6 +58,10 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [designation, setDesignation] = useState('');
   const [role, setRole] = useState<AppRole>(allowedRoles[0] || 'employee');
   const [disbursementType, setDisbursementType] = useState<DisbursementAccountType>('entry_only');
+  const [paymentDealerType, setPaymentDealerType] = useState<'cash' | 'bank' | 'both'>('both');
+  const [connectedEntryAccounts, setConnectedEntryAccounts] = useState<string[]>([]);
+  const [mandatoryHeadConsultation, setMandatoryHeadConsultation] = useState(false);
+  const [mandatoryConsultationHeadId, setMandatoryConsultationHeadId] = useState('');
 
   React.useEffect(() => {
     if (isOpen) {
@@ -61,6 +69,10 @@ export const UserModal: React.FC<UserModalProps> = ({
         setRole(allowedRoles[0]);
       }
       setDisbursementType('entry_only');
+      setPaymentDealerType('both');
+      setConnectedEntryAccounts([]);
+      setMandatoryHeadConsultation(false);
+      setMandatoryConsultationHeadId('');
     }
   }, [isOpen, allowedRoles]);
 
@@ -124,6 +136,11 @@ export const UserModal: React.FC<UserModalProps> = ({
       return;
     }
 
+    if (role === 'head' && mandatoryHeadConsultation && !mandatoryConsultationHeadId) {
+      setError('Please choose the mandatory Department Head required for consultation.');
+      return;
+    }
+
     const accessErr = validateAccess(role, shopId, types, { ...extra, regionalHeadId, coveringCount: covering.length });
     if (accessErr) {
       setError(accessErr);
@@ -145,13 +162,25 @@ export const UserModal: React.FC<UserModalProps> = ({
         allowed_types: withTypes ? types : undefined,
         photo: photo || undefined,
         ...(role === 'regional_head' ? { shop_ids: extra.shopIds, region_id: extra.regionId || null } : {}),
-        ...(role === 'head' ? { region_id: extra.regionId || null } : {}),
+        ...(role === 'head'
+          ? {
+              region_id: extra.regionId || null,
+              mandatory_head_consultation: mandatoryHeadConsultation,
+              mandatory_consultation_head_id: mandatoryHeadConsultation ? mandatoryConsultationHeadId || null : null,
+            }
+          : {}),
         ...(role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
         ...(role === 'employee' ? { regional_head_id: regionalHeadId || null } : {}),
         ...(role === 'employee' || role === 'regional_head'
           ? { head_ids: extra.headIds, default_head_id: defaultHead }
           : {}),
-        ...(role === 'disbursement' ? { disbursement_type: disbursementType } : {}),
+        ...(role === 'disbursement'
+          ? {
+              disbursement_type: disbursementType,
+              payment_dealer_type: disbursementType === 'payment_only' ? paymentDealerType : null,
+              connected_entry_accounts: disbursementType === 'payment_only' ? connectedEntryAccounts : [],
+            }
+          : {}),
       });
 
       if (res.success) {
@@ -386,7 +415,28 @@ export const UserModal: React.FC<UserModalProps> = ({
                 </div>
               </label>
 
-              <label className={`sm:col-span-2 flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+              <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                disbursementType === 'entry_approver'
+                  ? 'bg-amber-600/10 border-amber-500 ring-1 ring-amber-500'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}>
+                <input
+                  type="radio"
+                  name="disbursement_type"
+                  value="entry_approver"
+                  checked={disbursementType === 'entry_approver'}
+                  onChange={() => setDisbursementType('entry_approver')}
+                  className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">Entry Approver</span>
+                  <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                    Reviews all entries made by Entry accounts with cash/bank &amp; details. Can approve (routes to payment) or reject (sends for entry correction).
+                  </span>
+                </div>
+              </label>
+
+              <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
                 disbursementType === 'stock_transfer_monitor'
                   ? 'bg-indigo-600/10 border-indigo-500 ring-1 ring-indigo-500'
                   : 'bg-white border-slate-200 hover:border-slate-300'
@@ -407,6 +457,125 @@ export const UserModal: React.FC<UserModalProps> = ({
                 </div>
               </label>
             </div>
+
+            {disbursementType === 'payment_only' && (
+              <div className="pt-3 border-t border-sky-200/80 space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-sky-950 block mb-1.5">
+                    Payment Dealer Mode <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'both', label: 'Cash & Bank', desc: 'Both modes' },
+                      { id: 'cash', label: 'Cash Only', desc: 'Settle / cash pay' },
+                      { id: 'bank', label: 'Bank Only', desc: 'Bank transfer' },
+                    ].map((m) => (
+                      <label
+                        key={m.id}
+                        className={`flex flex-col p-2.5 rounded-xl border cursor-pointer transition-all text-center ${
+                          paymentDealerType === m.id
+                            ? 'bg-emerald-600/10 border-emerald-500 ring-1 ring-emerald-500'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="payment_dealer_type"
+                          value={m.id}
+                          checked={paymentDealerType === m.id}
+                          onChange={() => setPaymentDealerType(m.id as 'cash' | 'bank' | 'both')}
+                          className="sr-only"
+                        />
+                        <span className="text-xs font-bold text-slate-800">{m.label}</span>
+                        <span className="text-[10px] text-slate-500 mt-0.5">{m.desc}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-sky-950 block mb-1">
+                    Connected Entry Accounts
+                  </label>
+                  <p className="text-[11px] text-sky-800/80 mb-2">
+                    Only entries made by selected Entry Only accounts will route to this cashier (leave empty to receive from all).
+                  </p>
+                  <div className="max-h-36 overflow-y-auto space-y-1.5 p-2 bg-white rounded-xl border border-sky-200">
+                    {users.filter((u) => u.role === 'disbursement' && (u.disbursement_type || 'entry_only') === 'entry_only' && u.is_active).length === 0 ? (
+                      <span className="text-[11px] text-slate-400 italic block p-1">No active Entry Only accounts found.</span>
+                    ) : (
+                      users.filter((u) => u.role === 'disbursement' && (u.disbursement_type || 'entry_only') === 'entry_only' && u.is_active).map((eo) => {
+                        const checked = connectedEntryAccounts.includes(eo.id);
+                        return (
+                          <label key={eo.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setConnectedEntryAccounts((prev) =>
+                                  checked ? prev.filter((id) => id !== eo.id) : [...prev, eo.id]
+                                )
+                              }
+                              className="rounded-sm text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span className="font-medium text-slate-800">{eo.full_name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">@{eo.username}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {role === 'head' && (
+          <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/50 space-y-2.5">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mandatoryHeadConsultation}
+                onChange={(e) => {
+                  setMandatoryHeadConsultation(e.target.checked);
+                  if (!e.target.checked) setMandatoryConsultationHeadId('');
+                }}
+                className="mt-0.5 rounded-sm text-amber-600 focus:ring-amber-500"
+              />
+              <div>
+                <span className="text-xs font-bold text-amber-950 block">
+                  Mandatory Consultation with another Department Head
+                </span>
+                <span className="text-[11px] text-amber-800/80 block leading-tight mt-0.5">
+                  This Department Head cannot approve or forward any request without the designated head&apos;s agreed consultation.
+                </span>
+              </div>
+            </label>
+
+            {mandatoryHeadConsultation && (
+              <div className="pt-2 border-t border-amber-200/80">
+                <label htmlFor="mandatory-head-select" className="text-xs font-bold text-amber-950 block mb-1">
+                  Designated Head to Consult <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  id="mandatory-head-select"
+                  required={mandatoryHeadConsultation}
+                  value={mandatoryConsultationHeadId}
+                  onChange={(e) => setMandatoryConsultationHeadId(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-amber-300 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden bg-white"
+                >
+                  <option value="">Select Department Head…</option>
+                  {users
+                    .filter((u) => u.role === 'head' && u.is_active)
+                    .map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.full_name} (@{h.username}) — {departments.find((d) => d.id === h.department_id)?.name || 'Head'}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
           </div>
         )}
 

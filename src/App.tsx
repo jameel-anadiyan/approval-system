@@ -52,6 +52,7 @@ const ExhibitionCalendarPage = page(() => import('./pages/shared/ExhibitionCalen
 const AdminProductCategoriesPage = page(() => import('./pages/admin/AdminProductCategoriesPage'), 'AdminProductCategoriesPage');
 const StockTransferMonitorPage = page(() => import('./pages/stock/StockTransferMonitorPage'), 'StockTransferMonitorPage');
 const StockTransferReportPage = page(() => import('./pages/reports/StockTransferReportPage'), 'StockTransferReportPage');
+const EntryApprovalsPage = page(() => import('./pages/disbursement/EntryApprovalsPage'), 'EntryApprovalsPage');
 
 const PageSpinner: React.FC = () => (
   <div className="min-h-[50vh] flex items-center justify-center">
@@ -87,11 +88,21 @@ const RequireStockMonitor: React.FC = () => {
   return <Outlet />;
 };
 
-/** Payment / entry disbursement accounts only (monitor accounts have no payment work). */
+/** Admin or an Entry Approver disbursement account. */
+const RequireEntryApprover: React.FC = () => {
+  const { user, role } = useAuth();
+  if (role === 'admin' || (role === 'disbursement' && user?.disbursement_type === 'entry_approver')) {
+    return <Outlet />;
+  }
+  return <RoleRedirect />;
+};
+
+/** Payment / entry disbursement accounts only (monitor and approver accounts have their own screens). */
 const RequirePaymentDisbursement: React.FC = () => {
   const { user, role } = useAuth();
   if (role !== 'disbursement') return <RoleRedirect />;
   if (isStockMonitor(user)) return <Navigate to="/stock-transfers" replace />;
+  if (user?.disbursement_type === 'entry_approver') return <Navigate to="/entry-approvals" replace />;
   return <Outlet />;
 };
 
@@ -160,7 +171,9 @@ const RoleRedirect: React.FC = () => {
     case 'clerk':
       return <Navigate to="/clerk" replace />;
     case 'disbursement':
-      return <Navigate to={isStockMonitor(user) ? '/stock-transfers' : '/disbursement'} replace />;
+      if (isStockMonitor(user)) return <Navigate to="/stock-transfers" replace />;
+      if (user?.disbursement_type === 'entry_approver') return <Navigate to="/entry-approvals" replace />;
+      return <Navigate to="/disbursement" replace />;
     case 'regional_head':
       return <Navigate to="/regional" replace />;
     case 'employee':
@@ -269,6 +282,11 @@ export const App: React.FC = () => {
                   <Route path="admin/credentials" element={<AdminCredentialsPage />} />
                   <Route path="admin/settings" element={<AdminSettingsPage />} />
                   <Route path="admin/audit" element={<AdminAuditLogPage />} />
+                </Route>
+
+                {/* Entry Approvals routes (Admin + Entry Approvers) */}
+                <Route element={<RequireEntryApprover />}>
+                  <Route path="entry-approvals" element={<EntryApprovalsPage />} />
                 </Route>
 
                 {/* Disbursement routes */}

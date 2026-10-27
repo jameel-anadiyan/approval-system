@@ -47,15 +47,19 @@ export interface DiscountForm {
   after: string;
   customer: string;
   reference: string;
+  invoice_no: string;
+  bill_date: string;
 }
 
-export const emptyDiscount: DiscountForm = { before: '', after: '', customer: '', reference: '' };
+export const emptyDiscount: DiscountForm = { before: '', after: '', customer: '', reference: '', invoice_no: '', bill_date: '' };
 
 export const discountFromDetails = (d?: RequestDetails | null): DiscountForm => ({
   before: str(d?.before_amount),
   after: str(d?.after_amount),
   customer: str(d?.customer_name),
   reference: str(d?.reference),
+  invoice_no: str(d?.invoice_no),
+  bill_date: str(d?.bill_date),
 });
 
 export function discountCalc(f: DiscountForm) {
@@ -79,6 +83,8 @@ export const toDiscountDetails = (f: DiscountForm): RequestDetails => ({
   after_amount: num(f.after),
   customer_name: f.customer.trim() || null,
   reference: f.reference.trim() || null,
+  invoice_no: f.invoice_no.trim() || null,
+  bill_date: f.bill_date.trim() || null,
 });
 
 export const DiscountFields: React.FC<{ value: DiscountForm; onChange: (v: DiscountForm) => void }> = ({ value, onChange }) => {
@@ -100,6 +106,16 @@ export const DiscountFields: React.FC<{ value: DiscountForm; onChange: (v: Disco
           </label>
           <input id="discount-after" type="number" step="0.01" min="0" inputMode="decimal" value={value.after}
             onChange={set('after')} placeholder="0.00" className={`${inputCls} font-semibold`} />
+        </div>
+        <div>
+          <label className={labelCls}>Invoice Number</label>
+          <input id="discount-invoice" type="text" value={value.invoice_no} onChange={set('invoice_no')}
+            placeholder="e.g. INV-2026-0042" className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>Date of Bill</label>
+          <input id="discount-bill-date" type="date" value={value.bill_date} onChange={set('bill_date')}
+            className={inputCls} />
         </div>
         <div>
           <label className={labelCls}>Customer name</label>
