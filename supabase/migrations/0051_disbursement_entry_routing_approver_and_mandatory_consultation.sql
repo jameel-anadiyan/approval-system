@@ -610,7 +610,7 @@ begin
       v_count := v_count + 1;
     exception when others then
       v_failed := v_failed + 1;
-    end loop;
+    end;
   end loop;
 
   return jsonb_build_object(
