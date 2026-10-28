@@ -1009,7 +1009,7 @@ export const RequestDetailPage: React.FC = () => {
           )}
 
           {/* Disbursement Entry Officer Assignment Card (Available on all payment-needed requests before any entry is entered) */}
-          {isPaymentNeeded && request.status !== 'draft' && request.status !== 'cancelled' && (
+          {isPaymentNeeded && (request.status !== 'draft' || role === 'head') && request.status !== 'cancelled' && (
             <div className="bg-white rounded-2xl border border-indigo-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -1595,12 +1595,16 @@ export const RequestDetailPage: React.FC = () => {
                 type="button"
                 id="submit-request"
                 disabled={busy}
-                onClick={() =>
+                onClick={() => {
+                  if (role === 'head' && isPaymentNeeded && !request.assigned_entry_user_id) {
+                    setModalState('assign_entry_user');
+                    return;
+                  }
                   runInline(async () => {
                     const res = await submitRequest(request.id);
                     return res;
-                  }, request.status === 'returned' ? 'Request resubmitted.' : 'Request submitted.')
-                }
+                  }, request.status === 'returned' ? 'Request resubmitted.' : 'Request submitted.');
+                }}
                 className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-xs shadow-md hover:bg-indigo-700 disabled:opacity-50"
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}

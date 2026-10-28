@@ -38,6 +38,8 @@ export interface DraftInput {
   category_id?: string | null;
   /** Approving Head chosen by requester (for employee / regional head with multiple heads) */
   target_head_id?: string | null;
+  /** Disbursement Entry Officer chosen when Department Head raises a payment-needed request */
+  assigned_entry_user_id?: string | null;
 }
 
 /** Work categories the current user can pick for a new request. */
@@ -78,7 +80,7 @@ interface RequestContextType {
   addFiles: (id: string, files: RequestFile[]) => Promise<Result>;
   removeFile: (requestId: string, fileId: string) => Promise<Result>;
   deleteDraft: (id: string) => Promise<Result>;
-  submitRequest: (id: string) => Promise<{ success: boolean; request_no?: string; error?: string }>;
+  submitRequest: (id: string, entryUserId?: string | null) => Promise<{ success: boolean; request_no?: string; error?: string }>;
   withdrawRequest: (id: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
   routeRequest: (id: string, route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null, assignedEntryUserId?: string) => Promise<{ success: boolean; error?: string }>;
   assignDisbursementEntryUser: (requestId: string, entryUserId: string) => Promise<{ success: boolean; error?: string }>;
@@ -515,6 +517,17 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             .eq('id', requestId);
         }
 
+        if (data.assigned_entry_user_id && requestId) {
+          try {
+            await supabase.rpc('assign_disbursement_entry_user', {
+              p_request_id: requestId,
+              p_entry_user_id: data.assigned_entry_user_id,
+            });
+          } catch (assignErr) {
+            console.warn('Failed to assign entry officer during draft creation:', assignErr);
+          }
+        }
+
         await uploadFiles(requestId, data.files || []);
         try {
           await loadRequests();
@@ -578,6 +591,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       route: null,
       routed_by: null,
       routed_at: null,
+      assigned_entry_user_id: data.assigned_entry_user_id || null,
+      assigned_entry_user_name: data.assigned_entry_user_id
+        ? MOCK_USERS.find((u) => u.id === data.assigned_entry_user_id)?.full_name || 'Assigned Entry Officer'
+        : null,
+      assigned_entry_at: data.assigned_entry_user_id ? new Date().toISOString() : null,
+      assigned_entry_by: data.assigned_entry_user_id ? user.id : null,
       approval_no: null,
       decided_by: null,
       decided_at: null,
@@ -734,15 +753,40 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  const submitRequest = async (id: string): Promise<{ success: boolean; request_no?: string; error?: string }> => {
+  const submitRequest = async (
+    id: string,
+    entryUserId?: string | null
+  ): Promise<{ success: boolean; request_no?: string; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
 
     if (isBackendConnected) {
       try {
-        const { error } = await supabase.rpc('submit_request', {
-          p_request_id: id,
-        });
-        if (error) throw error;
+        if (entryUserId) {
+          try {
+            await supabase.rpc('assign_disbursement_entry_user', {
+              p_request_id: id,
+              p_entry_user_id: entryUserId,
+            });
+          } catch (assignErr) {
+            console.warn('Pre-assign entry user error:', assignErr);
+          }
+        }
+
+        let submitError = null;
+        try {
+          const { error } = await supabase.rpc('submit_request', {
+            p_request_id: id,
+            p_entry_user_id: entryUserId || null,
+          });
+          submitError = error;
+        } catch {
+          const { error } = await supabase.rpc('submit_request', {
+            p_request_id: id,
+          });
+          submitError = error;
+        }
+
+        if (submitError) throw submitError;
         const { data: row } = await supabase.from('requests').select('request_no').eq('id', id).maybeSingle();
         try {
           await loadRequests();
@@ -760,6 +804,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!current) return { success: false, error: 'Request not found' };
 
     const isHead = user.role === 'head';
+    const isPaymentNeeded = current.request_type !== 'discount' && current.request_type !== 'non_cash' && current.request_type !== 'stock_transfer';
+    if (isHead && isPaymentNeeded && !current.assigned_entry_user_id && !entryUserId) {
+      return { success: false, error: 'Please select a Disbursement Entry Account before submitting.' };
+    }
+
     const toStatus = isHead ? 'pending_admin_approval' : 'submitted';
     const genNo = current.request_no || `REQ-2026-${Math.floor(100000 + Math.random() * 900000)}`;
     const action: RequestAction = {
@@ -778,6 +827,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       created_at: new Date().toISOString(),
     };
 
+    const targetUser = entryUserId ? MOCK_USERS.find((u) => u.id === entryUserId) : null;
+
     updateLocalRequests((prev) =>
       prev.map((r) =>
         r.id === id
@@ -785,6 +836,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               ...r,
               status: toStatus,
               route: isHead ? 'A' : r.route,
+              assigned_entry_user_id: entryUserId || r.assigned_entry_user_id,
+              assigned_entry_user_name: targetUser ? targetUser.full_name : r.assigned_entry_user_name,
+              assigned_entry_at: entryUserId ? new Date().toISOString() : r.assigned_entry_at,
+              assigned_entry_by: entryUserId ? user.id : r.assigned_entry_by,
               reviewed_by: isHead ? user.id : r.reviewed_by,
               reviewed_by_name: isHead ? user.full_name : r.reviewed_by_name,
               reviewed_at: isHead ? new Date().toISOString() : r.reviewed_at,

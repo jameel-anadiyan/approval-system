@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests, errMsg } from '../../context/RequestContext';
-import { RequestFile, RequestType, RequestDetails } from '../../types/database';
+import { RequestFile, RequestType, RequestDetails, Profile } from '../../types/database';
 import { FileUploader } from '../../components/requests/FileUploader';
 import { VoiceRecorder } from '../../components/requests/VoiceRecorder';
 import {
@@ -21,11 +21,11 @@ import {
   toStockTransferDetails, validateStockTransfer, stockTransferCalc,
 } from '../../components/requests/StockTransferFields';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2 } from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
-import { useDirectory } from '../../lib/directory';
+import { useDirectory, fetchActiveEntryOfficers } from '../../lib/directory';
 import { RequestShopField, useRequestShops, needsShopPick } from '../../components/requests/RequestShopField';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
@@ -39,7 +39,7 @@ const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
 };
 
 export const NewRequestPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isBackendConnected } = useAuth();
   const dir = useDirectory();
   const { createDraft, submitRequest, threshold, requests } = useRequests();
   const navigate = useNavigate();
@@ -98,6 +98,27 @@ export const NewRequestPage: React.FC = () => {
   const [shopId, setShopId] = useState('');
   const [shopName, setShopName] = useState('');
   const pickShop = needsShopPick(type);
+  const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
+  const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>('');
+  const [entryOfficers, setEntryOfficers] = useState<Profile[]>([]);
+  const [loadingOfficers, setLoadingOfficers] = useState(false);
+
+  useEffect(() => {
+    if (user?.role === 'head') {
+      let cancelled = false;
+      setLoadingOfficers(true);
+      fetchActiveEntryOfficers(isBackendConnected)
+        .then((officers) => {
+          if (!cancelled) setEntryOfficers(officers);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingOfficers(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [user?.role, isBackendConnected]);
 
   // Exactly one associated shop: assign it as the default.
   useEffect(() => {
@@ -196,6 +217,9 @@ export const NewRequestPage: React.FC = () => {
 
   const validate = (forDraft: boolean): string | null => {
     if (!forDraft && user?.role !== 'head' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
+    if (!forDraft && user?.role === 'head' && isPaymentNeeded && !assignedEntryUserId) {
+      return 'Please select a Disbursement Entry Account before submitting.';
+    }
     if (!forDraft && pickShop && shopState.mustPick && !shopId) return 'Select the shop for this request.';
     if (isAsset) {
       if (!asset.asset_name.trim()) return 'Enter the asset you want to buy.';
@@ -246,6 +270,7 @@ export const NewRequestPage: React.FC = () => {
         files: allFiles,
         category_id: user?.role !== 'head' && categoryOptions.required ? categoryId || null : null,
         target_head_id: type === 'exhibition' ? null : (targetHeadId || null),
+        assigned_entry_user_id: user?.role === 'head' && isPaymentNeeded ? assignedEntryUserId || null : null,
       });
       if (!draftRes.success || !draftRes.id) {
         if (draftRes.id) {
@@ -261,7 +286,10 @@ export const NewRequestPage: React.FC = () => {
         navigate(`/requests/${draftRes.id}`);
         return;
       }
-      const submitRes = await submitRequest(draftRes.id);
+      const submitRes = await submitRequest(
+        draftRes.id,
+        user?.role === 'head' && isPaymentNeeded ? assignedEntryUserId || null : null
+      );
       navigate(`/requests/${draftRes.id}`, submitRes.success ? undefined : {
         state: { notice: `Saved as a draft but not submitted: ${submitRes.error}` },
       });
@@ -393,6 +421,48 @@ export const NewRequestPage: React.FC = () => {
 
           {user?.role !== 'head' && (
             <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
+          )}
+
+          {/* Head direct raise: Disbursement Entry Account selection (required for disbursement needed requests) */}
+          {user?.role === 'head' && isPaymentNeeded && (
+            <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <label htmlFor="head-entry-account" className="block text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4 text-indigo-600" />
+                  <span>Disbursement Entry Account <span className="text-rose-500">*</span></span>
+                </label>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-md">
+                  Required for Head Direct Request
+                </span>
+              </div>
+              <p className="text-[11px] text-indigo-900/80 leading-relaxed">
+                Because your request goes directly to Admin for approval, please select the Disbursement Entry Account who will record the payment entries.
+              </p>
+              {loadingOfficers ? (
+                <div className="flex items-center gap-2 text-xs text-indigo-600 py-1.5 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Loading active entry accounts…</span>
+                </div>
+              ) : entryOfficers.length === 0 ? (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                  No active Disbursement Entry Only accounts found. Please contact Admin.
+                </div>
+              ) : (
+                <select
+                  id="head-entry-account"
+                  value={assignedEntryUserId}
+                  onChange={(e) => setAssignedEntryUserId(e.target.value)}
+                  className="w-full text-xs font-semibold p-2.5 rounded-xl border border-indigo-300 bg-white text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                >
+                  <option value="">-- Choose Disbursement Entry Account --</option>
+                  {entryOfficers.map((officer) => (
+                    <option key={officer.id} value={officer.id}>
+                      {officer.full_name} (@{officer.username}){officer.designation ? ` – ${officer.designation}` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           )}
 
           {pickShop && (
