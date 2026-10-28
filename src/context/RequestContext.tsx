@@ -1387,7 +1387,29 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const file = details.document;
         const contentType = (file.type || '').split(';')[0] || 'application/octet-stream';
         const safe = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
-        const reqId = id || 'payments';
+
+        // Resolve the real request UUID for proper storage partitioning
+        let targetRequestId = id?.trim() || '';
+        if (!targetRequestId && details.entry_id) {
+          const match = requests.find(
+            (r) => r.id === id || (r.disbursement_entries || []).some((e) => e.id === details.entry_id)
+          );
+          if (match) targetRequestId = match.id;
+        }
+        if (!targetRequestId && details.entry_id) {
+          try {
+            const { data: entRow } = await supabase
+              .from('disbursement_entries')
+              .select('request_id')
+              .eq('id', details.entry_id)
+              .maybeSingle();
+            if (entRow?.request_id) targetRequestId = entRow.request_id;
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const reqId = targetRequestId || id || 'payments';
         storagePath = `${reqId}/payment-${crypto.randomUUID()}-${safe}`;
         docName = file.name;
 
@@ -1395,6 +1417,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           .from('request-files')
           .upload(storagePath, file, { contentType, upsert: false });
         if (upErr) {
+          const isRls =
+            upErr.message?.toLowerCase().includes('row-level security') ||
+            upErr.message?.toLowerCase().includes('policy') ||
+            upErr.message?.toLowerCase().includes('violates');
+          if (isRls) {
+            throw new Error(
+              `Payment document upload blocked by Supabase storage security policy. Please execute migration 0061 in your Supabase SQL Editor to enable payment document attachments.`
+            );
+          }
           throw new Error(`Failed to upload payment document: ${upErr.message}`);
         }
       } catch (uploadErr: unknown) {
@@ -1407,7 +1438,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (isBackendConnected) {
       try {
-        const { data, error } = await supabase.rpc('pay_disbursement_entry', {
+        let rpcRes = await supabase.rpc('pay_disbursement_entry', {
           p_entry_id: details.entry_id,
           p_amount: details.amount ?? null,
           p_payment_date: details.payment_date || null,
@@ -1418,9 +1449,34 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_document_storage_path: storagePath,
           p_document_name: docName,
         });
+
+        // Fallback: If migration 0061 has not been applied yet AND no document was attached,
+        // fall back to the 7-parameter version so normal payments continue without disruption.
+        if (rpcRes.error && rpcRes.error.code === 'PGRST202' && !storagePath) {
+          rpcRes = await supabase.rpc('pay_disbursement_entry', {
+            p_entry_id: details.entry_id,
+            p_amount: details.amount ?? null,
+            p_payment_date: details.payment_date || null,
+            p_payment_mode: details.payment_mode || null,
+            p_payment_ref: details.payment_ref || null,
+            p_remarks: details.payment_remarks || null,
+            p_passkey: details.passkey || null,
+          } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        }
+
+        const { data, error } = rpcRes;
         if (error) {
           if (storagePath && isBackendConnected) {
-            await supabase.storage.from('request-files').remove([storagePath]);
+            try {
+              await supabase.storage.from('request-files').remove([storagePath]);
+            } catch {
+              /* ignore */
+            }
+          }
+          if (error.code === 'PGRST202' && storagePath) {
+            throw new Error(
+              'Database update required: Please run migration 0061 in your Supabase SQL Editor to enable payment document saving.'
+            );
           }
           throw error;
         }

@@ -14,15 +14,18 @@ alter table public.request_payments
   add column if not exists document_storage_path text,
   add column if not exists document_name text;
 
--- 2. Storage upload permission function & policy for payment attachments
-create or replace function public.can_upload_payment_doc(p_request_id uuid)
+-- 2. Storage upload, delete, and read permission for payment attachments
+create or replace function public.can_upload_payment_doc(p_request_id uuid default null)
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists (
-    select 1 from public.requests r
-    join public.profiles me on me.id = auth.uid() and me.is_active
-    where r.id = p_request_id
-      and r.status in ('approved', 'paid')
+    select 1 from public.profiles me
+    where me.id = auth.uid() and me.is_active
       and (me.role = 'admin' or me.role = 'disbursement')
+  ) and (
+    p_request_id is null or exists (
+      select 1 from public.requests r
+      where r.id = p_request_id and r.status in ('approved', 'paid')
+    )
   );
 $$;
 revoke execute on function public.can_upload_payment_doc(uuid) from public, anon;
@@ -32,9 +35,44 @@ drop policy if exists "request-files payment doc insert" on storage.objects;
 create policy "request-files payment doc insert" on storage.objects for insert to authenticated
   with check (
     bucket_id = 'request-files'
-    and split_part(name, '/', 2) like 'payment-%'
-    and public.can_upload_payment_doc(public.storage_request_id(name))
+    and (split_part(name, '/', 2) like 'payment-%' or name like '%/payment-%' or name like 'payment-%')
+    and exists (
+      select 1 from public.profiles me
+      where me.id = auth.uid() and me.is_active
+        and (me.role = 'admin' or me.role = 'disbursement')
+    )
   );
+
+drop policy if exists "request-files payment doc delete" on storage.objects;
+create policy "request-files payment doc delete" on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'request-files'
+    and (split_part(name, '/', 2) like 'payment-%' or name like '%/payment-%' or name like 'payment-%')
+    and exists (
+      select 1 from public.profiles me
+      where me.id = auth.uid() and me.is_active
+        and (me.role = 'admin' or me.role = 'disbursement')
+    )
+  );
+
+drop policy if exists "request-files payment doc read" on storage.objects;
+create policy "request-files payment doc read" on storage.objects for select to authenticated
+  using (
+    bucket_id = 'request-files'
+    and (split_part(name, '/', 2) like 'payment-%' or name like '%/payment-%' or name like 'payment-%')
+    and (
+      exists (
+        select 1 from public.profiles me
+        where me.id = auth.uid() and me.is_active
+          and (me.role = 'admin' or me.role = 'disbursement')
+      )
+      or public.can_view_request(public.storage_request_id(name))
+    )
+  );
+
+-- Drop previous overloaded signatures to avoid PostgREST ambiguity
+drop function if exists public.pay_disbursement_entry(uuid, numeric, date, text, text, text);
+drop function if exists public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text);
 
 -- 3. Update pay_disbursement_entry RPC with optional document & strict mode checks
 create or replace function public.pay_disbursement_entry(
@@ -241,3 +279,5 @@ end;
 $$;
 revoke execute on function public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text, text, text) from public, anon;
 grant execute on function public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text, text, text) to authenticated;
+
+notify pgrst, 'reload schema';
