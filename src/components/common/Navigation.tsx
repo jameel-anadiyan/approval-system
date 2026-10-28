@@ -36,7 +36,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { canViewDiscountReport } from '../../lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTransferReport';
-import { isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
+import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
 
 interface NavItem {
   label: string;
@@ -55,17 +55,8 @@ export const Navigation: React.FC = () => {
 
   if (!role) return null;
 
-  // Compute live badge counts
-  const returnedCount = requests.filter((r) => {
-    if (r.status !== 'returned') return false;
-    if (role === 'regional_head') {
-      return r.regional_head_id === user?.id || r.requester_id === user?.id;
-    }
-    if (role === 'employee') {
-      return r.requester_id === user?.id;
-    }
-    return true;
-  }).length;
+  // Compute live badge counts - only associated head and clerk (and requester/regional head) count returned requests
+  const returnedCount = requests.filter((r) => canUserViewReturnedRequest(r, user)).length;
 
   const clerkToRouteCount = requests.filter((r) => isMyRoutingRequest(r, user)).length;
 

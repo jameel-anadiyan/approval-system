@@ -26,6 +26,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState';
+import { canUserViewReturnedRequest } from '../../lib/workflow';
 import type { RequestRecord } from '../../types/database';
 
 export const ReturnedRequestsPage: React.FC = () => {
@@ -38,16 +39,10 @@ export const ReturnedRequestsPage: React.FC = () => {
   const [scopeFilter, setScopeFilter] = useState<'all' | 'mine' | 'team'>('all');
   const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
 
-  // All returned requests visible to the user under RLS
+  // Only returned requests that this user is associated with (associated head, associated clerk, requester, regional head, admin)
   const returnedList = useMemo(() => {
-    return requests.filter((r) => {
-      if (r.status !== 'returned') return false;
-      if (user?.role === 'regional_head') {
-        return r.regional_head_id === user?.id || r.requester_id === user?.id;
-      }
-      return true;
-    });
-  }, [requests, user?.role, user?.id]);
+    return requests.filter((r) => canUserViewReturnedRequest(r, user));
+  }, [requests, user]);
 
   // Breakdowns
   const myReturnedCount = useMemo(() => {
@@ -131,7 +126,15 @@ export const ReturnedRequestsPage: React.FC = () => {
                 Returned for Correction
               </h1>
               <p className="text-xs sm:text-sm text-slate-500">
-                Applications returned by reviewers for revisions, missing documents, or remarks.
+                {user?.role === 'head'
+                  ? 'Applications returned for correction within your department or assigned to you.'
+                  : user?.role === 'clerk'
+                  ? 'Applications routed by you or within your department returned for correction.'
+                  : user?.role === 'regional_head'
+                  ? 'Applications from your region returned for correction.'
+                  : user?.role === 'employee'
+                  ? 'Your applications returned for correction.'
+                  : 'Applications returned by reviewers for revisions, missing documents, or remarks.'}
               </p>
             </div>
           </div>
