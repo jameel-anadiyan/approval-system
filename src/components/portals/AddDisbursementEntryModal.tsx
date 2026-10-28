@@ -4,12 +4,20 @@ import { DisbursementEntry, RequestRecord, entriesTotal, entryAvailable } from '
 import { formatINR } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
 import { PlusCircle, ShieldAlert, Check, FileText, Percent, AlertCircle, RotateCcw, Banknote, Landmark, CheckCircle2 } from 'lucide-react';
+import { PasskeyField, isValidPasskey } from '../common/PasskeyField';
 
 interface AddDisbursementEntryModalProps {
   isOpen: boolean;
   onClose: () => void;
   request: RequestRecord;
-  onAddEntry: (amount: number, tdsCut: boolean, notes?: string, adjustment?: number, entryType?: 'cash' | 'bank') => Promise<void>;
+  onAddEntry: (
+    amount: number,
+    tdsCut: boolean,
+    notes: string | undefined,
+    adjustment: number,
+    entryType: 'cash' | 'bank',
+    extra: { tdsAmount: number; passkey: string }
+  ) => Promise<void>;
 }
 
 export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps> = ({
@@ -36,7 +44,9 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
   );
   const [amountTouched, setAmountTouched] = useState(false);
   const [tdsCut, setTdsCut] = useState<boolean>(false);
+  const [tdsAmountStr, setTdsAmountStr] = useState<string>('');
   const [adjustmentStr, setAdjustmentStr] = useState<string>('');
+  const [passkey, setPasskey] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,20 +54,38 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const parsedAmount = round2(parseFloat(amountStr) || 0);
   const parsedAdjustment = round2(parseFloat(adjustmentStr) || 0);
-  const total = round2(parsedAmount + parsedAdjustment);
-  // Max entry amount after keeping room for the adjustment
-  const maxEntryAmount = Math.max(0, round2(remainingUnentered - parsedAdjustment));
+  // TDS is deducted from the request balance, so it is only counted when ticked
+  const parsedTds = tdsCut ? round2(parseFloat(tdsAmountStr) || 0) : 0;
+  const total = round2(parsedAmount + parsedAdjustment + parsedTds);
+  // Max entry amount after keeping room for the adjustment and the TDS
+  const maxEntryAmount = Math.max(0, round2(remainingUnentered - parsedAdjustment - parsedTds));
   const adjustmentInvalid = parsedAdjustment < 0 || parsedAdjustment > remainingUnentered;
+  const tdsMissing = tdsCut && parsedTds <= 0;
   const overLimit = total > remainingUnentered;
   const adjustmentOnly = parsedAmount === 0 && parsedAdjustment > 0;
 
+  // Keep the auto-filled entry amount = balance - adjustment - TDS until the user edits it
+  const autoFill = (adj: number, tds: number) => {
+    if (amountTouched) return;
+    const next = Math.max(0, round2(remainingUnentered - adj - tds));
+    setAmountStr(next > 0 ? next.toFixed(2) : '0');
+  };
+
   const handleAdjustmentChange = (value: string) => {
     setAdjustmentStr(value);
-    // Keep the auto-filled entry amount = balance - adjustment until the user edits it
-    if (!amountTouched) {
-      const adj = round2(parseFloat(value) || 0);
-      const next = Math.max(0, round2(remainingUnentered - adj));
-      setAmountStr(next > 0 ? next.toFixed(2) : '0');
+    autoFill(round2(parseFloat(value) || 0), parsedTds);
+  };
+
+  const handleTdsAmountChange = (value: string) => {
+    setTdsAmountStr(value);
+    autoFill(parsedAdjustment, tdsCut ? round2(parseFloat(value) || 0) : 0);
+  };
+
+  const handleTdsToggle = (checked: boolean) => {
+    setTdsCut(checked);
+    if (!checked) {
+      setTdsAmountStr('');
+      autoFill(parsedAdjustment, 0);
     }
   };
 
@@ -65,26 +93,44 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
     e.preventDefault();
     setError(null);
 
-    if (parsedAmount < 0 || parsedAdjustment < 0) {
+    if (parsedAmount < 0 || parsedAdjustment < 0 || parsedTds < 0) {
       setError('Amounts cannot be negative.');
       return;
     }
 
-    if (total <= 0) {
+    if (tdsMissing) {
+      setError('TDS is ticked - enter the TDS amount that was cut.');
+      return;
+    }
+
+    if (parsedAmount + parsedAdjustment <= 0) {
       setError('Enter an entry amount or an old balance / advance adjustment.');
+      return;
+    }
+
+    if (tdsCut && parsedAmount === 0) {
+      setError('TDS needs an entry amount to be paid.');
       return;
     }
 
     if (overLimit) {
       setError(
-        `Entry amount + adjustment (${formatINR(total)}) cannot exceed the balance available for entries (${formatINR(remainingUnentered)}).`
+        `Entry amount + TDS + adjustment (${formatINR(total)}) cannot exceed the balance available for entries (${formatINR(remainingUnentered)}).`
       );
+      return;
+    }
+
+    if (!isValidPasskey(passkey)) {
+      setError('Enter your 4-digit passkey to save this entry.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await onAddEntry(parsedAmount, tdsCut, notes.trim() || undefined, parsedAdjustment, entryType);
+      await onAddEntry(parsedAmount, tdsCut, notes.trim() || undefined, parsedAdjustment, entryType, {
+        tdsAmount: parsedTds,
+        passkey,
+      });
       onClose();
     } catch (err: unknown) {
       setError(errMsg(err));
@@ -260,19 +306,29 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
             )}
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            The Payment-Only account can pay at most this amount against Entry #{nextEntryNo}. Use 0 to record only an
-            adjustment.
+            The Payment-Only account pays exactly the amount the Entry Approver approves against Entry #{nextEntryNo}
+            (full, or a partial figure). Use 0 to record only an adjustment.
           </p>
         </div>
 
-        {parsedAdjustment > 0 && (
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg bg-violet-100/70 border border-violet-200 p-2 min-w-0">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-violet-700 flex items-center justify-center gap-0.5">
-                <CheckCircle2 className="w-2.5 h-2.5" /> Adjusted
-              </span>
-              <span className="text-xs font-extrabold text-violet-800 break-words">{formatINR(parsedAdjustment)}</span>
-            </div>
+        {(parsedAdjustment > 0 || parsedTds > 0) && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            {parsedAdjustment > 0 && (
+              <div className="rounded-lg bg-violet-100/70 border border-violet-200 p-2 min-w-0">
+                <span className="text-[9px] font-bold uppercase tracking-wider text-violet-700 flex items-center justify-center gap-0.5">
+                  <CheckCircle2 className="w-2.5 h-2.5" /> Adjusted
+                </span>
+                <span className="text-xs font-extrabold text-violet-800 break-words">{formatINR(parsedAdjustment)}</span>
+              </div>
+            )}
+            {parsedTds > 0 && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 min-w-0">
+                <span className="text-[9px] font-bold uppercase tracking-wider text-amber-700 flex items-center justify-center gap-0.5">
+                  <Percent className="w-2.5 h-2.5" /> TDS
+                </span>
+                <span className="text-xs font-extrabold text-amber-800 break-words">{formatINR(parsedTds)}</span>
+              </div>
+            )}
             <div className="rounded-lg bg-teal-50 border border-teal-200 p-2 min-w-0">
               <span className="text-[9px] font-bold uppercase tracking-wider text-teal-700 flex items-center justify-center gap-0.5">
                 <Banknote className="w-2.5 h-2.5" /> To Pay
@@ -294,7 +350,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
         )}
         {overLimit && (
           <p className="text-[11px] font-semibold text-rose-700">
-            Entry amount + adjustment cannot be more than {formatINR(remainingUnentered)}.
+            Entry amount + TDS + adjustment cannot be more than {formatINR(remainingUnentered)}.
           </p>
         )}
 
@@ -315,7 +371,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
               id="tds-checkbox"
               type="checkbox"
               checked={tdsCut}
-              onChange={(e) => setTdsCut(e.target.checked)}
+              onChange={(e) => handleTdsToggle(e.target.checked)}
               className="mt-1 w-4 h-4 text-amber-600 rounded-sm border-slate-300 focus:ring-amber-500 cursor-pointer"
             />
             <div className="min-w-0 flex-1">
@@ -341,6 +397,33 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
               </p>
             </div>
           </label>
+
+          {tdsCut && (
+            <div className="mt-2 p-3 rounded-xl border border-amber-200 bg-amber-50/50">
+              <label htmlFor="entry-tds-amount" className="text-xs font-bold text-amber-950 block mb-1">
+                TDS Amount Cut (₹) <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="entry-tds-amount"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={tdsAmountStr}
+                onChange={(e) => handleTdsAmountChange(e.target.value)}
+                placeholder="0.00"
+                className={`w-full text-sm font-bold font-mono p-2.5 rounded-xl border bg-white outline-hidden focus:ring-1 ${
+                  tdsMissing
+                    ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                    : 'border-amber-200 focus:border-amber-500 focus:ring-amber-500'
+                }`}
+              />
+              <p className="text-[11px] text-amber-900/80 leading-snug mt-1">
+                Deducted from the request balance together with the entry amount. The Payment account pays only the
+                entry amount; the TDS is settled automatically against the balance.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Optional Notes */}
@@ -358,6 +441,17 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           />
         </div>
 
+        {/* Who is making this entry */}
+        <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70">
+          <PasskeyField
+            id="entry-passkey"
+            value={passkey}
+            onChange={setPasskey}
+            label="Your 4-digit Passkey"
+            hint="Enter your personal passkey to save this entry. It records who made the entry."
+          />
+        </div>
+
         {/* Modal Actions */}
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
           <button
@@ -370,7 +464,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           <button
             type="submit"
             id="submit-entry-button"
-            disabled={isSubmitting || total <= 0 || overLimit || adjustmentInvalid || parsedAmount < 0}
+            disabled={isSubmitting || parsedAmount + parsedAdjustment <= 0 || overLimit || adjustmentInvalid || tdsMissing || !isValidPasskey(passkey)}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs shadow-md shadow-sky-200 transition-all disabled:opacity-50 cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" />

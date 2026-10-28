@@ -8,7 +8,7 @@ import { AddDisbursementEntryModal } from '../../components/portals/AddDisbursem
 import { EditDisbursementEntryModal } from '../../components/portals/EditDisbursementEntryModal';
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
-import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable, entriesTotal, entryAvailable } from '../../types/database';
+import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, entriesTotal, entryAvailable } from '../../types/database';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import {
   Banknote,
@@ -639,8 +639,17 @@ export const DisbursementPage: React.FC = () => {
                                         : 'bg-slate-200 text-slate-700 border-slate-300'
                                     }`}
                                   >
-                                    {ent.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
+                                    {ent.tds_cut
+                                      ? Number(ent.tds_amount || 0) > 0
+                                        ? `TDS Cut · ${formatINR(Number(ent.tds_amount))}`
+                                        : 'TDS Cut'
+                                      : 'TDS Not Cut'}
                                   </span>
+                                  {Number(ent.paid_amount || 0) > 0 && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-teal-50 text-teal-800 border-teal-200">
+                                      Paid {formatINR(Number(ent.paid_amount))} of {formatINR(Number(ent.amount))}
+                                    </span>
+                                  )}
                                   <span
                                     className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
                                       isEntryPaid
@@ -649,17 +658,30 @@ export const DisbursementPage: React.FC = () => {
                                         ? 'bg-purple-100 text-purple-800 border-purple-200'
                                         : isEntryRejected
                                         ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                        : entryHasBalanceAwaitingApproval(ent)
+                                        ? 'bg-violet-100 text-violet-800 border-violet-300'
                                         : 'bg-amber-50 text-amber-700 border-amber-200'
                                     }`}
                                   >
                                     {isEntryPaid
                                       ? 'Paid'
                                       : isEntryApproved
-                                      ? 'Approved for Payment'
+                                      ? entryPayable(ent) < entryOutstanding(ent)
+                                        ? `Partially Approved · ${formatINR(entryPayable(ent))}`
+                                        : 'Approved for Payment'
                                       : isEntryRejected
                                       ? 'Rejected'
+                                      : entryHasBalanceAwaitingApproval(ent)
+                                      ? `Balance ${formatINR(entryOutstanding(ent))} Awaiting Verification`
                                       : 'Pending Approver'}
                                   </span>
+                                  {(ent.created_by_person_name || ent.paid_by_person_name) && (
+                                    <span className="text-[10px] text-slate-500">
+                                      {ent.created_by_person_name ? `Entry by ${ent.created_by_person_name}` : ''}
+                                      {ent.created_by_person_name && ent.paid_by_person_name ? ' · ' : ''}
+                                      {ent.paid_by_person_name ? `Paid by ${ent.paid_by_person_name}` : ''}
+                                    </span>
+                                  )}
                                   {ent.notes && (
                                     <span className="text-[11px] text-slate-500 italic truncate max-w-xs">
                                       · {ent.notes}
@@ -740,16 +762,17 @@ export const DisbursementPage: React.FC = () => {
           isOpen={true}
           onClose={() => setEntryModalTarget(null)}
           request={entryModalTarget}
-          onAddEntry={async (amount, tdsCut, notes, adjustment = 0, entryType = 'bank') => {
-            const res = await addDisbursementEntry(entryModalTarget.id, amount, tdsCut, notes, adjustment, entryType);
+          onAddEntry={async (amount, tdsCut, notes, adjustment, entryType, extra) => {
+            const res = await addDisbursementEntry(entryModalTarget.id, amount, tdsCut, notes, adjustment, entryType, extra);
             if (!res.success) {
               throw new Error(res.error || 'Failed to add disbursement entry');
             }
             const adjText = adjustment > 0 ? ` · Old balance adjusted ${formatINR(adjustment)}` : '';
+            const tdsText = tdsCut ? `TDS Cut ${formatINR(extra.tdsAmount)}` : 'TDS Not Cut';
             setNotice(
               amount <= 0
                 ? `Entry recorded${adjText}. Nothing to pay — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
-                : `Entry added as ${entryType === 'cash' ? 'Cash Entry' : 'Bank Entry'}: ${formatINR(amount)} to pay (${tdsCut ? 'TDS Cut' : 'TDS Not Cut'})${adjText}. Sent to Approver for review.`
+                : `Entry added as ${entryType === 'cash' ? 'Cash Entry' : 'Bank Entry'}: ${formatINR(amount)} to pay (${tdsText})${adjText}. Sent to Approver for review.`
             );
           }}
         />
@@ -762,14 +785,15 @@ export const DisbursementPage: React.FC = () => {
           onClose={() => setEditEntryTarget(null)}
           request={editEntryTarget.request}
           entry={editEntryTarget.entry}
-          onResubmit={async (entryId, amount, entryType, tdsCut, notes, adjustment) => {
+          onResubmit={async (entryId, amount, entryType, tdsCut, notes, adjustment, extra) => {
             const res = await editRejectedDisbursementEntry(
               entryId,
               amount,
               entryType,
               tdsCut,
               notes,
-              adjustment
+              adjustment,
+              extra
             );
             if (!res.success) throw new Error(res.error || 'Failed to update entry');
             setEditEntryTarget(null);
@@ -800,9 +824,12 @@ export const DisbursementPage: React.FC = () => {
           onMarkPaid={async (dt) => {
             const res = await markAsPaid(payTarget.request.id, dt);
             if (!res.success) throw new Error(res.error || 'Could not record payment');
+            const balanceLeft = payTarget.entry
+              ? Math.max(0, Math.round((Number(payTarget.entry.amount) - Number(payTarget.entry.paid_amount || 0) - (dt.amount || 0)) * 100) / 100)
+              : 0;
             setNotice(
               payTarget.entry
-                ? `Entry #${payTarget.entry.entry_no} marked as Paid (${formatINR(dt.amount || entryPayable(payTarget.entry))}).`
+                ? `Entry #${payTarget.entry.entry_no} paid (${formatINR(dt.amount || entryPayable(payTarget.entry))}).${balanceLeft > 0 ? ` Balance ${formatINR(balanceLeft)} sent back to the Entry Approver for verification.` : ''}`
                 : res.fully_paid
                 ? 'Paid in full — request closed.'
                 : 'Partial payment recorded. Balance stays in Awaiting Payment.'

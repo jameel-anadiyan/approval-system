@@ -12,6 +12,7 @@ import {
   DisbursementEntry,
   UserTargetHead,
   entryPayable,
+  entryOutstanding,
   entryAvailable,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
@@ -56,6 +57,14 @@ export interface PaymentInput {
   payment_remarks?: string;
   payment_date?: string;
   entry_id?: string;
+  /** 4-digit passkey of the person at the Payment account making this payment */
+  passkey?: string;
+}
+
+/** Extra details sent with a disbursement entry: TDS amount + the entering person's 4-digit passkey. */
+export interface EntryExtra {
+  tdsAmount?: number;
+  passkey?: string;
 }
 
 interface RequestContextType {
@@ -109,10 +118,13 @@ interface RequestContextType {
     notes?: string,
     /** Old balance / old advance adjusted from this entry (auto-settled) */
     adjustment?: number,
-    entryType?: 'cash' | 'bank'
+    entryType?: 'cash' | 'bank',
+    /** TDS amount (required when TDS is cut) + the entering person's passkey */
+    extra?: EntryExtra
   ) => Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }>;
   cancelDisbursementEntry: (entryId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
-  approveDisbursementEntry: (entryId: string, remarks?: string) => Promise<{ success: boolean; error?: string }>;
+  /** Entry Approver: full approval (omit approvedAmount) or partial approval (approvedAmount < entry balance). */
+  approveDisbursementEntry: (entryId: string, remarks?: string, approvedAmount?: number) => Promise<{ success: boolean; error?: string }>;
   approveMultipleDisbursementEntries: (entryIds: string[]) => Promise<{ success: boolean; approved_count?: number; error?: string }>;
   rejectDisbursementEntry: (entryId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
   editRejectedDisbursementEntry: (
@@ -121,7 +133,8 @@ interface RequestContextType {
     entryType: 'cash' | 'bank',
     tdsCut: boolean,
     notes?: string,
-    adjustment?: number
+    adjustment?: number,
+    extra?: EntryExtra
   ) => Promise<{ success: boolean; error?: string }>;
   payDisbursementEntry: (
     entryId: string,
@@ -183,6 +196,16 @@ const LOCAL_STORAGE_REQ_KEY = 'approval_app_requests_store';
 import { errMsg } from '../lib/errorUtils';
 export { errMsg };
 
+/** Coerce numeric columns of a disbursement entry (Postgres numeric arrives as string). */
+const normEntry = <T extends Record<string, any>>(e: T) => ({
+  ...e,
+  amount: Number(e.amount),
+  adjustment_amount: Number(e.adjustment_amount ?? 0),
+  tds_amount: Number(e.tds_amount ?? 0),
+  paid_amount: Number(e.paid_amount ?? 0),
+  approved_amount: e.approved_amount === null || e.approved_amount === undefined ? null : Number(e.approved_amount),
+});
+
 /** Newest action first, files in upload order, resolve owner head. */
 const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Profile>> = {}) =>
   rows.map((r) => {
@@ -236,7 +259,7 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
         (a, b) => b.created_at.localeCompare(a.created_at)
       ),
       disbursement_entries: (r.disbursement_entries || [])
-        .map((e) => ({ ...e, amount: Number(e.amount), adjustment_amount: Number(e.adjustment_amount ?? 0) }))
+        .map((e) => normEntry(e))
         .sort((a, b) => (a.entry_no ?? 0) - (b.entry_no ?? 0)),
       files: [...(r.files || [])].sort(
         (a, b) =>
@@ -336,7 +359,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           if (!entryErr && entries && entries.length > 0) {
             entries.forEach((e: any) => {
               const list = entryMap.get(e.request_id) || [];
-              list.push({ ...e, amount: Number(e.amount), adjustment_amount: Number(e.adjustment_amount ?? 0) });
+              list.push(normEntry(e));
               entryMap.set(e.request_id, list);
             });
           }
@@ -805,12 +828,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!current) return { success: false, error: 'Request not found' };
 
     const isHead = user.role === 'head';
+    const isClerk = user.role === 'clerk';
     const isPaymentNeeded = current.request_type !== 'discount' && current.request_type !== 'non_cash' && current.request_type !== 'stock_transfer';
-    if (isHead && isPaymentNeeded && !current.assigned_entry_user_id && !entryUserId) {
+    const needsEntryAccount = isHead || isClerk;
+    if (needsEntryAccount && isPaymentNeeded && !current.assigned_entry_user_id && !entryUserId) {
       return { success: false, error: 'Please select a Disbursement Entry Account before submitting.' };
     }
 
-    const toStatus = isHead ? 'pending_admin_approval' : 'submitted';
+    const toStatus = isHead
+      ? 'pending_admin_approval'
+      : isClerk
+      ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'pending_head_review' : 'pending_head_approval')
+      : 'submitted';
+    const clkRoute = isClerk
+      ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'A' : 'B')
+      : undefined;
     const genNo = current.request_no || `REQ-2026-${Math.floor(100000 + Math.random() * 900000)}`;
     const action: RequestAction = {
       id: `act-${Date.now()}`,
@@ -823,6 +855,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       to_status: toStatus,
       remarks: isHead
         ? 'Department Head request routed directly to Admin for approval.'
+        : isClerk
+        ? 'Clerk request routed directly to Department Head for review and approval.'
         : 'Request formally submitted for department processing.',
       visible_to_requester: true,
       created_at: new Date().toISOString(),
@@ -836,7 +870,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ? {
               ...r,
               status: toStatus,
-              route: isHead ? 'A' : r.route,
+              route: isHead ? 'A' : clkRoute || r.route,
+              routed_by: isHead || isClerk ? user.id : r.routed_by,
+              routed_at: isHead || isClerk ? new Date().toISOString() : r.routed_at,
               assigned_entry_user_id: entryUserId || r.assigned_entry_user_id,
               assigned_entry_user_name: targetUser ? targetUser.full_name : r.assigned_entry_user_name,
               assigned_entry_at: entryUserId ? new Date().toISOString() : r.assigned_entry_at,
@@ -1348,6 +1384,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_payment_mode: details.payment_mode || null,
           p_payment_ref: details.payment_ref || null,
           p_remarks: details.payment_remarks || null,
+          p_passkey: details.passkey || null,
         });
         if (error) throw error;
         await loadRequests();
@@ -1361,21 +1398,28 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const current = id ? getRequestById(id) : requests.find((r) => (r.disbursement_entries || []).some((e) => e.id === details.entry_id));
     if (!current) return { success: false, error: 'Request not found' };
     if (current.status === 'paid') return { success: false, error: 'This request is already fully paid.' };
+    if (!/^\d{4}$/.test(details.passkey || '')) return { success: false, error: 'Enter your 4-digit passkey' };
 
     const entry = details.entry_id ? (current.disbursement_entries || []).find((e) => e.id === details.entry_id) : null;
-    if (!entry || entry.status !== 'pending') return { success: false, error: 'This entry has already been paid or cancelled.' };
-    const maxPayable = Math.min(entryPayable(entry), Math.max(0, current.amount - Number(current.paid_amount ?? 0)));
-    const amt = Math.round((details.amount ?? maxPayable) * 100) / 100;
-    if (amt <= 0) return { success: false, error: 'Payment amount must be more than zero.' };
-    if (amt > maxPayable) {
-      return { success: false, error: entry ? `Payment cannot exceed the payable amount of Entry #${entry.entry_no} (₹${maxPayable.toFixed(2)}).` : `Payment is more than the balance of ₹${maxPayable.toFixed(2)}.` };
+    if (!entry || (entry.status !== 'approved' && entry.status !== 'pending')) {
+      return { success: false, error: 'This entry is not approved for payment (or has already been paid or cancelled).' };
     }
+    // Exact approved amount only - the cashier cannot pick a lower or different figure
+    const exact = entryPayable(entry);
+    if (exact <= 0) return { success: false, error: 'Nothing left to pay on this entry.' };
+    if (details.amount !== undefined && Math.round(details.amount * 100) / 100 !== exact) {
+      return { success: false, error: `You can only pay the exact approved amount of ₹${exact.toFixed(2)} for Entry #${entry.entry_no}.` };
+    }
+    const amt = exact;
+    const tdsNow = Number(entry.tds_amount || 0) > 0 && !entry.tds_settled ? Number(entry.tds_amount) : 0;
 
     const already = Number(current.paid_amount ?? 0);
-    const paid = already + amt;
+    const paid = already + amt + tdsNow;
     const full = paid >= current.amount;
     const now = new Date().toISOString();
     const date = details.payment_date || now.slice(0, 10);
+    const entryPaid = Math.round((Number(entry.paid_amount || 0) + amt) * 100) / 100;
+    const entryLeft = Math.round((entry.amount - entryPaid) * 100) / 100;
 
     const action: RequestAction = {
       id: `act-${Date.now()}`,
@@ -1386,11 +1430,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       action: full ? 'paid' : 'partial_payment',
       from_status: current.status,
       to_status: full ? 'paid' : current.status,
-      remarks: entry
-        ? `Entry #${entry.entry_no} settled ₹${amt.toFixed(2)} via ${details.payment_mode || 'Payment'}${entry.tds_cut ? ' (TDS Cut)' : ' (TDS Not Cut)'}`
-        : full
-        ? `Paid via ${details.payment_mode || 'Direct Transfer'}. Ref: ${details.payment_ref || 'N/A'}. ${details.payment_remarks || ''}`
-        : `Paid ₹${amt.toFixed(2)} · balance ₹${(current.amount - paid).toFixed(2)}`,
+      remarks: `Entry #${entry.entry_no} settled ₹${amt.toFixed(2)} via ${details.payment_mode || 'Payment'}${tdsNow > 0 ? ` · TDS ₹${tdsNow.toFixed(2)} deducted from balance` : ''}${entryLeft > 0 ? ` · Entry balance ₹${entryLeft.toFixed(2)} sent back for verification` : ''}`,
       visible_to_requester: true,
       created_at: now,
     };
@@ -1410,11 +1450,28 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               updated_at: now,
               disbursement_entries: (r.disbursement_entries || []).map((e) =>
                 e.id === details.entry_id
-                  ? { ...e, status: 'paid', paid_at: now, paid_by: user.id, paid_by_name: user.full_name }
+                  ? {
+                      ...e,
+                      paid_amount: entryPaid,
+                      approved_amount: null,
+                      tds_settled: e.tds_settled || tdsNow > 0,
+                      status: entryLeft <= 0 ? 'paid' : 'pending_approval',
+                      paid_at: now,
+                      paid_by: user.id,
+                      paid_by_name: user.full_name,
+                    }
                   : e
               ),
               payments: [
                 ...(r.payments || []),
+                ...(tdsNow > 0
+                  ? [{
+                      id: `pay-tds-${Date.now()}`, request_id: current.id, amount: tdsNow, payment_date: date,
+                      payment_mode: 'TDS', payment_ref: null, remarks: `TDS deducted · Entry #${entry.entry_no}`,
+                      paid_by: user.id, paid_by_name: user.full_name, created_at: now,
+                      entry_id: details.entry_id || null, is_adjustment: true,
+                    }]
+                  : []),
                 {
                   id: `pay-${Date.now()}`, request_id: current.id, amount: amt, payment_date: date,
                   payment_mode: details.payment_mode || null, payment_ref: details.payment_ref || null,
@@ -1437,41 +1494,32 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     tdsCut: boolean,
     notes?: string,
     adjustment = 0,
-    entryType: 'cash' | 'bank' = 'bank'
+    entryType: 'cash' | 'bank' = 'bank',
+    extra?: EntryExtra
   ): Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     const amt = Math.round(Math.max(0, amount || 0) * 100) / 100;
     const adj = Math.round(Math.max(0, adjustment || 0) * 100) / 100;
+    const tds = tdsCut ? Math.round(Math.max(0, extra?.tdsAmount || 0) * 100) / 100 : 0;
     if (amt + adj <= 0) return { success: false, error: 'Enter an entry amount or an old balance / advance adjustment.' };
+    if (tdsCut && tds <= 0) return { success: false, error: 'TDS is ticked - enter the TDS amount.' };
 
     if (isBackendConnected) {
       try {
-        const sessionId = getClientSessionId();
-        let { data, error } = await supabase.rpc('add_disbursement_entry', {
+        const { data, error } = await supabase.rpc('add_disbursement_entry', {
           p_request_id: requestId,
           p_amount: amt,
           p_tds_cut: tdsCut,
           p_notes: notes?.trim() || null,
           p_adjustment: adj,
           p_entry_type: entryType,
-          p_session_id: sessionId,
+          p_session_id: getClientSessionId(),
+          p_tds_amount: tds,
+          p_passkey: extra?.passkey || null,
         });
-        if (error && (error.message.includes('p_session_id') || error.message.includes('schema cache'))) {
-          // Fallback if migration 0056 is not yet applied
-          const fallback = await supabase.rpc('add_disbursement_entry', {
-            p_request_id: requestId,
-            p_amount: amt,
-            p_tds_cut: tdsCut,
-            p_notes: notes?.trim() || null,
-            p_adjustment: adj,
-            p_entry_type: entryType,
-          });
-          data = fallback.data;
-          error = fallback.error;
-        }
         if (error) {
-          if (adj > 0 && (error.message.includes('p_adjustment') || error.message.includes('schema cache'))) {
-            throw new Error('Database migration required: run 0051_disbursement_entry_routing_approver_and_mandatory_consultation.sql in the Supabase SQL Editor.');
+          if (error.message.includes('schema cache')) {
+            throw new Error('Database migration required: run 0060_passkeys_tds_amount_partial_approval.sql in the Supabase SQL Editor.');
           }
           throw error;
         }
@@ -1484,10 +1532,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     // Mock (mirrors add_disbursement_entry: adjustment is separate and settled immediately)
+    if (!/^\d{4}$/.test(extra?.passkey || '')) return { success: false, error: 'Enter your 4-digit passkey' };
     const req = getRequestById(requestId);
     if (!req) return { success: false, error: 'Request not found' };
-    if (amt + adj > entryAvailable(req)) {
-      return { success: false, error: `Entry + adjustment is more than the balance available for entries (₹${entryAvailable(req).toFixed(2)}).` };
+    if (amt + adj + tds > entryAvailable(req)) {
+      return { success: false, error: `Entry + TDS + adjustment is more than the balance available for entries (₹${entryAvailable(req).toFixed(2)}).` };
     }
     const existing = req.disbursement_entries || [];
     const nextNo = existing.length > 0 ? Math.max(...existing.map((e) => e.entry_no)) + 1 : 1;
@@ -1504,6 +1553,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       adjustment_amount: adj,
       adjustment_payment_id: paymentId,
       tds_cut: tdsCut,
+      tds_amount: tds,
+      tds_settled: false,
+      paid_amount: 0,
+      approved_amount: null,
       status: fullyAdjusted ? 'paid' : 'pending_approval',
       notes: notes?.trim() || null,
       created_by: user.id,
@@ -1591,14 +1644,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const approveDisbursementEntry = async (
     entryId: string,
-    remarks?: string
+    remarks?: string,
+    approvedAmount?: number
   ): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
+    const partialAmt =
+      approvedAmount === undefined || approvedAmount === null ? null : Math.round(approvedAmount * 100) / 100;
+    if (partialAmt !== null && !(partialAmt > 0)) {
+      return { success: false, error: 'Enter the partial amount to approve (more than zero).' };
+    }
     if (isBackendConnected) {
       try {
         const { error } = await supabase.rpc('approve_disbursement_entry', {
           p_entry_id: entryId,
           p_remarks: remarks?.trim() || null,
+          p_approved_amount: partialAmt,
         });
         if (error) throw error;
         await loadRequests();
@@ -1609,6 +1669,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     // Mock
+    const target = requests.flatMap((r) => r.disbursement_entries || []).find((e) => e.id === entryId);
+    if (!target) return { success: false, error: 'Entry not found' };
+    const outstanding = entryOutstanding(target);
+    if (partialAmt !== null && partialAmt > outstanding) {
+      return { success: false, error: `Approved amount cannot be more than the entry balance (₹${outstanding.toFixed(2)}).` };
+    }
     const now = new Date().toISOString();
     updateLocalRequests((prev) =>
       prev.map((r) => ({
@@ -1618,6 +1684,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             ? {
                 ...e,
                 status: 'approved',
+                approved_amount: partialAmt ?? outstanding,
                 approved_by: user.id,
                 approved_by_name: user.full_name,
                 approved_at: now,
@@ -1650,7 +1717,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    // Mock
+    // Mock (bulk approval is always a FULL approval of the entry balance)
     const now = new Date().toISOString();
     const idSet = new Set(entryIds);
     updateLocalRequests((prev) =>
@@ -1661,6 +1728,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             ? {
                 ...e,
                 status: 'approved',
+                approved_amount: entryOutstanding(e),
                 approved_by: user.id,
                 approved_by_name: user.full_name,
                 approved_at: now,
@@ -1723,12 +1791,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     entryType: 'cash' | 'bank',
     tdsCut: boolean,
     notes?: string,
-    adjustment = 0
+    adjustment = 0,
+    extra?: EntryExtra
   ): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     const amt = Math.round(Math.max(0, amount || 0) * 100) / 100;
     const adj = Math.round(Math.max(0, adjustment || 0) * 100) / 100;
+    const tds = tdsCut ? Math.round(Math.max(0, extra?.tdsAmount || 0) * 100) / 100 : 0;
     if (amt + adj <= 0) return { success: false, error: 'Enter an amount or adjustment' };
+    if (tdsCut && tds <= 0) return { success: false, error: 'TDS is ticked - enter the TDS amount.' };
 
     if (isBackendConnected) {
       try {
@@ -1739,6 +1810,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_tds_cut: tdsCut,
           p_notes: notes?.trim() || null,
           p_adjustment: adj,
+          p_tds_amount: tds,
+          p_passkey: extra?.passkey || null,
         });
         if (error) throw error;
         await loadRequests();
@@ -1749,6 +1822,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     // Mock
+    if (!/^\d{4}$/.test(extra?.passkey || '')) return { success: false, error: 'Enter your 4-digit passkey' };
     updateLocalRequests((prev) =>
       prev.map((r) => ({
         ...r,
@@ -1759,9 +1833,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 amount: amt,
                 entry_type: entryType,
                 tds_cut: tdsCut,
+                tds_amount: tds,
                 notes: notes?.trim() || null,
                 adjustment_amount: adj,
                 status: 'pending_approval',
+                approved_amount: null,
                 rejection_reason: null,
                 rejected_by: null,
                 rejected_by_name: null,

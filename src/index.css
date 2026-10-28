@@ -121,6 +121,19 @@
   }
 }
 
+/* Plain amount fields: no up/down steppers on any numeric input (Chrome, Safari, Edge, Firefox) */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  display: none;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Custom utility classes */
 .font-display {
   font-family: var(--font-display);

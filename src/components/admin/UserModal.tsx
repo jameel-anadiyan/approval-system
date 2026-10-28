@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { AppRole, Department, DisbursementAccountType, Profile, Region, RequestType, Shop, WorkCategory } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
-import { UserPlus, ShieldAlert, Camera, Trash2, Wallet } from 'lucide-react';
+import { UserPlus, ShieldAlert, Camera, Trash2, Wallet, Users, Plus } from 'lucide-react';
 import { AccessFields, ExtraAccess, coveringRegionalHeads, rolesWithTypes, validateAccess } from './AccessFields';
 import { compressAvatar } from '../../lib/imageUtils';
 import { ROLE_LABELS } from '../../lib/formatters';
+import { AccountPersonInput } from '../../lib/directory';
 
 interface UserModalProps {
   isOpen: boolean;
@@ -38,6 +39,7 @@ interface UserModalProps {
     connected_entry_accounts?: string[];
     mandatory_head_consultation?: boolean;
     mandatory_consultation_head_id?: string | null;
+    account_persons?: AccountPersonInput[];
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -62,6 +64,9 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [connectedEntryAccounts, setConnectedEntryAccounts] = useState<string[]>([]);
   const [mandatoryHeadConsultation, setMandatoryHeadConsultation] = useState(false);
   const [mandatoryConsultationHeadId, setMandatoryConsultationHeadId] = useState('');
+  const [accountPersons, setAccountPersons] = useState<AccountPersonInput[]>([
+    { name: '', passkey: '' },
+  ]);
 
   React.useEffect(() => {
     if (isOpen) {
@@ -73,6 +78,7 @@ export const UserModal: React.FC<UserModalProps> = ({
       setConnectedEntryAccounts([]);
       setMandatoryHeadConsultation(false);
       setMandatoryConsultationHeadId('');
+      setAccountPersons([{ name: '', passkey: '' }]);
     }
   }, [isOpen, allowedRoles]);
 
@@ -146,6 +152,34 @@ export const UserModal: React.FC<UserModalProps> = ({
       setError(accessErr);
       return;
     }
+
+    if (role === 'disbursement' && (disbursementType === 'entry_only' || disbursementType === 'payment_only')) {
+      const trimmedPersons = accountPersons.map((p) => ({
+        name: p.name.trim(),
+        passkey: p.passkey.trim(),
+      }));
+      if (trimmedPersons.length === 0 || trimmedPersons.some((p) => !p.name)) {
+        setError('Please enter the name of at least one authorized person for this disbursement account.');
+        return;
+      }
+      for (const p of trimmedPersons) {
+        if (!/^\d{4}$/.test(p.passkey)) {
+          setError(`Passkey for "${p.name}" must be exactly 4 digits.`);
+          return;
+        }
+      }
+      const namesLower = trimmedPersons.map((p) => p.name.toLowerCase());
+      if (new Set(namesLower).size !== namesLower.length) {
+        setError('Each authorized person must have a unique name on this account.');
+        return;
+      }
+      const passkeys = trimmedPersons.map((p) => p.passkey);
+      if (new Set(passkeys).size !== passkeys.length) {
+        setError('Each authorized person must have a distinct 4-digit passkey on this account.');
+        return;
+      }
+    }
+
     const withTypes = rolesWithTypes.includes(role);
 
     setIsSubmitting(true);
@@ -179,6 +213,10 @@ export const UserModal: React.FC<UserModalProps> = ({
               disbursement_type: disbursementType,
               payment_dealer_type: disbursementType === 'payment_only' ? paymentDealerType : null,
               connected_entry_accounts: disbursementType === 'payment_only' ? connectedEntryAccounts : [],
+              account_persons:
+                disbursementType === 'entry_only' || disbursementType === 'payment_only'
+                  ? accountPersons.map((p) => ({ name: p.name.trim(), passkey: p.passkey.trim() }))
+                  : undefined,
             }
           : {}),
       });
@@ -189,6 +227,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         setDesignation('');
         setShopId('');
         setTypes(['general']);
+        setAccountPersons([{ name: '', passkey: '' }]);
         setExtra({
           shopIds: [],
           regionId: '',
@@ -525,6 +564,91 @@ export const UserModal: React.FC<UserModalProps> = ({
                       })
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {(disbursementType === 'entry_only' || disbursementType === 'payment_only') && (
+              <div className="pt-3 border-t border-sky-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-sky-950 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-sky-600" />
+                      Authorized Persons & 4-Digit Passkeys <span className="text-rose-500">*</span>
+                    </label>
+                    <p className="text-[11px] text-sky-800/80 mt-0.5">
+                      Each person using this shared login will enter their 4-digit passkey to record who performed the entry or payment.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAccountPersons((prev) => [...prev, { name: '', passkey: '' }])}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-sky-300 text-sky-800 hover:bg-sky-50 shadow-2xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Add Person</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {accountPersons.map((p, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 bg-white rounded-xl border border-sky-200/90 flex items-center gap-2"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-0.5">
+                          Person #{idx + 1} Name
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={p.name}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setAccountPersons((prev) =>
+                              prev.map((item, i) => (i === idx ? { ...item, name: val } : item))
+                            );
+                          }}
+                          placeholder="e.g. Rahul Sharma"
+                          className="w-full text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-hidden"
+                        />
+                      </div>
+
+                      <div className="w-32 shrink-0">
+                        <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-0.5">
+                          4-Digit Passkey
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]{4}"
+                          maxLength={4}
+                          required
+                          value={p.passkey}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                            setAccountPersons((prev) =>
+                              prev.map((item, i) => (i === idx ? { ...item, passkey: val } : item))
+                            );
+                          }}
+                          placeholder="••••"
+                          className="w-full text-xs font-mono font-bold tracking-widest text-center px-2 py-1.5 rounded-lg border border-slate-200 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-hidden"
+                        />
+                      </div>
+
+                      {accountPersons.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setAccountPersons((prev) => prev.filter((_, i) => i !== idx))}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors mt-3 cursor-pointer"
+                          title="Remove person"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

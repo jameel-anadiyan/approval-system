@@ -99,12 +99,14 @@ export const NewRequestPage: React.FC = () => {
   const [shopName, setShopName] = useState('');
   const pickShop = needsShopPick(type);
   const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
+  // Head and Clerk raise requests that go straight up for approval, so they pick the Entry Account up front.
+  const needsEntryAccount = user?.role === 'head' || user?.role === 'clerk';
   const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>('');
   const [entryOfficers, setEntryOfficers] = useState<Profile[]>([]);
   const [loadingOfficers, setLoadingOfficers] = useState(false);
 
   useEffect(() => {
-    if (user?.role === 'head') {
+    if (needsEntryAccount) {
       let cancelled = false;
       setLoadingOfficers(true);
       fetchActiveEntryOfficers(isBackendConnected)
@@ -118,7 +120,7 @@ export const NewRequestPage: React.FC = () => {
         cancelled = true;
       };
     }
-  }, [user?.role, isBackendConnected]);
+  }, [needsEntryAccount, isBackendConnected]);
 
   // Exactly one associated shop: assign it as the default.
   useEffect(() => {
@@ -216,8 +218,8 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const validate = (forDraft: boolean): string | null => {
-    if (!forDraft && user?.role !== 'head' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
-    if (!forDraft && user?.role === 'head' && isPaymentNeeded && !assignedEntryUserId) {
+    if (!forDraft && user?.role !== 'head' && user?.role !== 'clerk' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
+    if (!forDraft && needsEntryAccount && isPaymentNeeded && !assignedEntryUserId) {
       return 'Please select a Disbursement Entry Account before submitting.';
     }
     if (!forDraft && pickShop && shopState.mustPick && !shopId) return 'Select the shop for this request.';
@@ -270,7 +272,7 @@ export const NewRequestPage: React.FC = () => {
         files: allFiles,
         category_id: user?.role !== 'head' && categoryOptions.required ? categoryId || null : null,
         target_head_id: type === 'exhibition' ? null : (targetHeadId || null),
-        assigned_entry_user_id: user?.role === 'head' && isPaymentNeeded ? assignedEntryUserId || null : null,
+        assigned_entry_user_id: needsEntryAccount && isPaymentNeeded ? assignedEntryUserId || null : null,
       });
       if (!draftRes.success || !draftRes.id) {
         if (draftRes.id) {
@@ -288,7 +290,7 @@ export const NewRequestPage: React.FC = () => {
       }
       const submitRes = await submitRequest(
         draftRes.id,
-        user?.role === 'head' && isPaymentNeeded ? assignedEntryUserId || null : null
+        needsEntryAccount && isPaymentNeeded ? assignedEntryUserId || null : null
       );
       navigate(`/requests/${draftRes.id}`, submitRes.success ? undefined : {
         state: { notice: `Saved as a draft but not submitted: ${submitRes.error}` },
@@ -334,6 +336,12 @@ export const NewRequestPage: React.FC = () => {
           <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-purple-800 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1">
             <UserCheck className="w-3.5 h-3.5 text-purple-600" />
             Department Head request: Bypasses clerk routing and goes directly to Admin for approval.
+          </p>
+        )}
+        {user?.role === 'clerk' && (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-purple-800 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1">
+            <UserCheck className="w-3.5 h-3.5 text-purple-600" />
+            Clerk request: Goes directly to your Department Head for approval. Select the Disbursement Entry Account below.
           </p>
         )}
         {user?.role === 'employee' && user.regional_head_id && (
@@ -419,12 +427,12 @@ export const NewRequestPage: React.FC = () => {
             </div>
           )}
 
-          {user?.role !== 'head' && (
+          {user?.role !== 'head' && user?.role !== 'clerk' && (
             <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
           )}
 
-          {/* Head direct raise: Disbursement Entry Account selection (required for disbursement needed requests) */}
-          {user?.role === 'head' && isPaymentNeeded && (
+          {/* Head / Clerk raise: Disbursement Entry Account selection (required for disbursement needed requests) */}
+          {needsEntryAccount && isPaymentNeeded && (
             <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-2.5">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <label htmlFor="head-entry-account" className="block text-xs font-bold text-indigo-950 flex items-center gap-1.5">
@@ -432,11 +440,13 @@ export const NewRequestPage: React.FC = () => {
                   <span>Disbursement Entry Account <span className="text-rose-500">*</span></span>
                 </label>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-md">
-                  Required for Head Direct Request
+                  Required for {user?.role === 'clerk' ? 'Clerk' : 'Head Direct'} Request
                 </span>
               </div>
               <p className="text-[11px] text-indigo-900/80 leading-relaxed">
-                Because your request goes directly to Admin for approval, please select the Disbursement Entry Account who will record the payment entries.
+                {user?.role === 'clerk'
+                  ? 'Please select the Disbursement Entry Account who will record the payment entries once this request is approved.'
+                  : 'Because your request goes directly to Admin for approval, please select the Disbursement Entry Account who will record the payment entries.'}
               </p>
               {loadingOfficers ? (
                 <div className="flex items-center gap-2 text-xs text-indigo-600 py-1.5 font-medium">

@@ -41,6 +41,23 @@ export interface NewUserInput {
   mandatory_head_consultation?: boolean;
   /** Department Head: designated consultation head id */
   mandatory_consultation_head_id?: string | null;
+  /** Entry / Payment account: people who share this login, each with their own 4-digit passkey */
+  account_persons?: AccountPersonInput[];
+}
+
+export interface AccountPersonInput {
+  name: string;
+  /** Exactly 4 digits - only sent to the server, never stored in plain text */
+  passkey: string;
+}
+
+/** A person (name only - passkeys are never readable) on a shared disbursement login. */
+export interface DisbursementPerson {
+  id: string;
+  account_id: string;
+  person_name: string;
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface AccessInput {
@@ -58,6 +75,9 @@ export interface AccessInput {
   mandatory_head_consultation?: boolean;
   mandatory_consultation_head_id?: string | null;
 }
+
+/** Offline sandbox store for disbursement persons (live mode keeps them in the database). */
+const mockPersons: DisbursementPerson[] = [];
 
 const toAccountObjs = (ids: string[] = [], userList: Profile[] = []): ConnectedEntryAccount[] =>
   ids.map((id) => ({
@@ -282,9 +302,10 @@ export function useDirectory() {
 
   const createUser = async (input: NewUserInput): Promise<Result> => {
     if (live) {
+      const { account_persons: accountPersons, ...createInput } = input;
       const { data, error } = await invokeEdgeFunction<{ id: string; username: string }>('admin-users', {
         action: 'create',
-        ...input,
+        ...createInput,
       });
       if (error) return { success: false, error: errMsg(error) };
 
@@ -302,6 +323,7 @@ export function useDirectory() {
         }
       }
 
+      let personError: string | null = null;
       if (input.role === 'disbursement' && input.disbursement_type && data?.id) {
         await supabase.rpc('set_user_disbursement_type', {
           p_user_id: data.id,
@@ -313,6 +335,20 @@ export function useDirectory() {
             p_dealer_type: input.payment_dealer_type || 'both',
             p_entry_user_ids: (input.connected_entry_accounts || []).length > 0 ? input.connected_entry_accounts : null,
           });
+        }
+        // Entry / Payment accounts: register every person with their own 4-digit passkey
+        if (input.disbursement_type === 'entry_only' || input.disbursement_type === 'payment_only') {
+          for (const person of accountPersons || []) {
+            const { error: personErr } = await supabase.rpc('add_disbursement_person', {
+              p_account_id: data.id,
+              p_name: person.name,
+              p_passkey: person.passkey,
+            });
+            if (personErr) {
+              personError = `Account created, but ${person.name} could not be added: ${errMsg(personErr)}. Add the persons from the account's "Persons & Passkeys" button.`;
+              break;
+            }
+          }
         }
       }
 
@@ -332,14 +368,27 @@ export function useDirectory() {
         });
       }
       await reload();
+      if (personError) return { success: false, error: personError };
       return { success: true };
     }
     const dept = departments.find((d) => d.id === input.department_id);
     const shop = shops.find((s) => s.id === input.shop_id) ?? null;
     const region = regions.find((r) => r.id === input.region_id) ?? null;
     const targetConsultHead = input.mandatory_consultation_head_id ? users.find((u) => u.id === input.mandatory_consultation_head_id) : null;
+    const newUserId = `user-${Date.now()}`;
+    if (input.role === 'disbursement') {
+      (input.account_persons || []).forEach((p) => {
+        mockPersons.push({
+          id: `person-${Date.now()}-${mockPersons.length}`,
+          account_id: newUserId,
+          person_name: p.name.trim(),
+          is_active: true,
+          created_at: new Date().toISOString(),
+        });
+      });
+    }
     setUsers((prev) => [{
-      id: `user-${Date.now()}`, username: input.username, full_name: input.full_name,
+      id: newUserId, username: input.username, full_name: input.full_name,
       designation: input.designation ?? null, role: input.role, department_id: input.department_id ?? null,
       is_active: true, must_change_password: true, created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(), department: dept,
@@ -1098,11 +1147,82 @@ export function useDirectory() {
     return { success: true };
   };
 
+  const listDisbursementPersons = async (accountId?: string): Promise<DisbursementPerson[]> => {
+    if (live) {
+      const { data, error } = await supabase.rpc('list_disbursement_persons', {
+        p_account_id: accountId || null,
+      });
+      if (error) throw error;
+      return (data as DisbursementPerson[]) || [];
+    }
+    return mockPersons.filter((p) => !accountId || p.account_id === accountId);
+  };
+
+  const addDisbursementPerson = async (
+    accountId: string,
+    name: string,
+    passkey: string
+  ): Promise<Result & { id?: string }> => {
+    if (live) {
+      const { data, error } = await supabase.rpc('add_disbursement_person', {
+        p_account_id: accountId,
+        p_name: name,
+        p_passkey: passkey,
+      });
+      if (error) return { success: false, error: errMsg(error) };
+      return { success: true, id: (data as any)?.id };
+    }
+    if (!/^\d{4}$/.test(passkey)) return { success: false, error: 'Passkey must be exactly 4 digits' };
+    const id = `person-${Date.now()}`;
+    mockPersons.push({
+      id,
+      account_id: accountId,
+      person_name: name.trim(),
+      is_active: true,
+      created_at: new Date().toISOString(),
+    });
+    return { success: true, id };
+  };
+
+  const updateDisbursementPerson = async (
+    personId: string,
+    name?: string,
+    passkey?: string,
+    isActive?: boolean
+  ): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('update_disbursement_person', {
+        p_person_id: personId,
+        p_name: name || null,
+        p_passkey: passkey || null,
+        p_is_active: isActive !== undefined ? isActive : null,
+      });
+      if (error) return { success: false, error: errMsg(error) };
+      return { success: true };
+    }
+    const idx = mockPersons.findIndex((p) => p.id === personId);
+    if (idx !== -1) {
+      if (name) mockPersons[idx].person_name = name.trim();
+      if (isActive !== undefined) mockPersons[idx].is_active = isActive;
+    }
+    return { success: true };
+  };
+
+  const getMyDisbursementPersonCount = async (): Promise<number> => {
+    if (live) {
+      const { data, error } = await supabase.rpc('my_disbursement_person_count');
+      if (error) return 0;
+      return Number(data ?? 0);
+    }
+    return user ? mockPersons.filter((p) => p.account_id === user.id && p.is_active).length : 0;
+  };
+
   return {
     departments, shops, regions, users, categories, productCategories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
     saveProductCategory, setProductCategoryActive,
     createUser, updateAccess, setUserRegion, setDisbursementType, setPaymentDealerConfig, setHeadMandatoryConsultation, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
+    listDisbursementPersons, addDisbursementPerson, updateDisbursementPerson, getMyDisbursementPersonCount,
   };
 }
 

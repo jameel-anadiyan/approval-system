@@ -39,7 +39,7 @@ import {
   ROLE_LABELS,
   typeOf,
 } from '../../lib/formatters';
-import { DisbursementEntry, entriesTotal, entryAvailable, entryPayable, paymentSummary } from '../../types/database';
+import { DisbursementEntry, entriesTotal, entryAvailable, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, paymentSummary } from '../../types/database';
 import { useDirectory } from '../../lib/directory';
 import { useEntryLock } from '../../lib/entryLock';
 import { isPaymentUserAllowedForEntry } from '../../lib/disbursementRouting';
@@ -320,7 +320,8 @@ export const RequestDetailPage: React.FC = () => {
   const entries: DisbursementEntry[] = (request.disbursement_entries || []).filter(
     (e) => e.status !== 'cancelled'
   );
-  const pendingEntries = entries.filter((e) => e.status === 'pending');
+  // Entries the cashier can pay right now (approved by the Entry Approver)
+  const pendingEntries = entries.filter((e) => e.status === 'pending' || e.status === 'approved');
   const totalEntered = entriesTotal(entries);
   const remainingUnentered = entryAvailable(request);
   const nextEntryNo = entries.reduce((m, e) => Math.max(m, e.entry_no || 0), 0) + 1;
@@ -744,12 +745,16 @@ export const RequestDetailPage: React.FC = () => {
                   type="button"
                   id="returned-resubmit-btn"
                   disabled={busy}
-                  onClick={() =>
+                  onClick={() => {
+                    if ((role === 'head' || role === 'clerk') && isPaymentNeeded && !request.assigned_entry_user_id) {
+                      setModalState('assign_entry_user');
+                      return;
+                    }
                     runInline(async () => {
                       const res = await submitRequest(request.id);
                       return res;
-                    }, 'Request resubmitted.')
-                  }
+                    }, 'Request resubmitted.');
+                  }}
                   className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs transition-colors disabled:opacity-50"
                 >
                   {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
@@ -1282,23 +1287,49 @@ export const RequestDetailPage: React.FC = () => {
                                       : 'bg-slate-200 text-slate-700 border-slate-300'
                                   }`}
                                 >
-                                  {ent.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
+                                  {ent.tds_cut
+                                    ? Number(ent.tds_amount || 0) > 0
+                                      ? `TDS Cut · ${formatINR(Number(ent.tds_amount))}`
+                                      : 'TDS Cut'
+                                    : 'TDS Not Cut'}
                                 </span>
+
+                                {Number(ent.paid_amount || 0) > 0 && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
+                                    Paid {formatINR(Number(ent.paid_amount))} of {formatINR(Number(ent.amount))}
+                                  </span>
+                                )}
 
                                 {/* Approver / Review Status Badge */}
                                 {isPendingApproval && (
-                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                                    Awaiting Approver
-                                  </span>
+                                  entryHasBalanceAwaitingApproval(ent) ? (
+                                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-violet-100 text-violet-900 border border-violet-300">
+                                      Balance {formatINR(entryOutstanding(ent))} Awaiting Verification
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                                      Awaiting Approver
+                                    </span>
+                                  )
                                 )}
                                 {ent.status === 'approved' && (
                                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-sky-100 text-sky-900 border border-sky-300">
-                                    Approved for Payment
+                                    {entryPayable(ent) < entryOutstanding(ent)
+                                      ? `Partially Approved · ${formatINR(entryPayable(ent))}`
+                                      : 'Approved for Payment'}
                                   </span>
                                 )}
                                 {isRejected && (
                                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
                                     Rejected
+                                  </span>
+                                )}
+
+                                {(ent.created_by_person_name || ent.paid_by_person_name) && (
+                                  <span className="text-[10px] text-slate-500">
+                                    {ent.created_by_person_name ? `Entry by ${ent.created_by_person_name}` : ''}
+                                    {ent.created_by_person_name && ent.paid_by_person_name ? ' · ' : ''}
+                                    {ent.paid_by_person_name ? `Paid by ${ent.paid_by_person_name}` : ''}
                                   </span>
                                 )}
 
@@ -1373,7 +1404,7 @@ export const RequestDetailPage: React.FC = () => {
                                 ) : (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                                     <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                    <span>{entryPayable(ent) === 0 && Number(ent.adjustment_amount || 0) > 0 ? 'Adjusted' : 'Paid'}</span>
+                                    <span>{Number(ent.amount) === 0 && Number(ent.adjustment_amount || 0) > 0 ? 'Adjusted' : 'Paid'}</span>
                                   </span>
                                 )}
                               </div>
@@ -1384,7 +1415,7 @@ export const RequestDetailPage: React.FC = () => {
                               <div className="pt-2 border-t border-rose-200/70 flex items-center justify-between gap-2 flex-wrap text-rose-900">
                                 <div className="flex items-center gap-1.5">
                                   <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                                  <span><strong>Approver Rejection:</strong> {ent.rejection_reason || 'Correction requested by approver'}</span>
+                                  <span><strong>Approver Rejection:</strong> {ent.rejection_reason || 'Correction requested by approver'}{ent.created_by_person_name ? ` · Only ${ent.created_by_person_name} can resubmit (passkey)` : ''}</span>
                                 </div>
                                 {(isEntryOnly || role === 'admin') && (
                                   <button
@@ -1420,17 +1451,21 @@ export const RequestDetailPage: React.FC = () => {
                           <p className="font-semibold text-slate-800">
                             #{i + 1} · {formatISTDate(p.payment_date, false)}
                             {p.is_adjustment && (
-                              <span className="ml-1.5 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-800 border border-violet-200">
-                                Adjustment
+                              <span className={`ml-1.5 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-md border ${p.payment_mode === 'TDS' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-violet-50 text-violet-800 border-violet-200'}`}>
+                                {p.payment_mode === 'TDS' ? 'TDS' : 'Adjustment'}
                               </span>
                             )}
                           </p>
                           <p className="text-[11px] text-slate-500 truncate">
-                            {[p.is_adjustment ? 'Old balance / advance adjustment' : p.payment_mode, p.payment_ref, p.paid_by_name].filter(Boolean).join(' · ') || '—'}
+                            {[
+                              p.is_adjustment ? (p.payment_mode === 'TDS' ? 'TDS deducted from balance' : 'Old balance / advance adjustment') : p.payment_mode,
+                              p.payment_ref,
+                              p.paid_by_person_name ? `${p.paid_by_person_name} (${p.paid_by_name || 'Payment desk'})` : p.paid_by_name,
+                            ].filter(Boolean).join(' · ') || '—'}
                           </p>
                           {p.remarks && <p className="text-[11px] text-slate-500 italic break-words">{p.remarks}</p>}
                         </div>
-                        <span className={`font-bold shrink-0 ${p.is_adjustment ? 'text-violet-700' : 'text-teal-700'}`}>{formatINR(p.amount)}</span>
+                        <span className={`font-bold shrink-0 ${p.payment_mode === 'TDS' ? 'text-amber-700' : p.is_adjustment ? 'text-violet-700' : 'text-teal-700'}`}>{formatINR(p.amount)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1660,7 +1695,7 @@ export const RequestDetailPage: React.FC = () => {
                 id="submit-request"
                 disabled={busy}
                 onClick={() => {
-                  if (role === 'head' && isPaymentNeeded && !request.assigned_entry_user_id) {
+                  if ((role === 'head' || role === 'clerk') && isPaymentNeeded && !request.assigned_entry_user_id) {
                     setModalState('assign_entry_user');
                     return;
                   }
@@ -2170,17 +2205,18 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onAddEntry={async (amount, tdsCut, notes, adjustment = 0, entryType = 'bank') => {
-            const res = await addDisbursementEntry(request.id, amount, tdsCut, notes, adjustment, entryType);
+          onAddEntry={async (amount, tdsCut, notes, adjustment, entryType, extra) => {
+            const res = await addDisbursementEntry(request.id, amount, tdsCut, notes, adjustment, entryType, extra);
             if (!res.success) throw new Error(res.error || 'Failed to add entry');
             const adjText = adjustment > 0 ? ` · Old balance adjusted ${formatINR(adjustment)}` : '';
             const typeText = entryType === 'cash' ? ' (Cash Entry)' : ' (Bank Entry)';
+            const tdsText = tdsCut ? `TDS Cut ${formatINR(extra.tdsAmount)}` : 'TDS Not Cut';
             setBanner({
               ok: true,
               text:
                 amount <= 0
                   ? `Entry recorded${adjText}. Nothing to pay — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
-                  : `Disbursement entry created: ${formatINR(amount)} to pay${typeText} (${tdsCut ? 'TDS Cut' : 'TDS Not Cut'})${adjText}. Sent for Entry Approver review.`,
+                  : `Disbursement entry created: ${formatINR(amount)} to pay${typeText} (${tdsText})${adjText}. Sent for Entry Approver review.`,
             });
           }}
         />
@@ -2203,14 +2239,15 @@ export const RequestDetailPage: React.FC = () => {
           }}
           request={request}
           entry={entryToEdit}
-          onResubmit={async (entryId, amount, entryType, tdsCut, notes, adjustment) => {
+          onResubmit={async (entryId, amount, entryType, tdsCut, notes, adjustment, extra) => {
             const res = await editRejectedDisbursementEntry(
               entryId,
               amount,
               entryType,
               tdsCut,
               notes,
-              adjustment
+              adjustment,
+              extra
             );
             if (!res.success) throw new Error(res.error || 'Failed to update entry');
             setBanner({
@@ -2238,10 +2275,13 @@ export const RequestDetailPage: React.FC = () => {
             if (!res.success) throw new Error(res.error || 'Action failed');
             const paidEnt = selectedEntry;
             setSelectedEntry(null);
+            const balanceLeft = paidEnt
+              ? Math.max(0, Math.round((Number(paidEnt.amount) - Number(paidEnt.paid_amount || 0) - (dt.amount || 0)) * 100) / 100)
+              : 0;
             setBanner({
               ok: true,
               text: paidEnt
-                ? `Entry #${paidEnt.entry_no} paid successfully (${formatINR(dt.amount || paidEnt.amount)}).`
+                ? `Entry #${paidEnt.entry_no} paid successfully (${formatINR(dt.amount || 0)}).${balanceLeft > 0 ? ` Balance ${formatINR(balanceLeft)} sent back to the Entry Approver for verification.` : ''}`
                 : res.fully_paid
                 ? 'Paid in full.'
                 : 'Partial payment recorded. Balance is still pending.',

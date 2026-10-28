@@ -378,32 +378,68 @@ export interface DisbursementEntry {
   adjustment_amount?: number;
   adjustment_payment_id?: string | null;
   updated_at?: string | null;
+  /** TDS amount deducted from the request balance (settled with the entry's first payment) */
+  tds_amount?: number;
+  tds_settled?: boolean;
+  /** Amount the Entry Approver cleared for payment (full outstanding, or a partial figure) */
+  approved_amount?: number | null;
+  /** Cash already paid out against this entry */
+  paid_amount?: number;
+  /** Person (name + passkey) who made the entry / who paid it */
+  created_by_person_id?: string | null;
+  created_by_person_name?: string | null;
+  paid_by_person_id?: string | null;
+  paid_by_person_name?: string | null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Amount the Payment-Only account pays for an entry = the entry amount (adjustment is separate). */
-export const entryPayable = (e: Pick<DisbursementEntry, 'amount'>) => Math.max(0, round2(Number(e.amount || 0)));
+/** Part of an entry that is still to be paid out (entry amount - cash already paid). */
+export const entryOutstanding = (e: Pick<DisbursementEntry, 'amount' | 'paid_amount'>) =>
+  Math.max(0, round2(Number(e.amount || 0) - Number(e.paid_amount || 0)));
 
-/** Entry amount + adjustment of all live entries. */
+/**
+ * Exact amount the Payment-Only account must pay for an entry = what the Entry Approver approved
+ * (full outstanding, or the partial figure). Nothing is payable until the entry is approved.
+ */
+export const entryPayable = (
+  e: Pick<DisbursementEntry, 'amount' | 'paid_amount' | 'approved_amount' | 'status'>
+) => {
+  if (e.status !== 'approved' && e.status !== 'pending') return 0;
+  const outstanding = entryOutstanding(e);
+  const approved = e.approved_amount;
+  if (approved === null || approved === undefined || Number(approved) <= 0) return outstanding;
+  return Math.min(outstanding, Math.max(0, round2(Number(approved))));
+};
+
+/** True when part of the entry has been paid and the rest is waiting for the verifier. */
+export const entryHasBalanceAwaitingApproval = (
+  e: Pick<DisbursementEntry, 'amount' | 'paid_amount' | 'status'>
+) => (e.status === 'pending_approval' || e.status === 'pending') && Number(e.paid_amount || 0) > 0 && entryOutstanding(e) > 0;
+
+/** Entry amount + TDS + adjustment of all live entries. */
 export const entriesTotal = (entries: DisbursementEntry[] = []) =>
   round2(
     entries
       .filter((e) => e.status !== 'cancelled')
-      .reduce((s, e) => s + Number(e.amount || 0) + Number(e.adjustment_amount || 0), 0)
+      .reduce(
+        (s, e) => s + Number(e.amount || 0) + Number(e.adjustment_amount || 0) + Number(e.tds_amount || 0),
+        0
+      )
   );
 
 /**
- * Balance still available for new entries (entry amount + adjustment):
- * request amount - already paid/adjusted - unpaid (pending) entries.
+ * Balance still available for new entries (entry amount + TDS + adjustment):
+ * request amount - already paid/adjusted - cash still to be paid on live entries
+ * - TDS of live entries not yet deducted.
  */
 export const entryAvailable = (
   r: { amount?: number | null; paid_amount?: number | null; disbursement_entries?: DisbursementEntry[] | null }
 ) => {
-  const pending = (r.disbursement_entries || [])
-    .filter((e) => e.status === 'pending')
-    .reduce((s, e) => s + Number(e.amount || 0), 0);
-  return Math.max(0, round2(Number(r.amount || 0) - Number(r.paid_amount || 0) - pending));
+  const reserved = (r.disbursement_entries || [])
+    .filter((e) => e.status === 'pending' || e.status === 'pending_approval' || e.status === 'approved')
+    .reduce((s, e) => s + entryOutstanding(e) + (e.tds_settled ? 0 : Number(e.tds_amount || 0)), 0);
+  return Math.max(0, round2(Number(r.amount || 0) - Number(r.paid_amount || 0) - reserved));
 };
 
 export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
@@ -461,9 +497,11 @@ export interface RequestPayment {
   remarks: string | null;
   paid_by: string | null;
   paid_by_name: string | null;
+  /** Person (name + passkey) at the Payment account who made the payment */
+  paid_by_person_name?: string | null;
   created_at: string;
   entry_id?: string | null;
-  /** Auto-recorded old balance / old advance adjustment (not a real payout) */
+  /** Auto-recorded old balance / old advance adjustment / TDS deduction (not a real payout) */
   is_adjustment?: boolean;
 }
 

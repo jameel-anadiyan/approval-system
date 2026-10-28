@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Modal } from '../../components/common/Modal';
-import { DisbursementEntry, RequestRecord } from '../../types/database';
+import { DisbursementEntry, RequestRecord, entryOutstanding, entryHasBalanceAwaitingApproval } from '../../types/database';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
 import {
@@ -25,6 +25,9 @@ import {
   Check,
   X,
   RotateCcw,
+  PieChart,
+  Percent,
+  UserCheck,
 } from 'lucide-react';
 
 interface EntryWithRequest {
@@ -42,6 +45,9 @@ export const EntryApprovalsPage: React.FC = () => {
   const [rejectTarget, setRejectTarget] = useState<EntryWithRequest | null>(null);
   const [rejectReason, setRejectReason] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [partialTarget, setPartialTarget] = useState<EntryWithRequest | null>(null);
+  const [partialStr, setPartialStr] = useState<string>('');
+  const [partialError, setPartialError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [modeFilter, setModeFilter] = useState<'all' | 'cash' | 'bank'>('all');
@@ -136,12 +142,55 @@ export const EntryApprovalsPage: React.FC = () => {
       if (!res.success) throw new Error(res.error || 'Approval failed');
       setNotice({
         type: 'success',
-        message: `Entry #${item.entry.entry_no} (${formatINR(item.entry.amount)} · ${item.entry.entry_type.toUpperCase()}) approved and routed to payment accounts.`,
+        message: `Entry #${item.entry.entry_no} (${formatINR(entryOutstanding(item.entry))} · ${item.entry.entry_type.toUpperCase()}) fully approved and routed to payment accounts.`,
       });
       selectedIds.delete(item.entry.id);
       setSelectedIds(new Set(selectedIds));
     } catch (err: unknown) {
       setNotice({ type: 'error', message: errMsg(err) });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const openPartial = (item: EntryWithRequest) => {
+    setPartialTarget(item);
+    setPartialStr('');
+    setPartialError(null);
+  };
+
+  const handlePartialSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!partialTarget) return;
+    const outstanding = entryOutstanding(partialTarget.entry);
+    const amt = Math.round((parseFloat(partialStr) || 0) * 100) / 100;
+    setPartialError(null);
+    if (amt <= 0) {
+      setPartialError('Enter the amount you approve for payment now.');
+      return;
+    }
+    if (amt >= outstanding) {
+      setPartialError(
+        `A partial approval must be less than the entry balance (${formatINR(outstanding)}). Use "Approve Full" to approve all of it.`
+      );
+      return;
+    }
+
+    setIsProcessing(true);
+    setNotice(null);
+    try {
+      const res = await approveDisbursementEntry(partialTarget.entry.id, undefined, amt);
+      if (!res.success) throw new Error(res.error || 'Partial approval failed');
+      setNotice({
+        type: 'success',
+        message: `Entry #${partialTarget.entry.entry_no}: ${formatINR(amt)} approved for payment. The balance ${formatINR(outstanding - amt)} stays here for your verification after this part is paid.`,
+      });
+      selectedIds.delete(partialTarget.entry.id);
+      setSelectedIds(new Set(selectedIds));
+      setPartialTarget(null);
+      setPartialStr('');
+    } catch (err: unknown) {
+      setPartialError(errMsg(err));
     } finally {
       setIsProcessing(false);
     }
@@ -196,7 +245,7 @@ export const EntryApprovalsPage: React.FC = () => {
   };
 
   // Metrics
-  const pendingTotalAmount = pendingQueue.reduce((s, item) => s + Number(item.entry.amount || 0), 0);
+  const pendingTotalAmount = pendingQueue.reduce((s, item) => s + entryOutstanding(item.entry), 0);
   const pendingCashCount = pendingQueue.filter((item) => item.entry.entry_type === 'cash').length;
   const pendingBankCount = pendingQueue.filter((item) => item.entry.entry_type === 'bank').length;
 
@@ -464,6 +513,15 @@ export const EntryApprovalsPage: React.FC = () => {
             const isSelected = selectedIds.has(entry.id);
             const isCash = entry.entry_type === 'cash';
             const isPending = entry.status === 'pending_approval' || entry.status === 'pending';
+            const outstanding = entryOutstanding(entry);
+            const paidSoFar = Number(entry.paid_amount || 0);
+            const tdsAmt = Number(entry.tds_amount || 0);
+            const balanceAwaiting = entryHasBalanceAwaitingApproval(entry);
+            const approvedPartial =
+              entry.status === 'approved' &&
+              entry.approved_amount !== null &&
+              entry.approved_amount !== undefined &&
+              Number(entry.approved_amount) < outstanding;
 
             return (
               <div
@@ -518,44 +576,76 @@ export const EntryApprovalsPage: React.FC = () => {
 
                         {/* TDS badge */}
                         <span
-                          className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                          className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
                             entry.tds_cut
                               ? 'bg-amber-100 text-amber-900 border-amber-300'
                               : 'bg-slate-100 text-slate-600 border-slate-200'
                           }`}
                         >
-                          {entry.tds_cut ? 'TDS Cut' : 'TDS Not Cut'}
+                          {entry.tds_cut && <Percent className="w-3 h-3" />}
+                          {entry.tds_cut
+                            ? tdsAmt > 0
+                              ? `TDS Cut · ${formatINR(tdsAmt)}`
+                              : 'TDS Cut'
+                            : 'TDS Not Cut'}
                         </span>
 
                         {/* Status */}
                         {isPending ? (
-                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                            Awaiting Approver
-                          </span>
+                          balanceAwaiting ? (
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
+                              Balance Awaiting Verification
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                              Awaiting Approver
+                            </span>
+                          )
                         ) : entry.status === 'rejected' ? (
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200">
                             Returned for Correction
                           </span>
                         ) : (
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
-                            {entry.status === 'paid' ? 'Paid' : 'Approved · At Cashier'}
+                            {entry.status === 'paid'
+                              ? 'Paid'
+                              : approvedPartial
+                              ? `Partially Approved · ${formatINR(Number(entry.approved_amount))} At Cashier`
+                              : 'Approved · At Cashier'}
                           </span>
                         )}
                       </div>
 
-                      <div className="text-xs text-slate-500">
-                        Recorded by <strong>{entry.created_by_name || 'Entry Officer'}</strong> on{' '}
-                        {formatISTDate(entry.created_at, false)}
+                      <div className="text-xs text-slate-500 flex items-center gap-1 flex-wrap">
+                        <UserCheck className="w-3 h-3 text-slate-400" />
+                        <span>
+                          Recorded by{' '}
+                          <strong>{entry.created_by_person_name || entry.created_by_name || 'Entry Officer'}</strong>
+                          {entry.created_by_person_name && entry.created_by_name ? ` (${entry.created_by_name})` : ''} on{' '}
+                          {formatISTDate(entry.created_at, false)}
+                        </span>
+                        {entry.paid_by_person_name && (
+                          <span>
+                            · Paid by <strong>{entry.paid_by_person_name}</strong>
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
 
                   {/* Prominent Amount */}
                   <div className="text-right shrink-0">
-                    <span className="text-[10px] font-bold uppercase text-slate-400 block">Entry Amount</span>
-                    <span className="font-display font-extrabold text-base sm:text-xl text-slate-900">
-                      {formatINR(entry.amount)}
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                      {paidSoFar > 0 && isPending ? 'Balance To Verify' : 'Entry Amount'}
                     </span>
+                    <span className="font-display font-extrabold text-base sm:text-xl text-slate-900">
+                      {formatINR(isPending ? outstanding : entry.amount)}
+                    </span>
+                    {paidSoFar > 0 && (
+                      <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200 block mt-0.5">
+                        Paid so far: {formatINR(paidSoFar)} of {formatINR(Number(entry.amount))}
+                      </span>
+                    )}
                     {Number(entry.adjustment_amount || 0) > 0 && (
                       <span className="text-[10px] font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-full border border-violet-200 block mt-0.5">
                         + Adj: {formatINR(Number(entry.adjustment_amount))}
@@ -626,20 +716,36 @@ export const EntryApprovalsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Action Buttons for Pending Entries */}
+                {/* Decision buttons for pending entries: Reject / Approve Partial / Approve Full */}
                 {isPending && (
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    {balanceAwaiting && (
+                      <span className="mr-auto text-[11px] text-violet-800 font-semibold">
+                        Part of this entry is already paid — verify the remaining {formatINR(outstanding)} to release it.
+                      </span>
+                    )}
                     <button
                       type="button"
-                      disabled={isProcessing}
+                      disabled={isProcessing || paidSoFar > 0}
+                      title={paidSoFar > 0 ? 'Part of this entry is already paid, it cannot be returned.' : undefined}
                       onClick={() => {
                         setRejectTarget({ entry, request });
                         setRejectReason('');
                       }}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <XCircle className="w-3.5 h-3.5" />
                       <span>Reject &amp; Return</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isProcessing}
+                      onClick={() => openPartial({ entry, request })}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-800 font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      <PieChart className="w-3.5 h-3.5" />
+                      <span>Approve Partial</span>
                     </button>
 
                     <button
@@ -649,7 +755,7 @@ export const EntryApprovalsPage: React.FC = () => {
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95"
                     >
                       <Check className="w-3.5 h-3.5" />
-                      <span>Approve Entry #{entry.entry_no}</span>
+                      <span>Approve Full #{entry.entry_no} ({formatINR(outstanding)})</span>
                     </button>
                   </div>
                 )}
@@ -677,6 +783,90 @@ export const EntryApprovalsPage: React.FC = () => {
         </div>
       )}
 
+      {/* Partial Approval Modal */}
+      {partialTarget && (
+        <Modal
+          isOpen={true}
+          onClose={() => setPartialTarget(null)}
+          title={`Partially Approve Entry #${partialTarget.entry.entry_no}`}
+          description={`Request ${partialTarget.request.approval_no || partialTarget.request.request_no} · ${partialTarget.request.requester_name}`}
+          maxWidth="md"
+        >
+          <form onSubmit={handlePartialSubmit} className="space-y-4">
+            {partialError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl">{partialError}</div>
+            )}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span>Entry balance to verify:</span>
+                <span className="font-bold text-slate-900">{formatINR(entryOutstanding(partialTarget.entry))}</span>
+              </div>
+              {Number(partialTarget.entry.paid_amount || 0) > 0 && (
+                <div className="flex items-center justify-between">
+                  <span>Already paid:</span>
+                  <span className="font-bold text-teal-800">{formatINR(Number(partialTarget.entry.paid_amount))}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span>Payment Mode:</span>
+                <span className="font-bold uppercase text-slate-900">{partialTarget.entry.entry_type}</span>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="partial-amount" className="text-xs font-bold text-slate-700 block mb-1">
+                Amount to approve for payment now (₹) <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="partial-amount"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                autoFocus
+                required
+                value={partialStr}
+                onChange={(e) => setPartialStr(e.target.value)}
+                placeholder="0.00"
+                className="w-full text-base font-bold font-mono p-3 rounded-xl border border-slate-200 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden bg-white"
+              />
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                The Payment account can pay <strong>exactly</strong> this amount — no more, no less. The remaining balance
+                comes back to you for verification before it can be paid.
+              </span>
+              {(() => {
+                const amt = Math.round((parseFloat(partialStr) || 0) * 100) / 100;
+                const out = entryOutstanding(partialTarget.entry);
+                return amt > 0 && amt < out ? (
+                  <span className="text-[11px] font-semibold text-violet-800 mt-1 block">
+                    Balance left to verify later: {formatINR(out - amt)}
+                  </span>
+                ) : null;
+              })()}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPartialTarget(null)}
+                disabled={isProcessing}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isProcessing || !(parseFloat(partialStr) > 0)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <PieChart className="w-3.5 h-3.5" />
+                <span>{isProcessing ? 'Approving…' : 'Approve Partial Amount'}</span>
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {/* Reject Modal */}
       {rejectTarget && (
         <Modal
@@ -690,7 +880,7 @@ export const EntryApprovalsPage: React.FC = () => {
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
               <div className="flex items-center justify-between">
                 <span>Entry Amount:</span>
-                <span className="font-bold text-slate-900">{formatINR(rejectTarget.entry.amount)}</span>
+                <span className="font-bold text-slate-900">{formatINR(entryOutstanding(rejectTarget.entry))}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Payment Mode:</span>
@@ -698,7 +888,7 @@ export const EntryApprovalsPage: React.FC = () => {
               </div>
               <div className="flex items-center justify-between">
                 <span>Entered by:</span>
-                <span>{rejectTarget.entry.created_by_name || 'Entry Officer'}</span>
+                <span>{rejectTarget.entry.created_by_person_name || rejectTarget.entry.created_by_name || 'Entry Officer'}</span>
               </div>
             </div>
 
@@ -716,7 +906,7 @@ export const EntryApprovalsPage: React.FC = () => {
                 className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-hidden bg-white"
               />
               <span className="text-[10px] text-slate-400 mt-1 block">
-                The entry will be marked 'returned' and notified to the entry officer in their dedicated Rejected Entries tab. They can edit and resubmit it.
+                The entry will be marked 'returned' and notified to the entry officer in their dedicated Rejected Entries tab. Only the person who made the entry can correct it and resubmit it with their passkey.
               </span>
             </div>
 

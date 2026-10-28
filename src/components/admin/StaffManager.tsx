@@ -10,6 +10,7 @@ import { AccessModal, coveringRegionalHeads, rolesWithTypes } from './AccessFiel
 import { WorkCategoriesPanel } from './WorkCategoriesPanel';
 import { CredentialsModal } from './CredentialsModal';
 import { PhotoUploadModal } from './PhotoUploadModal';
+import { DisbursementPersonsModal } from './DisbursementPersonsModal';
 import { UserAvatar } from '../common/UserAvatar';
 import { Modal } from '../common/Modal';
 import { LoadingSpinner } from '../common/LoadingSpinner';
@@ -83,6 +84,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const [photoTarget, setPhotoTarget] = useState<Profile | null>(null);
   const [resetTarget, setResetTarget] = useState<Profile | null>(null);
   const [accessTarget, setAccessTarget] = useState<Profile | null>(null);
+  const [personsTarget, setPersonsTarget] = useState<Profile | null>(null);
   const [resetPw, setResetPw] = useState('');
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -661,6 +663,17 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" /><span>Access</span>
                     </button>
                   )}
+                  {u.role === 'disbursement' && (u.disbursement_type === 'entry_only' || u.disbursement_type === 'payment_only') && (
+                    <button
+                      type="button"
+                      onClick={() => setPersonsTarget(u)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-800 font-semibold text-xs transition-colors cursor-pointer"
+                      title="Manage authorized individuals and 4-digit passkeys"
+                    >
+                      <Users className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Persons & Passkeys</span>
+                    </button>
+                  )}
                   <button type="button" onClick={() => setResetTarget(u)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs">
                     <KeyRound className="w-3.5 h-3.5 text-slate-400" /><span>Reset password</span>
@@ -795,6 +808,15 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
             }
             return res;
           }}
+        />
+      )}
+
+      {personsTarget && (
+        <DisbursementPersonsModal
+          account={personsTarget}
+          dir={dir}
+          onClose={() => setPersonsTarget(null)}
+          onNotify={(msg) => show(msg)}
         />
       )}
 

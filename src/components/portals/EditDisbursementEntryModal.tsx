@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { DisbursementEntry, RequestRecord, entriesTotal, entryAvailable } from '../../types/database';
+import { DisbursementEntry, RequestRecord, entryOutstanding } from '../../types/database';
 import { formatINR } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
-import { ShieldAlert, AlertCircle, Banknote, Landmark, CheckCircle2, RotateCcw } from 'lucide-react';
+import { ShieldAlert, AlertCircle, Banknote, Landmark, CheckCircle2, RotateCcw, Percent, UserCheck } from 'lucide-react';
+import { PasskeyField, isValidPasskey } from '../common/PasskeyField';
 
 interface EditDisbursementEntryModalProps {
   isOpen: boolean;
@@ -15,8 +16,9 @@ interface EditDisbursementEntryModalProps {
     amount: number,
     entryType: 'cash' | 'bank',
     tdsCut: boolean,
-    notes?: string,
-    adjustment?: number
+    notes: string | undefined,
+    adjustment: number,
+    extra: { tdsAmount: number; passkey: string }
   ) => Promise<void>;
 }
 
@@ -30,9 +32,13 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
   const [entryType, setEntryType] = useState<'cash' | 'bank'>(entry.entry_type || 'bank');
   const [amountStr, setAmountStr] = useState<string>(String(entry.amount || ''));
   const [tdsCut, setTdsCut] = useState<boolean>(entry.tds_cut);
+  const [tdsAmountStr, setTdsAmountStr] = useState<string>(
+    entry.tds_amount && entry.tds_amount > 0 ? String(entry.tds_amount) : ''
+  );
   const [adjustmentStr, setAdjustmentStr] = useState<string>(
     entry.adjustment_amount && entry.adjustment_amount > 0 ? String(entry.adjustment_amount) : ''
   );
+  const [passkey, setPasskey] = useState<string>('');
   const [notes, setNotes] = useState<string>(entry.notes || '');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,18 +46,23 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const parsedAmount = round2(parseFloat(amountStr) || 0);
   const parsedAdjustment = round2(parseFloat(adjustmentStr) || 0);
-  const total = round2(parsedAmount + parsedAdjustment);
+  const parsedTds = tdsCut ? round2(parseFloat(tdsAmountStr) || 0) : 0;
+  const total = round2(parsedAmount + parsedAdjustment + parsedTds);
+  const tdsMissing = tdsCut && parsedTds <= 0;
 
-  // Remaining available excluding this entry
+  // Remaining available excluding this entry: the balance not already earmarked by other live entries
+  // (cash still to pay + TDS not yet deducted). This entry's own old adjustment is already counted as paid.
   const otherEntries = (request.disbursement_entries || []).filter(
     (e) => e.id !== entry.id && e.status !== 'cancelled'
   );
-  const otherUnpaidSum = otherEntries
-    .filter((e) => e.status in ['pending', 'pending_approval', 'approved'])
-    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const otherReserved = otherEntries
+    .filter((e) => ['pending', 'pending_approval', 'approved'].includes(e.status))
+    .reduce((s, e) => s + entryOutstanding(e) + (e.tds_settled ? 0 : Number(e.tds_amount || 0)), 0);
   const availableBalance = Math.max(
     0,
-    round2(request.amount - Number(request.paid_amount || 0) - otherUnpaidSum)
+    round2(
+      request.amount - Number(request.paid_amount || 0) + Number(entry.adjustment_amount || 0) - otherReserved
+    )
   );
 
   const overLimit = total > availableBalance;
@@ -60,18 +71,26 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
     e.preventDefault();
     setError(null);
 
-    if (parsedAmount < 0 || parsedAdjustment < 0) {
+    if (parsedAmount < 0 || parsedAdjustment < 0 || parsedTds < 0) {
       setError('Amounts cannot be negative.');
       return;
     }
-    if (total <= 0) {
-      setError('Enter an entry amount or an old balance adjustment.');
+    if (tdsMissing) {
+      setError('TDS is ticked - enter the TDS amount that was cut.');
+      return;
+    }
+    if (parsedAmount <= 0) {
+      setError('Enter the entry amount to pay.');
       return;
     }
     if (overLimit) {
       setError(
-        `Total amount (${formatINR(total)}) exceeds available balance (${formatINR(availableBalance)}).`
+        `Entry + TDS + adjustment (${formatINR(total)}) exceeds available balance (${formatINR(availableBalance)}).`
       );
+      return;
+    }
+    if (!isValidPasskey(passkey)) {
+      setError('Enter the 4-digit passkey of the person who made this entry.');
       return;
     }
 
@@ -83,7 +102,8 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
         entryType,
         tdsCut,
         notes.trim() || undefined,
-        parsedAdjustment
+        parsedAdjustment,
+        { tdsAmount: parsedTds, passkey }
       );
       onClose();
     } catch (err: unknown) {
@@ -113,6 +133,12 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
           </p>
           <span className="text-[10px] text-rose-600 block">
             Make the required correction below and resubmit. The entry will go back to the Approver queue.
+          </span>
+          <span className="text-[10px] text-rose-700 font-semibold flex items-center gap-1 pt-0.5">
+            <UserCheck className="w-3 h-3" />
+            Only the person who made this entry
+            {entry.created_by_person_name ? ` (${entry.created_by_person_name})` : ''} can resubmit it, using their own
+            passkey.
           </span>
         </div>
 
@@ -172,13 +198,16 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
           />
         </div>
 
-        {/* TDS Checkbox */}
+        {/* TDS Checkbox + amount */}
         <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
           <label className="flex items-start gap-2.5 cursor-pointer">
             <input
               type="checkbox"
               checked={tdsCut}
-              onChange={(e) => setTdsCut(e.target.checked)}
+              onChange={(e) => {
+                setTdsCut(e.target.checked);
+                if (!e.target.checked) setTdsAmountStr('');
+              }}
               className="mt-0.5 rounded-sm border-slate-300 text-indigo-600 focus:ring-indigo-500"
             />
             <div>
@@ -188,6 +217,30 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
               </span>
             </div>
           </label>
+          {tdsCut && (
+            <div className="mt-2.5">
+              <label htmlFor="edit-entry-tds-amount" className="text-xs font-bold text-amber-950 flex items-center gap-1 mb-1">
+                <Percent className="w-3 h-3 text-amber-600" />
+                TDS Amount Cut (₹) <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="edit-entry-tds-amount"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={tdsAmountStr}
+                onChange={(e) => setTdsAmountStr(e.target.value)}
+                placeholder="0.00"
+                className={`w-full text-sm font-bold font-mono p-2.5 rounded-xl border bg-white outline-hidden focus:ring-1 ${
+                  tdsMissing
+                    ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                    : 'border-amber-200 focus:border-amber-500 focus:ring-amber-500'
+                }`}
+              />
+              <p className="text-[11px] text-slate-500 mt-1">Deducted from the request balance along with the entry amount.</p>
+            </div>
+          )}
         </div>
 
         {/* Notes */}
@@ -202,6 +255,17 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Add explanation of correction made…"
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden bg-white"
+          />
+        </div>
+
+        {/* Passkey of the person who made the entry */}
+        <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70">
+          <PasskeyField
+            id="edit-entry-passkey"
+            value={passkey}
+            onChange={setPasskey}
+            label={`Passkey${entry.created_by_person_name ? ` of ${entry.created_by_person_name}` : ''}`}
+            hint="Resubmission is accepted only with the passkey of the person who made this entry."
           />
         </div>
 
@@ -222,7 +286,7 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
           </button>
           <button
             type="submit"
-            disabled={isSubmitting || total <= 0 || overLimit}
+            disabled={isSubmitting || parsedAmount <= 0 || overLimit || tdsMissing || !isValidPasskey(passkey)}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
