@@ -377,6 +377,7 @@ export interface DisbursementEntry {
   /** Old balance / old advance adjusted with this entry (separate from the entry amount, auto-settled, not paid by Payment-Only) */
   adjustment_amount?: number;
   adjustment_payment_id?: string | null;
+  updated_at?: string | null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
