@@ -3,7 +3,8 @@
 -- ==============================================================================
 -- 1. Adds document columns to request_payments
 -- 2. Grants storage upload, delete, and read permissions on request-files for disbursement payment docs
--- 3. Updates pay_disbursement_entry RPC with optional document & strict mode checks
+-- 3. Sets default true on request_actions.visible_to_requester and protects _log_action
+-- 4. Updates pay_disbursement_entry RPC with optional document & strict mode checks
 -- ==============================================================================
 
 -- 1. Add document columns to request_payments
@@ -66,6 +67,20 @@ create policy "request-files payment doc read" on storage.objects for select to 
       or public.can_view_request(public.storage_request_id(name))
     )
   );
+
+-- Safeguard: ensure request_actions.visible_to_requester defaults to true and coalesce inside _log_action
+alter table public.request_actions alter column visible_to_requester set default true;
+
+create or replace function public._log_action(
+  p_request_id uuid, p_actor public.profiles, p_action text,
+  p_from public.request_status, p_to public.request_status,
+  p_remarks text, p_visible boolean default true)
+returns void language sql security definer set search_path = '' as $$
+  insert into public.request_actions
+    (request_id, actor_id, actor_name, actor_role, action, from_status, to_status, remarks, visible_to_requester)
+  values (p_request_id, p_actor.id, p_actor.full_name, p_actor.role, p_action, p_from, p_to,
+          nullif(btrim(p_remarks), ''), coalesce(p_visible, true))
+$$;
 
 -- Drop previous overloaded signatures to avoid PostgREST ambiguity
 drop function if exists public.pay_disbursement_entry(uuid, numeric, date, text, text, text);
@@ -257,9 +272,27 @@ begin
     'approved'::public.request_status,
     case when v_full then 'paid'::public.request_status else 'approved'::public.request_status end,
     'Entry #' || e.entry_no || ' disbursed by ' || v_by || ': ₹' || to_char(v_amt, 'FM999999999990.00')
-      || case when nullif(btrim(p_document_name), '') is not null then ' (doc attached: ' || p_document_name || ')' else '' end,
-    null
+      || ' via ' || coalesce(v_clean_mode, upper(coalesce(e.entry_type, 'bank')))
+      || case when v_tds_settle > 0 then ' · TDS ₹' || to_char(v_tds_settle, 'FM999999999990.00') || ' deducted from balance' else '' end
+      || case when p_payment_ref is not null and btrim(p_payment_ref) <> '' then ' (Ref: ' || btrim(p_payment_ref) || ')' else '' end
+      || case when nullif(btrim(p_document_name), '') is not null then ' (doc attached: ' || p_document_name || ')' else '' end
+      || case when v_entry_left > 0 then ' · Entry balance ₹' || to_char(v_entry_left, 'FM999999999990.00') || ' sent back for verification' else '' end
+      || case when v_full then ' [Fully Paid]' else ' [Request balance: ₹' || to_char(r.amount - v_paid, 'FM999999999990.00') || ']' end,
+    true
   );
+
+  if v_full then
+    perform public.notify_next_actor(r.id, 'paid');
+  elsif v_entry_left > 0 then
+    perform public._notify(
+      (select array_agg(id) from public.profiles
+        where is_active and (role = 'admin' or (role = 'disbursement' and disbursement_type = 'entry_approver'))),
+      r.id,
+      'Entry #' || e.entry_no || ' balance needs verification',
+      coalesce(r.request_no, 'Request') || ': ₹' || to_char(v_amt, 'FM999999999990.00') || ' paid, balance ₹'
+        || to_char(v_entry_left, 'FM999999999990.00') || ' awaiting your verification'
+    );
+  end if;
 
   return jsonb_build_object(
     'success', true,
@@ -267,6 +300,10 @@ begin
     'entry_id', e.id,
     'entry_no', e.entry_no,
     'amount', v_amt,
+    'total_paid', v_paid,
+    'tds_deducted', v_tds_settle,
+    'entry_balance', greatest(v_entry_left, 0),
+    'is_fully_paid', v_full,
     'fully_paid', v_full,
     'entry_left', v_entry_left,
     'document_storage_path', p_document_storage_path,
