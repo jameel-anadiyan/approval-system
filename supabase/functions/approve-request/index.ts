@@ -229,7 +229,8 @@ Deno.serve(handle(async (req) => {
     ]);
     const origin = appOrigin(body.app_url);
     const r = b.request;
-    const approverLine = [b.approver.full_name, b.approver.designation, b.approver.department ?? (b.approver.role === "admin" ? "Administration" : null)]
+    const approverObj = b.approver ?? me;
+    const approverLine = [approverObj.full_name, approverObj.designation, approverObj.department ?? (approverObj.role === "admin" || me.role === "admin" ? "Administration" : null)]
       .filter(Boolean).join(", ");
     const ctx: StampContext = {
       approvalNo: b.approval_no,
@@ -338,7 +339,7 @@ Deno.serve(handle(async (req) => {
       // deno-lint-ignore no-explicit-any
       timeline: [...(b.timeline as any[]).map((t) => ({
         when: ist(t.created_at), who: t.actor_name, what: ACTION_LABEL[t.action] ?? t.action, remarks: t.remarks,
-      })), { when: ctx.dateTime, who: b.approver.full_name, what: `Approved · ${b.approval_no}`, remarks: null }],
+      })), { when: ctx.dateTime, who: approverObj.full_name, what: `Approved · ${b.approval_no}`, remarks: null }],
     }, signedBytes, ctx);
     const packetName = `${b.approval_no}_packet.pdf`;
     const packetPath = `${requestId}/${packetName}`;
