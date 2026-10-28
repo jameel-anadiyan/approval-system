@@ -40,6 +40,10 @@ import {
   typeOf,
 } from '../../lib/formatters';
 import { DisbursementEntry, entriesTotal, entryAvailable, entryPayable, paymentSummary } from '../../types/database';
+import { useDirectory } from '../../lib/directory';
+import { useEntryLock } from '../../lib/entryLock';
+import { isPaymentUserAllowedForEntry } from '../../lib/disbursementRouting';
+import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import {
   ArrowLeft,
   Send,
@@ -70,6 +74,9 @@ import {
   MapPin,
   PackageCheck,
   Truck,
+  Eye,
+  Lock,
+  ExternalLink,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -298,19 +305,13 @@ export const RequestDetailPage: React.FC = () => {
   const isApprovedTransfer = rType === 'stock_transfer' && request.status === 'approved';
   const canCompleteTransfer = isApprovedTransfer && !request.transfer_completed_at && (role === 'admin' || isStockMonitorUser);
 
-  const paymentDealerType = user?.payment_dealer_type || 'both';
-  const connectedEntryIds = (user?.connected_entry_accounts || []).map((c) =>
-    typeof c === 'string' ? c : c.entry_user_id
+  const dir = useDirectory();
+  const entryLock = useEntryLock(
+    request?.id,
+    isEntryOnly && request?.status === 'approved' && isPaymentNeeded
   );
-
-  const isEntryForThisCashier = (ent: DisbursementEntry) => {
-    if (role === 'admin') return true;
-    if (!isPaymentOnly) return true;
-    const mode = ent.entry_type || 'bank';
-    if (paymentDealerType !== 'both' && paymentDealerType !== mode) return false;
-    if (connectedEntryIds.length > 0 && ent.created_by && !connectedEntryIds.includes(ent.created_by)) return false;
-    return true;
-  };
+  const [previewSignedDoc, setPreviewSignedDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
+  const signedPacket = (request.signed_files || []).find((s) => s.is_packet) || (request.signed_files || [])[0];
 
   const isEntryReadyForPayment = (ent: DisbursementEntry) => {
     return ent.status === 'approved' || ent.status === 'pending';
@@ -1131,9 +1132,9 @@ export const RequestDetailPage: React.FC = () => {
 
               {/* Disbursement Entries List if applicable */}
               {(request.status === 'approved' || request.status === 'paid' || entries.length > 0) && (
-                <div className="space-y-2 pt-3 border-t border-slate-100">
+                <div className="space-y-3 pt-3 border-t border-slate-100">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <FileCheck className="w-4 h-4 text-sky-600" />
                       <span className="font-bold text-slate-800 text-xs">
                         Disbursement Entries ({entries.length})
@@ -1143,19 +1144,73 @@ export const RequestDetailPage: React.FC = () => {
                           · {formatINR(totalEntered)} entered of {formatINR(request.amount)}
                         </span>
                       )}
+                      {isEntryOnly && entryLock.isLockedByMe && (
+                        <span className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                          <Lock className="w-3 h-3 text-emerald-600" />
+                          <span>Session Active (This Computer)</span>
+                        </span>
+                      )}
                     </div>
 
-                    {canAddDisbursementEntry && request.status === 'approved' && remainingUnentered > 0 && !isPendingDisbursementClarification && (
-                      <button
-                        type="button"
-                        onClick={() => setModalState('add_disb_entry')}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-sky-300 bg-sky-50 text-sky-800 text-xs font-bold hover:bg-sky-100 transition-colors cursor-pointer shadow-2xs"
-                      >
-                        <PlusCircle className="w-3.5 h-3.5 text-sky-600" />
-                        <span>+ Add Entry #{nextEntryNo}</span>
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {signedPacket && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewSignedDoc({
+                              path: signedPacket.storage_path,
+                              name: signedPacket.file_name || `${request.approval_no}_packet.pdf`,
+                              approvalNo: request.approval_no,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Preview Approved Doc</span>
+                        </button>
+                      )}
+
+                      {canAddDisbursementEntry && request.status === 'approved' && remainingUnentered > 0 && !isPendingDisbursementClarification && (
+                        <button
+                          type="button"
+                          disabled={entryLock.isLockedByOther}
+                          onClick={() => setModalState('add_disb_entry')}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-sky-300 bg-sky-50 text-sky-800 text-xs font-bold hover:bg-sky-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer shadow-2xs"
+                          title={entryLock.isLockedByOther ? 'Currently open on another computer' : undefined}
+                        >
+                          <PlusCircle className="w-3.5 h-3.5 text-sky-600" />
+                          <span>+ Add Entry #{nextEntryNo}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Concurrent session lock banner if locked by another computer */}
+                  {entryLock.isLockedByOther && (
+                    <div className="p-3.5 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-950 space-y-1.5">
+                      <div className="flex items-center gap-2 font-bold text-xs text-amber-900">
+                        <Lock className="w-4 h-4 text-amber-600" />
+                        <span>This request is currently open on another computer</span>
+                      </div>
+                      <p className="text-[11px] text-amber-900/90 leading-relaxed">
+                        Another session ({entryLock.lockedByName || 'Staff Member'} on {entryLock.clientLabel || 'another computer'}) is currently entering or viewing this request. To prevent conflicting duplicate entries, adding entries is paused on this screen.
+                        <strong> As soon as the other computer closes this request, this page will unlock.</strong>
+                      </p>
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <span className="text-[10px] text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Auto-checking for session release…
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => entryLock.refreshLock()}
+                          className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-amber-200 hover:bg-amber-300 text-amber-950 transition-colors cursor-pointer"
+                        >
+                          Retry Now
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {entries.length === 0 ? (
                     <div className="text-xs text-slate-600 bg-slate-50 border border-dashed border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1163,15 +1218,17 @@ export const RequestDetailPage: React.FC = () => {
                         <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
                         <span>
                           {canAddDisbursementEntry
-                            ? 'No payment entries created yet. Click "+ Add Entry #1" to record the first entry with TDS indication.'
+                            ? 'No payment entries created yet. Review the approved document and click "+ Add Entry #1" to record the first entry with TDS indication.'
                             : 'Awaiting payment entries from an Entry Only account before disbursement can proceed.'}
                         </span>
                       </div>
                       {canAddDisbursementEntry && request.status === 'approved' && !isPendingDisbursementClarification && (
                         <button
                           type="button"
+                          disabled={entryLock.isLockedByOther}
                           onClick={() => setModalState('add_disb_entry')}
-                          className="shrink-0 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-sky-600 text-white font-bold text-xs hover:bg-sky-700 transition-colors cursor-pointer"
+                          className="shrink-0 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-sky-600 text-white font-bold text-xs hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                          title={entryLock.isLockedByOther ? 'Currently open on another computer' : undefined}
                         >
                           + Add Entry #1
                         </button>
@@ -1281,31 +1338,38 @@ export const RequestDetailPage: React.FC = () => {
                                     </span>
                                   )
                                 ) : isReadyForPay ? (
-                                  canDisbursePayment && isEntryForThisCashier(ent) && !isPendingDisbursementClarification && request.status === 'approved' ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedEntry(ent);
-                                        setModalState('pay');
-                                      }}
-                                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95 ${
-                                        isCash ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-teal-600 hover:bg-teal-700'
-                                      }`}
-                                    >
-                                      <Banknote className="w-3.5 h-3.5" />
-                                      <span>{isCash ? 'Settle Cash Entry' : 'Pay Entry'} #{ent.entry_no} ({formatINR(entryPayable(ent))})</span>
-                                    </button>
-                                  ) : (
-                                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
-                                      {isPendingDisbursementClarification
-                                        ? 'On Hold'
-                                        : isPaymentOnly && !isEntryForThisCashier(ent)
-                                        ? `Routed to ${isCash ? 'Cash' : 'Bank'} Dealer`
-                                        : isEntryOnly
-                                        ? 'Ready for Payment'
-                                        : 'Pending Payment'}
-                                    </span>
-                                  )
+                                  (() => {
+                                    const payCheck = isPaymentUserAllowedForEntry(user, ent, request, dir.users);
+                                    const canPayThis = canDisbursePayment && payCheck.allowed && !isPendingDisbursementClarification && request.status === 'approved';
+                                    return canPayThis ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedEntry(ent);
+                                          setModalState('pay');
+                                        }}
+                                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95 ${
+                                          isCash ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-teal-600 hover:bg-teal-700'
+                                        }`}
+                                      >
+                                        <Banknote className="w-3.5 h-3.5" />
+                                        <span>{isCash ? 'Settle Cash Entry' : 'Pay Entry'} #{ent.entry_no} ({formatINR(entryPayable(ent))})</span>
+                                      </button>
+                                    ) : (
+                                      <span
+                                        className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 max-w-[200px] truncate"
+                                        title={payCheck.reason}
+                                      >
+                                        {isPendingDisbursementClarification
+                                          ? 'On Hold'
+                                          : isPaymentOnly && !payCheck.allowed
+                                          ? payCheck.reason || 'Routed to linked cashier'
+                                          : isEntryOnly
+                                          ? 'Ready for Payment'
+                                          : 'Pending Payment'}
+                                      </span>
+                                    );
+                                  })()
                                 ) : (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                                     <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -2197,6 +2261,15 @@ export const RequestDetailPage: React.FC = () => {
           }}
         />
       )}
+
+      {/* Signed Document Preview Modal */}
+      <SignedDocPreviewModal
+        isOpen={Boolean(previewSignedDoc)}
+        onClose={() => setPreviewSignedDoc(null)}
+        storagePath={previewSignedDoc?.path || null}
+        fileName={previewSignedDoc?.name || 'signed_approval.pdf'}
+        approvalNo={previewSignedDoc?.approvalNo || request?.approval_no}
+      />
     </div>
   );
 };

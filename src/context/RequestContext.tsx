@@ -18,6 +18,7 @@ import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { MOCK_REQUESTS, MOCK_USERS, MOCK_REGIONS } from '../lib/mockData';
 import { loadThreshold } from '../lib/directory';
+import { getClientSessionId } from '../lib/entryLock';
 
 type Result = { success: boolean; error?: string; warning?: string };
 
@@ -1445,14 +1446,29 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (isBackendConnected) {
       try {
-        const { data, error } = await supabase.rpc('add_disbursement_entry', {
+        const sessionId = getClientSessionId();
+        let { data, error } = await supabase.rpc('add_disbursement_entry', {
           p_request_id: requestId,
           p_amount: amt,
           p_tds_cut: tdsCut,
           p_notes: notes?.trim() || null,
           p_adjustment: adj,
           p_entry_type: entryType,
+          p_session_id: sessionId,
         });
+        if (error && (error.message.includes('p_session_id') || error.message.includes('schema cache'))) {
+          // Fallback if migration 0056 is not yet applied
+          const fallback = await supabase.rpc('add_disbursement_entry', {
+            p_request_id: requestId,
+            p_amount: amt,
+            p_tds_cut: tdsCut,
+            p_notes: notes?.trim() || null,
+            p_adjustment: adj,
+            p_entry_type: entryType,
+          });
+          data = fallback.data;
+          error = fallback.error;
+        }
         if (error) {
           if (adj > 0 && (error.message.includes('p_adjustment') || error.message.includes('schema cache'))) {
             throw new Error('Database migration required: run 0051_disbursement_entry_routing_approver_and_mandatory_consultation.sql in the Supabase SQL Editor.');

@@ -22,14 +22,18 @@ import {
   FileText,
   AlertCircle,
   RotateCcw,
+  ExternalLink,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { downloadSignedPacket } from '../../lib/files';
+import { useDirectory } from '../../lib/directory';
+import { isPaymentUserAllowedForEntry } from '../../lib/disbursementRouting';
 
 export const DisbursementPage: React.FC = () => {
   const { requests, markAsPaid, addDisbursementEntry, editRejectedDisbursementEntry } = useRequests();
   const { user, isBackendConnected } = useAuth();
+  const dir = useDirectory();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -88,20 +92,6 @@ export const DisbursementPage: React.FC = () => {
 
   // Paid history: status === 'paid'
   const paidQueue = entryFilteredPayable.filter((r) => r.status === 'paid');
-
-  const paymentDealerType = user?.payment_dealer_type || 'both';
-  const connectedEntryIds = (user?.connected_entry_accounts || []).map((c) =>
-    typeof c === 'string' ? c : c.entry_user_id
-  );
-
-  const isEntryForThisCashier = (ent: DisbursementEntry) => {
-    if (isAdmin) return true;
-    if (!isPaymentOnly) return true;
-    const mode = ent.entry_type || 'bank';
-    if (paymentDealerType !== 'both' && paymentDealerType !== mode) return false;
-    if (connectedEntryIds.length > 0 && ent.created_by && !connectedEntryIds.includes(ent.created_by)) return false;
-    return true;
-  };
 
   const currentList =
     activeTab === 'awaiting'
@@ -567,11 +557,11 @@ export const DisbursementPage: React.FC = () => {
                         {canAddEntry && req.status === 'approved' && remainingUnentered > 0 && !isPendingHead && (
                           <button
                             type="button"
-                            onClick={() => setEntryModalTarget(req)}
+                            onClick={() => navigate(`/requests/${req.id}`)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-sky-300 bg-sky-50 text-sky-800 text-xs font-bold hover:bg-sky-100 transition-colors cursor-pointer shadow-2xs"
                           >
-                            <PlusCircle className="w-3.5 h-3.5 text-sky-600" />
-                            <span>+ Add Entry #{nextEntryNo}</span>
+                            <ExternalLink className="w-3.5 h-3.5 text-sky-600" />
+                            <span>Open Details to Add Entry #{nextEntryNo}</span>
                           </button>
                         )}
                       </div>
@@ -582,17 +572,18 @@ export const DisbursementPage: React.FC = () => {
                             <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
                             <span>
                               {canAddEntry
-                                ? 'No payment entries created yet. Click "+ Add Entry #1" to record the first entry with Cash/Bank selection and TDS status.'
+                                ? 'No payment entries created yet. Please open the request to review approved documents before adding the entry.'
                                 : 'Awaiting payment entries from an Entry Only account before disbursement can proceed.'}
                             </span>
                           </div>
                           {canAddEntry && req.status === 'approved' && !isPendingHead && (
                             <button
                               type="button"
-                              onClick={() => setEntryModalTarget(req)}
-                              className="shrink-0 self-start sm:self-auto px-3 py-1.5 rounded-lg bg-sky-600 text-white font-bold text-xs hover:bg-sky-700 transition-colors cursor-pointer"
+                              onClick={() => navigate(`/requests/${req.id}`)}
+                              className="shrink-0 self-start sm:self-auto px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
                             >
-                              + Add Entry #1
+                              <span>Open Request to Add Entry</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
                             </button>
                           )}
                         </div>
@@ -603,8 +594,8 @@ export const DisbursementPage: React.FC = () => {
                             const isEntryApproved = ent.status === 'approved';
                             const isEntryRejected = ent.status === 'rejected';
                             const isEntryPaid = ent.status === 'paid';
-                            const isCashierMatch = isEntryForThisCashier(ent);
-                            const canPayThisEntry = canPay && isEntryApproved && isCashierMatch && !isPendingHead;
+                            const payCheck = isPaymentUserAllowedForEntry(user, ent, req, dir.users);
+                            const canPayThisEntry = canPay && isEntryApproved && payCheck.allowed && !isPendingHead;
                             const isCashMode = ent.entry_type === 'cash';
 
                             return (
@@ -696,9 +687,12 @@ export const DisbursementPage: React.FC = () => {
                                           {isCashMode ? 'Settle Cash Entry' : 'Pay Entry'} #{ent.entry_no} ({formatINR(entryPayable(ent))})
                                         </span>
                                       </button>
-                                    ) : isPaymentOnly && !isCashierMatch ? (
-                                      <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded-md border border-slate-200">
-                                        Routed to {isCashMode ? 'Cash' : 'Bank'} Dealer Account
+                                    ) : isPaymentOnly && !payCheck.allowed ? (
+                                      <span
+                                        className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-1 rounded-md border border-amber-200 max-w-[240px] truncate"
+                                        title={payCheck.reason}
+                                      >
+                                        {payCheck.reason || 'Restricted to linked cashier'}
                                       </span>
                                     ) : (
                                       <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">

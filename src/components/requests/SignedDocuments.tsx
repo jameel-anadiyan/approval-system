@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Download, ExternalLink, FileCheck, Loader2, UserCheck } from 'lucide-react';
+import { CheckCircle2, Download, ExternalLink, Eye, FileCheck, Loader2, UserCheck } from 'lucide-react';
 import { RequestRecord, RequestFile } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
 import { downloadStoredFile, useSignedUrl } from '../../lib/files';
 import { VoicePlayer } from './VoicePlayer';
+import { SignedDocPreviewModal } from './SignedDocPreviewModal';
 
 interface SignedDocumentsProps {
   request: RequestRecord;
@@ -13,7 +14,7 @@ interface SignedDocumentsProps {
   onAssignEntry?: () => void;
 }
 
-/** Approved / paid: signed packet + each stamped document, each downloadable. */
+/** Approved / paid: signed packet + each stamped document, each downloadable and previewable. */
 export const SignedDocuments: React.FC<SignedDocumentsProps> = ({
   request,
   isPaymentNeeded = false,
@@ -24,6 +25,7 @@ export const SignedDocuments: React.FC<SignedDocumentsProps> = ({
   const { isBackendConnected } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
 
   const signed = [...(request.signed_files || [])].sort((a, b) => Number(!!b.is_packet) - Number(!!a.is_packet));
   const clarifFiles = new Map(
@@ -71,16 +73,34 @@ export const SignedDocuments: React.FC<SignedDocumentsProps> = ({
         </div>
 
         {packet && (
-          <button
-            type="button"
-            id="download-signed-packet"
-            onClick={() => download(packet.storage_path, packet.file_name || `${request.approval_no}_packet.pdf`, packet.id)}
-            disabled={busy === packet.id}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all shrink-0 disabled:opacity-60"
-          >
-            {busy === packet.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            <span>Download Signed PDF</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <button
+              type="button"
+              id="preview-signed-packet"
+              onClick={() =>
+                setPreviewTarget({
+                  path: packet.storage_path,
+                  name: packet.file_name || `${request.approval_no}_packet.pdf`,
+                  approvalNo: request.approval_no,
+                })
+              }
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-900 font-bold text-xs shadow-xs transition-all cursor-pointer"
+            >
+              <Eye className="w-4 h-4 text-emerald-700" />
+              <span>Preview Approved Doc</span>
+            </button>
+
+            <button
+              type="button"
+              id="download-signed-packet"
+              onClick={() => download(packet.storage_path, packet.file_name || `${request.approval_no}_packet.pdf`, packet.id)}
+              disabled={busy === packet.id}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all shrink-0 disabled:opacity-60 cursor-pointer"
+            >
+              {busy === packet.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span>Download PDF</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -141,15 +161,27 @@ export const SignedDocuments: React.FC<SignedDocumentsProps> = ({
                 <span className="hidden sm:inline font-mono text-[10px] text-slate-400" title={s.sha256}>
                   {s.sha256.slice(0, 10)}…
                 </span>
-                <button
-                  type="button"
-                  onClick={() => download(s.storage_path, name, s.id)}
-                  disabled={busy === s.id}
-                  className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-                  aria-label={`Download ${name}`}
-                >
-                  {busy === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTarget({ path: s.storage_path, name, approvalNo: request.approval_no })}
+                    className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer"
+                    aria-label={`Preview ${name}`}
+                    title="Preview document"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => download(s.storage_path, name, s.id)}
+                    disabled={busy === s.id}
+                    className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 cursor-pointer"
+                    aria-label={`Download ${name}`}
+                    title="Download document"
+                  >
+                    {busy === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </li>
             );
           })}
@@ -160,6 +192,15 @@ export const SignedDocuments: React.FC<SignedDocumentsProps> = ({
         <p className="text-[11px] text-emerald-800">Signed files are being prepared. Refresh in a moment.</p>
       )}
       {error && <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800">{error}</div>}
+
+      {/* Preview Modal */}
+      <SignedDocPreviewModal
+        isOpen={Boolean(previewTarget)}
+        onClose={() => setPreviewTarget(null)}
+        storagePath={previewTarget?.path || null}
+        fileName={previewTarget?.name || 'signed_approval.pdf'}
+        approvalNo={previewTarget?.approvalNo || request.approval_no}
+      />
     </div>
   );
 };
