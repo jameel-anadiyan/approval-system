@@ -71,7 +71,83 @@ alter table public.disbursement_entries
   add constraint disbursement_entries_tds_amount_check check (tds_amount >= 0);
 
 alter table public.request_payments
-  add column if not exists paid_by_person_name text;
+  add column if not exists paid_by_person_name text,
+  add column if not exists document_storage_path text,
+  add column if not exists document_name text;
+
+-- Safeguard: ensure request_actions.visible_to_requester drops strict not-null, defaults to true and coalesce inside _log_action
+alter table public.request_actions alter column visible_to_requester drop not null;
+alter table public.request_actions alter column visible_to_requester set default true;
+
+create or replace function public.trg_request_actions_visible_default()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.visible_to_requester is null then
+    new.visible_to_requester := true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_request_actions_visible_default on public.request_actions;
+create trigger trg_request_actions_visible_default
+  before insert on public.request_actions
+  for each row
+  execute function public.trg_request_actions_visible_default();
+
+create or replace function public._log_action(
+  p_request_id uuid, p_actor public.profiles, p_action text,
+  p_from public.request_status, p_to public.request_status,
+  p_remarks text, p_visible boolean default true)
+returns void language sql security definer set search_path = '' as $$
+  insert into public.request_actions
+    (request_id, actor_id, actor_name, actor_role, action, from_status, to_status, remarks, visible_to_requester)
+  values (p_request_id, p_actor.id, p_actor.full_name, p_actor.role, p_action, p_from, p_to,
+          nullif(btrim(p_remarks), ''), coalesce(p_visible, true))
+$$;
+
+-- Storage RLS: allow disbursement accounts (and admins) to upload payment documents
+drop policy if exists "request-files payment doc insert" on storage.objects;
+create policy "request-files payment doc insert" on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'request-files'
+    and (
+      exists (
+        select 1 from public.profiles me
+        where me.id = auth.uid() and me.is_active
+          and (me.role = 'admin' or me.role = 'disbursement')
+      )
+      or public.can_view_request(public.storage_request_id(name))
+    )
+  );
+
+drop policy if exists "request-files payment doc delete" on storage.objects;
+create policy "request-files payment doc delete" on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'request-files'
+    and (
+      exists (
+        select 1 from public.profiles me
+        where me.id = auth.uid() and me.is_active
+          and (me.role = 'admin' or me.role = 'disbursement')
+      )
+      or public.can_view_request(public.storage_request_id(name))
+    )
+  );
+
+drop policy if exists "request-files payment doc read" on storage.objects;
+create policy "request-files payment doc read" on storage.objects for select to authenticated
+  using (
+    bucket_id = 'request-files'
+    and (
+      exists (
+        select 1 from public.profiles me
+        where me.id = auth.uid() and me.is_active
+          and (me.role = 'admin' or me.role = 'disbursement')
+      )
+      or public.can_view_request(public.storage_request_id(name))
+    )
+  );
 
 -- Entries paid before this migration were paid in full.
 update public.disbursement_entries
@@ -894,6 +970,11 @@ grant execute on function public.cancel_disbursement_entry(uuid, text) to authen
 -- The cashier can only pay the EXACT amount the approver approved (the full
 -- entry amount, or the partial figure the approver typed).
 
+-- Drop previous overloaded signatures to avoid PostgREST ambiguity
+drop function if exists public.pay_disbursement_entry(uuid, numeric, date, text, text, text);
+drop function if exists public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text);
+drop function if exists public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text, text, text);
+
 create or replace function public.pay_disbursement_entry(
   p_entry_id uuid,
   p_amount numeric default null,
@@ -901,7 +982,9 @@ create or replace function public.pay_disbursement_entry(
   p_payment_mode text default null,
   p_payment_ref text default null,
   p_remarks text default null,
-  p_passkey text default null
+  p_passkey text default null,
+  p_document_storage_path text default null,
+  p_document_name text default null
 )
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -919,6 +1002,7 @@ declare
   v_entry_left numeric;
   v_tds_settle numeric := 0;
   v_by text;
+  v_clean_mode text;
 begin
   me := public._me();
   if me.role <> 'admin' and (me.role <> 'disbursement' or coalesce(me.disbursement_type, 'entry_only') <> 'payment_only') then
@@ -943,12 +1027,23 @@ begin
     raise exception 'This entry is not in an approved payable status (current: %)', e.status;
   end if;
 
-  -- Payment Dealer Mode check (cash vs bank)
+  -- Payment Dealer Mode check (account restriction)
   if me.role <> 'admin' and me.payment_dealer_type is not null and me.payment_dealer_type <> 'both' then
     if me.payment_dealer_type <> e.entry_type then
       raise exception 'Dealer mismatch: This account is a % dealer, but Entry #% is designated as a % entry',
         upper(me.payment_dealer_type), e.entry_no, upper(e.entry_type);
     end if;
+  end if;
+
+  -- Strict Entry Mode check:
+  -- If entry is cash: mode MUST be Cash.
+  -- If entry is bank: mode CANNOT be Cash.
+  v_clean_mode := btrim(coalesce(p_payment_mode, case when e.entry_type = 'cash' then 'Cash' else 'Bank Transfer' end));
+  if e.entry_type = 'cash' and lower(v_clean_mode) <> 'cash' then
+    raise exception 'This entry is defined as Cash payment. Bank modes are not allowed.';
+  end if;
+  if e.entry_type = 'bank' and lower(v_clean_mode) = 'cash' then
+    raise exception 'This entry is defined as Bank transfer. Cash mode is not allowed.';
   end if;
 
   select * into r from public.requests where id = e.request_id for update;
@@ -1014,13 +1109,16 @@ begin
 
   insert into public.request_payments (
     request_id, amount, payment_date, payment_mode, payment_ref, remarks,
-    paid_by, paid_by_name, paid_by_person_name, entry_id
+    paid_by, paid_by_name, paid_by_person_name, entry_id,
+    document_storage_path, document_name
   ) values (
     r.id, v_amt, v_date,
-    nullif(btrim(coalesce(p_payment_mode, case when e.entry_type = 'cash' then 'Cash' else 'Bank Transfer' end)), ''),
+    nullif(v_clean_mode, ''),
     nullif(btrim(p_payment_ref), ''),
     nullif(btrim(p_remarks), ''),
-    me.id, me.full_name, v_by, e.id
+    me.id, me.full_name, v_by, e.id,
+    nullif(btrim(p_document_storage_path), ''),
+    nullif(btrim(p_document_name), '')
   ) returning id into v_payment_id;
 
   v_entry_paid := round(coalesce(e.paid_amount, 0) + v_amt, 2);
@@ -1052,7 +1150,7 @@ begin
     paid_at = case when v_full then now() else paid_at end,
     paid_by = case when v_full then me.id else paid_by end,
     payment_date = case when v_full then v_date else payment_date end,
-    payment_mode = coalesce(nullif(btrim(p_payment_mode), ''), payment_mode),
+    payment_mode = coalesce(nullif(v_clean_mode, ''), payment_mode),
     payment_ref = coalesce(nullif(btrim(p_payment_ref), ''), payment_ref),
     payment_remarks = coalesce(nullif(btrim(p_remarks), ''), payment_remarks),
     updated_at = now()
@@ -1063,9 +1161,10 @@ begin
     'approved'::public.request_status,
     case when v_full then 'paid'::public.request_status else 'approved'::public.request_status end,
     'Entry #' || e.entry_no || ' disbursed by ' || v_by || ': ₹' || to_char(v_amt, 'FM999999999990.00')
-      || ' via ' || coalesce(p_payment_mode, upper(coalesce(e.entry_type, 'bank')))
+      || ' via ' || coalesce(v_clean_mode, upper(coalesce(e.entry_type, 'bank')))
       || case when v_tds_settle > 0 then ' · TDS ₹' || to_char(v_tds_settle, 'FM999999999990.00') || ' deducted from balance' else '' end
       || case when p_payment_ref is not null and btrim(p_payment_ref) <> '' then ' (Ref: ' || btrim(p_payment_ref) || ')' else '' end
+      || case when nullif(btrim(p_document_name), '') is not null then ' (doc attached: ' || p_document_name || ')' else '' end
       || case when v_entry_left > 0 then ' · Entry balance ₹' || to_char(v_entry_left, 'FM999999999990.00') || ' sent back for verification' else '' end
       || case when v_full then ' [Fully Paid]' else ' [Request balance: ₹' || to_char(r.amount - v_paid, 'FM999999999990.00') || ']' end,
     true
@@ -1088,17 +1187,19 @@ begin
     'success', true,
     'payment_id', v_payment_id,
     'entry_id', e.id,
-    'amount', v_amt,
-    'total_paid', v_paid,
-    'tds_deducted', v_tds_settle,
-    'entry_balance', greatest(v_entry_left, 0),
-    'is_fully_paid', v_full,
-    'fully_paid', v_full
+    'paid_amount', v_amt,
+    'entry_paid_total', v_entry_paid,
+    'entry_balance', v_entry_left,
+    'request_paid_total', v_paid,
+    'request_balance', greatest(0, r.amount - v_paid),
+    'fully_paid', v_full,
+    'tds_settled', v_tds_settle,
+    'disbursed_by', v_by
   );
 end $$;
 
-revoke execute on function public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text) from public, anon;
-grant execute on function public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text) to authenticated;
+revoke execute on function public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text, text, text) from public, anon;
+grant execute on function public.pay_disbursement_entry(uuid, numeric, date, text, text, text, text, text, text) to authenticated;
 
 -- ──────────────────── 11. submit_request: clerks pick the entry account too ──
 -- Same body as 0054; the only change is that the Disbursement Entry Account is

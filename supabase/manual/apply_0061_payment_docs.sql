@@ -68,8 +68,25 @@ create policy "request-files payment doc read" on storage.objects for select to 
     )
   );
 
--- Safeguard: ensure request_actions.visible_to_requester defaults to true and coalesce inside _log_action
+-- Safeguard: ensure request_actions.visible_to_requester drops strict not-null, defaults to true and coalesce inside _log_action
+alter table public.request_actions alter column visible_to_requester drop not null;
 alter table public.request_actions alter column visible_to_requester set default true;
+
+create or replace function public.trg_request_actions_visible_default()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.visible_to_requester is null then
+    new.visible_to_requester := true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_request_actions_visible_default on public.request_actions;
+create trigger trg_request_actions_visible_default
+  before insert on public.request_actions
+  for each row
+  execute function public.trg_request_actions_visible_default();
 
 create or replace function public._log_action(
   p_request_id uuid, p_actor public.profiles, p_action text,
