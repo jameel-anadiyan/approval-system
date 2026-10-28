@@ -1,12 +1,26 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Download, ExternalLink, FileCheck, Loader2 } from 'lucide-react';
+import { CheckCircle2, Download, ExternalLink, FileCheck, Loader2, UserCheck } from 'lucide-react';
 import { RequestRecord, RequestFile } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
 import { downloadStoredFile, useSignedUrl } from '../../lib/files';
 import { VoicePlayer } from './VoicePlayer';
 
+interface SignedDocumentsProps {
+  request: RequestRecord;
+  isPaymentNeeded?: boolean;
+  canManageEntry?: boolean;
+  entriesCount?: number;
+  onAssignEntry?: () => void;
+}
+
 /** Approved / paid: signed packet + each stamped document, each downloadable. */
-export const SignedDocuments: React.FC<{ request: RequestRecord }> = ({ request }) => {
+export const SignedDocuments: React.FC<SignedDocumentsProps> = ({
+  request,
+  isPaymentNeeded = false,
+  canManageEntry = false,
+  entriesCount = 0,
+  onAssignEntry,
+}) => {
   const { isBackendConnected } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +83,39 @@ export const SignedDocuments: React.FC<{ request: RequestRecord }> = ({ request 
           </button>
         )}
       </div>
+
+      {/* Entry Officer section on approved document for payment-needed requests */}
+      {isPaymentNeeded && (
+        <div className="pt-3 border-t border-emerald-200/80 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <UserCheck className="w-4 h-4 text-emerald-800 shrink-0" />
+            <div className="text-xs">
+              <span className="text-emerald-900/80 font-medium">Disbursement Entry Account: </span>
+              {request.assigned_entry_user_name ? (
+                <strong className="text-emerald-950 font-bold">{request.assigned_entry_user_name}</strong>
+              ) : (
+                <span className="text-amber-800 font-semibold italic">Not assigned yet</span>
+              )}
+            </div>
+          </div>
+          {entriesCount === 0 ? (
+            canManageEntry && onAssignEntry && (
+              <button
+                type="button"
+                id="signed-packet-assign-btn"
+                onClick={onAssignEntry}
+                className="px-3 py-1 text-xs font-bold rounded-lg border border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-900 shadow-2xs transition-colors cursor-pointer shrink-0"
+              >
+                {request.assigned_entry_user_id ? 'Change Entry Officer' : 'Assign Entry Officer'}
+              </button>
+            )
+          ) : (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-200">
+              Entry Locked ({entriesCount} entered)
+            </span>
+          )}
+        </div>
+      )}
 
       {signed.length > 1 && (
         <ul className="divide-y divide-emerald-100 bg-white/70 rounded-xl border border-emerald-100">

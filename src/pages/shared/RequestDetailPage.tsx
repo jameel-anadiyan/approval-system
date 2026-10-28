@@ -277,6 +277,18 @@ export const RequestDetailPage: React.FC = () => {
 
   const rType = typeOf(request);
   const isPaymentNeeded = rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer';
+  const isHead =
+    role === 'head' ||
+    role === 'regional_head' ||
+    (Boolean(request.owner_head_id) && user?.id === request.owner_head_id) ||
+    isOwningHead;
+  const canManageEntryAccount =
+    isPaymentNeeded &&
+    (role === 'admin' || role === 'clerk' || isHead) &&
+    request.status !== 'draft' &&
+    request.status !== 'cancelled' &&
+    request.status !== 'rejected' &&
+    request.status !== 'withdrawn';
   const isDisbursement = role === 'disbursement';
   const isStockMonitorUser = isDisbursement && user?.disbursement_type === 'stock_transfer_monitor';
   const isEntryOnly = isDisbursement && !isStockMonitorUser && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
@@ -986,45 +998,67 @@ export const RequestDetailPage: React.FC = () => {
                   Void
                 </span>
               )}
-              <SignedDocuments request={request} />
+              <SignedDocuments
+                request={request}
+                isPaymentNeeded={isPaymentNeeded}
+                canManageEntry={canManageEntryAccount}
+                entriesCount={entries.length}
+                onAssignEntry={() => setModalState('assign_entry_user')}
+              />
             </div>
           )}
 
-          {/* Pre-approval Entry Officer Assignment Card */}
-          {isPaymentNeeded && request.status !== 'draft' && request.status !== 'approved' && request.status !== 'paid' && request.status !== 'cancelled' && (
-            <div className="bg-white rounded-2xl border border-indigo-100 p-4 sm:p-5 shadow-xs text-xs space-y-3">
+          {/* Disbursement Entry Officer Assignment Card (Available on all payment-needed requests before any entry is entered) */}
+          {isPaymentNeeded && request.status !== 'draft' && request.status !== 'cancelled' && (
+            <div className="bg-white rounded-2xl border border-indigo-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
                     <UserCheck className="w-4 h-4 text-indigo-600" />
                   </div>
                   <div>
-                    <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
-                      Disbursement Entry Account (Pre-assignment)
-                    </p>
-                    <p className="text-xs font-bold text-slate-900 truncate">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+                        Disbursement Entry Account {request.status === 'approved' ? '(Post-Approval Assignment)' : '(Pre-assignment)'}
+                      </p>
+                      {entries.length > 0 && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                          Locked · {entries.length} {entries.length === 1 ? 'entry' : 'entries'} created
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-bold text-slate-900 truncate mt-0.5">
                       {request.assigned_entry_user_name ? (
                         <span className="text-indigo-950 font-extrabold">{request.assigned_entry_user_name}</span>
                       ) : (
-                        <span className="text-amber-700 font-semibold italic">Not assigned yet (selected during routing or by Head)</span>
+                        <span className="text-amber-700 font-semibold italic">Not assigned yet (selected by Head or Clerk)</span>
                       )}
                     </p>
                   </div>
                 </div>
-                {(role === 'admin' || role === 'clerk' || isOwningHead) && (
-                  <button
-                    type="button"
-                    onClick={() => setModalState('assign_entry_user')}
-                    className="self-end sm:self-auto px-3 py-1.5 text-xs font-bold rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer shadow-2xs"
-                  >
-                    {request.assigned_entry_user_id ? 'Change Entry Officer' : 'Assign Entry Officer'}
-                  </button>
-                )}
+                <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                  {entries.length === 0 ? (
+                    canManageEntryAccount && (
+                      <button
+                        type="button"
+                        id="assign-entry-user-card-btn"
+                        onClick={() => setModalState('assign_entry_user')}
+                        className="px-3.5 py-1.5 text-xs font-bold rounded-lg border border-indigo-300 bg-indigo-600 hover:bg-indigo-700 text-white transition-colors cursor-pointer shadow-2xs"
+                      >
+                        {request.assigned_entry_user_id ? 'Change Entry Officer' : 'Assign Entry Officer'}
+                      </button>
+                    )
+                  ) : (
+                    <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                      Entry Entered (Locked)
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           )}
 
-          {rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && (request.status === 'paid' || ((request.status === 'approved' || request.status === 'cancelled') && (pay.paid > 0 || (request.disbursement_entries?.length || 0) > 0))) && (
+          {isPaymentNeeded && (request.status === 'approved' || request.status === 'paid' || (request.status === 'cancelled' && (pay.paid > 0 || entries.length > 0))) && (
             <div className="bg-white rounded-2xl border border-teal-200 p-4 sm:p-5 shadow-xs text-xs space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 font-bold text-teal-800 text-sm">
@@ -1078,7 +1112,7 @@ export const RequestDetailPage: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                   {entries.length === 0 ? (
-                    (role === 'admin' || role === 'clerk' || isOwningHead) && (
+                    canManageEntryAccount && (
                       <button
                         type="button"
                         onClick={() => setModalState('assign_entry_user')}
@@ -1817,6 +1851,20 @@ export const RequestDetailPage: React.FC = () => {
               >
                 <Ban className="w-3.5 h-3.5" />
                 <span>Cancel Approval</span>
+              </button>
+            )}
+
+            {/* Entry Account Assignment / Change for Head, Clerk, or Admin (locked once any entry is entered) */}
+            {canManageEntryAccount && entries.length === 0 && (
+              <button
+                type="button"
+                id="assign-entry-officer-action-bar-btn"
+                onClick={() => setModalState('assign_entry_user')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold text-xs transition-colors cursor-pointer"
+                title={request.assigned_entry_user_id ? `Assigned to ${request.assigned_entry_user_name}. Click to change.` : 'Assign Entry Only Account'}
+              >
+                <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                <span>{request.assigned_entry_user_id ? 'Change Entry Officer' : 'Assign Entry Officer'}</span>
               </button>
             )}
 

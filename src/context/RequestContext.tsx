@@ -940,7 +940,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     entryUserId: string
   ): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
-    if (!['clerk', 'head', 'admin'].includes(user.role)) {
+    if (!['clerk', 'head', 'regional_head', 'admin'].includes(user.role)) {
       return { success: false, error: 'Only Clerk, Head, or Admin can assign an Entry account.' };
     }
 
@@ -965,13 +965,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Cannot change Entry account after disbursement entries have already been made.' };
     }
 
+    const targetUser = MOCK_USERS.find((u) => u.id === entryUserId);
     updateLocalRequests((prev) =>
       prev.map((r) =>
         r.id === requestId
           ? {
               ...r,
               assigned_entry_user_id: entryUserId,
-              assigned_entry_user_name: 'Assigned Entry Officer',
+              assigned_entry_user_name: targetUser?.full_name || 'Assigned Entry Officer',
               assigned_entry_at: new Date().toISOString(),
               assigned_entry_by: user.id,
             }

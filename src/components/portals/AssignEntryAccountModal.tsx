@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { Profile, RequestRecord } from '../../types/database';
-import { useDirectory } from '../../lib/directory';
+import { useDirectory, fetchActiveEntryOfficers, isEntryCheckingUser } from '../../lib/directory';
+import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { errMsg } from '../../lib/errorUtils';
 import { UserCheck, ShieldAlert, CheckCircle2 } from 'lucide-react';
@@ -17,21 +18,52 @@ export const AssignEntryAccountModal: React.FC<AssignEntryAccountModalProps> = (
   onClose,
   request,
 }) => {
+  const { isBackendConnected } = useAuth();
   const { users } = useDirectory();
   const { assignDisbursementEntryUser } = useRequests();
+  const [extraOfficers, setExtraOfficers] = useState<Profile[]>([]);
 
-  // Active Entry Only disbursement officers
-  const entryOfficers = users.filter(
-    (u) =>
-      u.is_active &&
-      (u.role === 'admin' || (u.role === 'disbursement' && (u.disbursement_type === 'entry_only' || !u.disbursement_type)))
-  );
+  // Strictly active Entry Only accounts (no admin, no payment_only, no entry_approver, no entry checking person)
+  const entryOfficers = React.useMemo(() => {
+    const list = [...users, ...extraOfficers];
+    const unique = new Map<string, Profile>();
+    for (const u of list) {
+      if (
+        u.is_active &&
+        u.role === 'disbursement' &&
+        u.disbursement_type === 'entry_only' &&
+        !isEntryCheckingUser(u)
+      ) {
+        unique.set(u.id, u);
+      }
+    }
+    return Array.from(unique.values()).sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }, [users, extraOfficers]);
+
+  // Load active entry officers directly to ensure clerks & heads always see them
+  React.useEffect(() => {
+    let isMounted = true;
+    fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
+      if (isMounted && officers && officers.length > 0) {
+        setExtraOfficers(officers);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isBackendConnected]);
 
   const [selectedUserId, setSelectedUserId] = useState<string>(
-    request.assigned_entry_user_id || (entryOfficers[0]?.id ?? '')
+    request.assigned_entry_user_id || ''
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!selectedUserId && entryOfficers.length > 0) {
+      setSelectedUserId(request.assigned_entry_user_id || entryOfficers[0].id);
+    }
+  }, [entryOfficers, selectedUserId, request.assigned_entry_user_id]);
 
   const activeEntriesCount = (request.disbursement_entries || []).filter((e) => e.status !== 'cancelled').length;
   const isLocked = activeEntriesCount > 0;
@@ -91,21 +123,27 @@ export const AssignEntryAccountModal: React.FC<AssignEntryAccountModalProps> = (
           <label htmlFor="assign-entry-user" className="text-xs font-bold text-slate-700 block mb-1">
             Disbursement Entry Only Account <span className="text-rose-500">*</span>
           </label>
-          <select
-            id="assign-entry-user"
-            required
-            disabled={isLocked || isSubmitting}
-            value={selectedUserId}
-            onChange={(e) => setSelectedUserId(e.target.value)}
-            className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden bg-white disabled:bg-slate-100 disabled:text-slate-500"
-          >
-            <option value="">Select Entry Only Officer…</option>
-            {entryOfficers.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.full_name} (@{u.username})
-              </option>
-            ))}
-          </select>
+          {entryOfficers.length === 0 ? (
+            <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-xs">
+              No active Disbursement Entry Only accounts found. Please ensure an active Disbursement user has their account type set to &quot;Entry Only&quot;.
+            </div>
+          ) : (
+            <select
+              id="assign-entry-user"
+              required
+              disabled={isLocked || isSubmitting}
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden bg-white disabled:bg-slate-100 disabled:text-slate-500"
+            >
+              <option value="">Select Entry Only Officer…</option>
+              {entryOfficers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name} (@{u.username})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {error && (

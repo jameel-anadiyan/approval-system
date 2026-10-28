@@ -5,10 +5,11 @@ import { useRequests } from '../../context/RequestContext';
 import { formatINR, formatISTDate, TYPE_BADGES, TYPE_LABELS, typeOf } from '../../lib/formatters';
 import {
   CheckCircle2, Search, Download, Eye, FileText, Building2, Store, Calendar,
-  Filter, ShieldCheck, Banknote, Sparkles
+  Filter, ShieldCheck, Banknote, Sparkles, UserCheck
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState';
 import { canUserViewApprovedRequest } from '../../lib/workflow';
+import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import type { RequestType, RequestRecord } from '../../types/database';
 
 export const ApprovedRequestsPage: React.FC = () => {
@@ -19,6 +20,10 @@ export const ApprovedRequestsPage: React.FC = () => {
   const [query, setQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
+  const [assignTarget, setAssignTarget] = useState<RequestRecord | null>(null);
+
+  const isHeadRole = role === 'head' || role === 'regional_head';
+  const canManageEntryAccount = role === 'admin' || role === 'clerk' || isHeadRole;
 
   // Filter approved or paid requests that the current user has access to based on their role:
   // - Head: only respective head's approvals (approved by this head or by admin for their department/scope)
@@ -232,6 +237,45 @@ export const ApprovedRequestsPage: React.FC = () => {
                       <span className="font-semibold text-slate-700 block">{formatISTDate(req.decided_at || req.updated_at)}</span>
                     </div>
                   </div>
+
+                  {/* Disbursement Entry Account row for payment-needed requests */}
+                  {t !== 'discount' && t !== 'non_cash' && t !== 'stock_transfer' && (
+                    <div className="mb-3 px-3 py-2 bg-indigo-50/70 border border-indigo-100 rounded-xl flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">
+                            Disbursement Entry Account
+                          </span>
+                          <span className="text-xs font-bold text-slate-900 truncate block">
+                            {req.assigned_entry_user_name ? (
+                              <span className="text-indigo-950 font-extrabold">{req.assigned_entry_user_name}</span>
+                            ) : (
+                              <span className="text-amber-700 italic font-medium">Not assigned yet</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                      {((req.disbursement_entries || []).filter((e) => e.status !== 'cancelled').length === 0) ? (
+                        canManageEntryAccount && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAssignTarget(req);
+                            }}
+                            className="px-2.5 py-1 text-xs font-bold rounded-lg border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 shadow-2xs transition-colors shrink-0 cursor-pointer"
+                          >
+                            {req.assigned_entry_user_id ? 'Change' : 'Assign'}
+                          </button>
+                        )
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700 shrink-0">
+                          Locked ({(req.disbursement_entries || []).filter((e) => e.status !== 'cancelled').length} entries)
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
@@ -264,6 +308,15 @@ export const ApprovedRequestsPage: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {/* Assign Entry Account Modal */}
+      {assignTarget && (
+        <AssignEntryAccountModal
+          isOpen={true}
+          onClose={() => setAssignTarget(null)}
+          request={assignTarget}
+        />
       )}
     </div>
   );

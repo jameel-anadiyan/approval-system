@@ -178,6 +178,42 @@ export function useDirectory() {
           }));
           setUsers(merged);
         }
+
+        // Ensure active Entry Only disbursement accounts are included for Clerk & Head routing/assignment
+        if (user && (user.role === 'clerk' || user.role === 'head')) {
+          try {
+            const { data: rpcOfficers, error: rpcErr } = await supabase.rpc('get_active_entry_only_users');
+            let eoList: Profile[] = [];
+            if (!rpcErr && rpcOfficers && (rpcOfficers as Profile[]).length > 0) {
+              eoList = rpcOfficers as Profile[];
+            } else {
+              const { data: directProfiles } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('role', 'disbursement')
+                .eq('disbursement_type', 'entry_only')
+                .eq('is_active', true);
+              if (directProfiles && directProfiles.length > 0) {
+                eoList = directProfiles as Profile[];
+              }
+            }
+            const filteredEo = eoList.filter((eo) => !isEntryCheckingUser(eo));
+            if (filteredEo.length > 0) {
+              setUsers((prev) => {
+                const map = new Map<string, Profile>(prev.map((u) => [u.id, u]));
+                for (const eo of filteredEo) {
+                  if (!map.has(eo.id)) {
+                    map.set(eo.id, eo);
+                  }
+                }
+                return Array.from(map.values());
+              });
+            }
+          } catch (e) {
+            console.warn('Could not load entry-only disbursement officers:', e);
+          }
+        }
+
         setCategories((c.data as WorkCategory[]) ?? []);
       } else {
         setDepartments(MOCK_DEPARTMENTS);
@@ -213,8 +249,10 @@ export function useDirectory() {
     setDepartments((prev) =>
       input.id
         ? prev.map((d) => (d.id === input.id ? { ...d, ...input, is_active: input.is_active ?? d.is_active } : d))
-        : [{ id: `dept-${Date.now()}`, name: input.name, code: input.code, is_active: true,
-             created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]
+        : [{
+          id: `dept-${Date.now()}`, name: input.name, code: input.code, is_active: true,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        }, ...prev]
     );
     return { success: true };
   };
@@ -234,8 +272,10 @@ export function useDirectory() {
     setShops((prev) =>
       input.id
         ? prev.map((s) => (s.id === input.id ? { ...s, ...input, is_active: input.is_active ?? s.is_active } : s))
-        : [{ id: `shop-${Date.now()}`, name: input.name, code: input.code, is_active: true,
-             created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]
+        : [{
+          id: `shop-${Date.now()}`, name: input.name, code: input.code, is_active: true,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        }, ...prev]
     );
     return { success: true };
   };
@@ -508,11 +548,11 @@ export function useDirectory() {
       prev.map((u) =>
         u.id === userId
           ? {
-              ...u,
-              mandatory_head_consultation: enabled,
-              mandatory_consultation_head_id: enabled ? (targetHeadId || null) : null,
-              mandatory_consultation_head_name: enabled && targetHead ? targetHead.full_name : null,
-            }
+            ...u,
+            mandatory_head_consultation: enabled,
+            mandatory_consultation_head_id: enabled ? (targetHeadId || null) : null,
+            mandatory_consultation_head_name: enabled && targetHead ? targetHead.full_name : null,
+          }
           : u
       )
     );
@@ -601,7 +641,7 @@ export function useDirectory() {
             window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
           }
         }
-      } catch {}
+      } catch { }
       return next;
     });
     return { success: true };
@@ -635,7 +675,7 @@ export function useDirectory() {
             window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
           }
         }
-      } catch {}
+      } catch { }
       return next;
     });
     return { success: true };
@@ -668,7 +708,7 @@ export function useDirectory() {
             window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
           }
         }
-      } catch {}
+      } catch { }
       return next;
     });
     return { success: true };
@@ -740,8 +780,10 @@ export function useDirectory() {
     setRegions((prev) =>
       input.id
         ? prev.map((r) => (r.id === input.id ? { ...r, ...input, is_active: input.is_active ?? r.is_active, updated_at: new Date().toISOString() } : r))
-        : [{ id: `reg-${Date.now()}`, name: input.name, code: input.code, is_active: input.is_active ?? true,
-             created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]
+        : [{
+          id: `reg-${Date.now()}`, name: input.name, code: input.code, is_active: input.is_active ?? true,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        }, ...prev]
     );
     return { success: true };
   };
@@ -886,12 +928,12 @@ export function useDirectory() {
         prev.map((u) =>
           u.id === userId
             ? {
-                ...u,
-                full_name: cleanFullName,
-                username: cleanUsername,
-                designation: cleanDesignation,
-                updated_at: new Date().toISOString(),
-              }
+              ...u,
+              full_name: cleanFullName,
+              username: cleanUsername,
+              designation: cleanDesignation,
+              updated_at: new Date().toISOString(),
+            }
             : u
         )
       );
@@ -917,12 +959,12 @@ export function useDirectory() {
       prev.map((u) =>
         u.id === userId
           ? {
-              ...u,
-              full_name: cleanFullName,
-              username: cleanUsername,
-              designation: cleanDesignation,
-              updated_at: new Date().toISOString(),
-            }
+            ...u,
+            full_name: cleanFullName,
+            username: cleanUsername,
+            designation: cleanDesignation,
+            updated_at: new Date().toISOString(),
+          }
           : u
       )
     );
@@ -1085,3 +1127,58 @@ export async function saveThreshold(live: boolean, value: number): Promise<Resul
   const { error } = await supabase.rpc('update_setting', { p_key: 'high_value_threshold', p_value: value });
   return error ? { success: false, error: errMsg(error) } : { success: true };
 }
+
+/** Returns true if a profile represents an Entry Checking / Approver user */
+export function isEntryCheckingUser(u?: {
+  disbursement_type?: string | null;
+  full_name?: string | null;
+  username?: string | null;
+  designation?: string | null;
+} | null): boolean {
+  if (!u) return false;
+  if (u.disbursement_type === 'entry_approver') return true;
+  const text = `${u.full_name || ''} ${u.username || ''} ${u.designation || ''}`.toLowerCase();
+  return (
+    text.includes('approv') ||
+    text.includes('check') ||
+    text.includes('verif') ||
+    text.includes('review') ||
+    text.includes('audit')
+  );
+}
+
+/** Reliably loads active Entry Only disbursement officers, using the dedicated RPC with fallbacks */
+export async function fetchActiveEntryOfficers(live: boolean): Promise<Profile[]> {
+  if (!live) {
+    return MOCK_USERS.filter(
+      (u) => u.role === 'disbursement' && u.disbursement_type === 'entry_only' && !isEntryCheckingUser(u) && u.is_active
+    );
+  }
+  let officers: Profile[] = [];
+  try {
+    const { data: rpcOfficers, error: rpcErr } = await supabase.rpc('get_active_entry_only_users');
+    if (!rpcErr && rpcOfficers && (rpcOfficers as Profile[]).length > 0) {
+      officers = rpcOfficers as Profile[];
+    }
+  } catch {
+    // fallback to direct table query
+  }
+  if (officers.length === 0) {
+    try {
+      const { data: directProfiles } = await supabase
+        .from('profiles')
+        .select('id, username, full_name, designation, role, disbursement_type, is_active')
+        .eq('role', 'disbursement')
+        .eq('disbursement_type', 'entry_only')
+        .eq('is_active', true)
+        .order('full_name', { ascending: true });
+      if (directProfiles && directProfiles.length > 0) {
+        officers = directProfiles as Profile[];
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return officers.filter((u) => !isEntryCheckingUser(u));
+}
+

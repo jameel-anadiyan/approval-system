@@ -40,7 +40,20 @@ const DISB_TYPE_STYLES: Record<DisbursementAccountType, { badge: string; active:
     help: 'Sees only approved stock transfers and marks them as Transfer Completed. No payment access.',
   },
 };
-const disbType = (u: Profile): DisbursementAccountType => u.disbursement_type || 'entry_only';
+const disbType = (u: Profile): DisbursementAccountType => {
+  if (u.disbursement_type === 'entry_approver' || u.disbursement_type === 'payment_only' || u.disbursement_type === 'stock_transfer_monitor') {
+    return u.disbursement_type;
+  }
+  const text = `${u.full_name || ''} ${u.username || ''} ${u.designation || ''}`.toLowerCase();
+  if (
+    text.includes('approv') ||
+    text.includes('check') ||
+    text.includes('verif') ||
+    text.includes('review') ||
+    text.includes('audit')
+  ) return 'entry_approver';
+  return u.disbursement_type || 'entry_only';
+};
 
 interface StaffManagerProps {
   title: string;
@@ -88,7 +101,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
     if (!res.canDelete) {
       setDeleteBlockReason(
         res.reason ||
-          'This user cannot be deleted because they have associated requests or activity. You can deactivate their account instead.'
+        'This user cannot be deleted because they have associated requests or activity. You can deactivate their account instead.'
       );
       setDeleteTarget(u);
     } else {
@@ -113,9 +126,18 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
     }
   };
 
+  const [disbTypeFilter, setDisbTypeFilter] = useState<'all' | DisbursementAccountType>('all');
+
   const listed = dir.users.filter(
     (u) => roles.includes(u.role) && (me?.role !== 'head' || u.department_id === me.department_id)
   );
+
+  const visibleUsers = listed.filter((u) => {
+    if (u.role === 'disbursement' && disbTypeFilter !== 'all') {
+      return disbType(u) === disbTypeFilter;
+    }
+    return true;
+  });
   const shopName = (id: string) => {
     const s = dir.shops.find((x) => x.id === id);
     return s ? s.name : 'Unknown shop';
@@ -210,9 +232,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
       </div>
 
       {flash && (
-        <div className={`p-3.5 text-xs rounded-xl flex items-start gap-2 border ${
-          flash.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
-        }`}>
+        <div className={`p-3.5 text-xs rounded-xl flex items-start gap-2 border ${flash.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}>
           {flash.ok ? <Check className="w-4 h-4 shrink-0" /> : <ShieldAlert className="w-4 h-4 shrink-0" />}
           <span>{flash.text}</span>
         </div>
@@ -228,15 +249,75 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
         />
       )}
 
+      {roles.includes('disbursement') && !dir.loading && listed.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs font-semibold">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider px-2">Type:</span>
+            <button
+              type="button"
+              onClick={() => setDisbTypeFilter('all')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${disbTypeFilter === 'all'
+                  ? 'bg-slate-900 text-white shadow-xs font-bold'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+                }`}
+            >
+              All ({listed.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisbTypeFilter('entry_only')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${disbTypeFilter === 'entry_only'
+                  ? 'bg-sky-600 text-white shadow-xs font-bold'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:text-sky-700'
+                }`}
+            >
+              Entry Only ({listed.filter((u) => u.role === 'disbursement' && disbType(u) === 'entry_only').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisbTypeFilter('payment_only')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${disbTypeFilter === 'payment_only'
+                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:text-emerald-700'
+                }`}
+            >
+              Payment Only ({listed.filter((u) => u.role === 'disbursement' && disbType(u) === 'payment_only').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisbTypeFilter('entry_approver')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${disbTypeFilter === 'entry_approver'
+                  ? 'bg-amber-600 text-white shadow-xs font-bold'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:text-amber-700'
+                }`}
+            >
+              Entry Approver ({listed.filter((u) => u.role === 'disbursement' && disbType(u) === 'entry_approver').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisbTypeFilter('stock_transfer_monitor')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${disbTypeFilter === 'stock_transfer_monitor'
+                  ? 'bg-indigo-600 text-white shadow-xs font-bold'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:text-indigo-700'
+                }`}
+            >
+              Stock Transfer ({listed.filter((u) => u.role === 'disbursement' && disbType(u) === 'stock_transfer_monitor').length})
+            </button>
+          </div>
+        </div>
+      )}
+
       {dir.loading ? (
         <LoadingSpinner label="Loading users…" />
-      ) : listed.length === 0 ? (
+      ) : visibleUsers.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-          No users yet. Use “{addLabel}” to create the first one.
+          {disbTypeFilter !== 'all'
+            ? `No ${DISBURSEMENT_TYPE_LABELS[disbTypeFilter]} accounts found.`
+            : `No users yet. Use “${addLabel}” to create the first one.`}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {listed.map((u) => (
+          {visibleUsers.map((u) => (
             <div key={u.id} className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col gap-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-3 min-w-0">
@@ -274,9 +355,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     </span>
                   </div>
                 </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
-                  u.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'
-                }`}>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${u.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'
+                  }`}>
                   {u.is_active ? 'Active' : 'Inactive'}
                 </span>
               </div>
@@ -354,15 +434,15 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
               )}
               {u.role === 'employee' && u.is_active && !u.regional_head_id &&
                 coveringRegionalHeads(dir.users, u.department_id, u.shop_id ?? '').length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setAccessTarget(u)}
-                  className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5 text-left"
-                >
-                  <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-                  Regional Head not assigned — tap to assign
-                </button>
-              )}
+                  <button
+                    type="button"
+                    onClick={() => setAccessTarget(u)}
+                    className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5 text-left"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                    Regional Head not assigned — tap to assign
+                  </button>
+                )}
 
               {(u.role === 'employee' || u.role === 'regional_head') && (
                 <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-600">
@@ -375,11 +455,10 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       return (
                         <span
                           key={uh.head_id}
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                            isDef
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isDef
                               ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
                               : 'border-slate-200 bg-slate-50 text-slate-600'
-                          }`}
+                            }`}
                         >
                           {hName} {isDef && '★'}
                         </span>
@@ -421,11 +500,10 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         id={`disb-type-${t}-${u.id}`}
                         disabled={busyId === u.id || disbType(u) === t}
                         onClick={() => changeDisbType(u, t)}
-                        className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all leading-tight ${
-                          disbType(u) === t
+                        className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all leading-tight ${disbType(u) === t
                             ? DISB_TYPE_STYLES[t].active
                             : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                        }`}
+                          }`}
                       >
                         {t === 'stock_transfer_monitor' ? 'Stock Transfer' : DISBURSEMENT_TYPE_LABELS[t]}
                       </button>
@@ -451,11 +529,10 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                                 setBusyId(null);
                                 if (res.success) show(`Dealer mode updated to ${dm.toUpperCase()} for @${u.username}.`);
                               }}
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase transition-all ${
-                                (u.payment_dealer_type || 'both') === dm
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase transition-all ${(u.payment_dealer_type || 'both') === dm
                                   ? 'bg-emerald-600 text-white shadow-xs'
                                   : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                              }`}
+                                }`}
                             >
                               {dm}
                             </button>
@@ -488,13 +565,11 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     aria-checked={!!u.can_view_stock_transfer_report}
                     disabled={busyId === u.id}
                     onClick={() => toggleStockReport(u)}
-                    className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
-                      u.can_view_stock_transfer_report ? 'bg-indigo-600' : 'bg-slate-300'
-                    }`}
+                    className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${u.can_view_stock_transfer_report ? 'bg-indigo-600' : 'bg-slate-300'
+                      }`}
                   >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                      u.can_view_stock_transfer_report ? 'translate-x-4' : ''
-                    }`} />
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.can_view_stock_transfer_report ? 'translate-x-4' : ''
+                      }`} />
                   </button>
                 </label>
               )}
@@ -513,13 +588,11 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       aria-checked={!!u.can_view_discount_report}
                       disabled={busyId === u.id}
                       onClick={() => toggleReport(u)}
-                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
-                        u.can_view_discount_report ? 'bg-brand-600' : 'bg-slate-300'
-                      }`}
+                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${u.can_view_discount_report ? 'bg-brand-600' : 'bg-slate-300'
+                        }`}
                     >
-                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                        u.can_view_discount_report ? 'translate-x-4' : ''
-                      }`} />
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.can_view_discount_report ? 'translate-x-4' : ''
+                        }`} />
                     </button>
                   </label>
 
@@ -535,13 +608,11 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       aria-checked={!!u.can_view_exhibition_waitlist}
                       disabled={busyId === u.id}
                       onClick={() => toggleWaitlist(u)}
-                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${
-                        u.can_view_exhibition_waitlist ? 'bg-rose-600' : 'bg-slate-300'
-                      }`}
+                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${u.can_view_exhibition_waitlist ? 'bg-rose-600' : 'bg-slate-300'
+                        }`}
                     >
-                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                        u.can_view_exhibition_waitlist ? 'translate-x-4' : ''
-                      }`} />
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.can_view_exhibition_waitlist ? 'translate-x-4' : ''
+                        }`} />
                     </button>
                   </label>
                 </div>
@@ -595,11 +666,10 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     <KeyRound className="w-3.5 h-3.5 text-slate-400" /><span>Reset password</span>
                   </button>
                   <button type="button" disabled={busyId === u.id} onClick={() => toggleActive(u)}
-                    className={`px-3 py-1.5 rounded-lg font-semibold text-xs border disabled:opacity-50 ${
-                      u.is_active
+                    className={`px-3 py-1.5 rounded-lg font-semibold text-xs border disabled:opacity-50 ${u.is_active
                         ? 'border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
                         : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                    }`}>
+                      }`}>
                     {u.is_active ? 'Deactivate' : 'Activate'}
                   </button>
                   {u.id !== me?.id && (

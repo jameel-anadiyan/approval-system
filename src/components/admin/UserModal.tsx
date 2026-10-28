@@ -501,10 +501,10 @@ export const UserModal: React.FC<UserModalProps> = ({
                     Only entries made by selected Entry Only accounts will route to this cashier (leave empty to receive from all).
                   </p>
                   <div className="max-h-36 overflow-y-auto space-y-1.5 p-2 bg-white rounded-xl border border-sky-200">
-                    {users.filter((u) => u.role === 'disbursement' && (u.disbursement_type || 'entry_only') === 'entry_only' && u.is_active).length === 0 ? (
+                    {users.filter((u) => u.role === 'disbursement' && u.disbursement_type === 'entry_only' && u.is_active).length === 0 ? (
                       <span className="text-[11px] text-slate-400 italic block p-1">No active Entry Only accounts found.</span>
                     ) : (
-                      users.filter((u) => u.role === 'disbursement' && (u.disbursement_type || 'entry_only') === 'entry_only' && u.is_active).map((eo) => {
+                      users.filter((u) => u.role === 'disbursement' && u.disbursement_type === 'entry_only' && u.is_active).map((eo) => {
                         const checked = connectedEntryAccounts.includes(eo.id);
                         return (
                           <label key={eo.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs">

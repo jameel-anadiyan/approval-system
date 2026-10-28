@@ -6,7 +6,9 @@ import { errMsg } from '../../lib/errorUtils';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { ShieldAlert, ArrowRight, UserCheck, Lock, Award, Wallet } from 'lucide-react';
-import { useDirectory } from '../../lib/directory';
+import { useDirectory, fetchActiveEntryOfficers, isEntryCheckingUser } from '../../lib/directory';
+import { useAuth } from '../../context/AuthContext';
+import { Profile } from '../../types/database';
 
 interface RouteModalProps {
   isOpen: boolean;
@@ -21,6 +23,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   request,
   onRoute,
 }) => {
+  const { isBackendConnected } = useAuth();
   const type = typeOf(request);
   const [selectedRoute, setSelectedRoute] = useState<ApprovalRoute>(type === 'discount' ? 'B' : 'A');
   const [remarks, setRemarks] = useState('');
@@ -44,14 +47,41 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   const isRouteADisabled = typeLock === 'B';
 
   const { users } = useDirectory();
-  const entryOfficers = users.filter(
-    (u) =>
-      u.is_active &&
-      (u.role === 'admin' || (u.role === 'disbursement' && (u.disbursement_type === 'entry_only' || !u.disbursement_type)))
-  );
+  const [extraOfficers, setExtraOfficers] = useState<Profile[]>([]);
+
+  // Strictly active Entry Only accounts (no admin, no payment_only, no entry_approver, no entry checking person)
+  const entryOfficers = React.useMemo(() => {
+    const list = [...users, ...extraOfficers];
+    const unique = new Map<string, Profile>();
+    for (const u of list) {
+      if (
+        u.is_active &&
+        u.role === 'disbursement' &&
+        u.disbursement_type === 'entry_only' &&
+        !isEntryCheckingUser(u)
+      ) {
+        unique.set(u.id, u);
+      }
+    }
+    return Array.from(unique.values()).sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }, [users, extraOfficers]);
+
+  // Load active entry officers directly to ensure clerks & heads always see them
+  React.useEffect(() => {
+    let isMounted = true;
+    fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
+      if (isMounted && officers && officers.length > 0) {
+        setExtraOfficers(officers);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isBackendConnected]);
+
   const needsPayment = type !== 'discount' && type !== 'stock_transfer' && type !== 'non_cash';
   const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>(
-    request.assigned_entry_user_id || (entryOfficers[0]?.id ?? '')
+    request.assigned_entry_user_id || ''
   );
 
   React.useEffect(() => {
@@ -61,9 +91,9 @@ export const RouteModal: React.FC<RouteModalProps> = ({
 
   React.useEffect(() => {
     if (!assignedEntryUserId && entryOfficers.length > 0) {
-      setAssignedEntryUserId(entryOfficers[0].id);
+      setAssignedEntryUserId(request.assigned_entry_user_id || entryOfficers[0].id);
     }
-  }, [entryOfficers, assignedEntryUserId]);
+  }, [entryOfficers, assignedEntryUserId, request.assigned_entry_user_id]);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -249,20 +279,26 @@ export const RouteModal: React.FC<RouteModalProps> = ({
               <span>Assign Disbursement Entry Only Account</span>
               <span className="text-rose-500">*</span>
             </label>
-            <select
-              id="route-entry-user"
-              required
-              value={assignedEntryUserId}
-              onChange={(e) => setAssignedEntryUserId(e.target.value)}
-              className="w-full text-xs p-2.5 rounded-xl border border-sky-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-hidden bg-white"
-            >
-              <option value="">Select Entry Only Officer…</option>
-              {entryOfficers.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.full_name} (@{u.username})
-                </option>
-              ))}
-            </select>
+            {entryOfficers.length === 0 ? (
+              <div className="p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-xs">
+                No active Disbursement Entry Only accounts found. Please ensure an active Disbursement user has their account type set to &quot;Entry Only&quot;.
+              </div>
+            ) : (
+              <select
+                id="route-entry-user"
+                required
+                value={assignedEntryUserId}
+                onChange={(e) => setAssignedEntryUserId(e.target.value)}
+                className="w-full text-xs p-2.5 rounded-xl border border-sky-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-hidden bg-white"
+              >
+                <option value="">Select Entry Only Officer…</option>
+                {entryOfficers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} (@{u.username})
+                  </option>
+                ))}
+              </select>
+            )}
             <p className="text-[11px] text-sky-800 leading-snug">
               Only the selected Entry Only account will receive and record payment entries for this request. (Can be modified by Clerk/Head before the first entry is created).
             </p>

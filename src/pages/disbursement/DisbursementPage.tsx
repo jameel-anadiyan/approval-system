@@ -444,11 +444,11 @@ export const DisbursementPage: React.FC = () => {
                             {req.approval_no || req.request_no}
                           </span>
                           <TypeBadge type={typeOf(req)} />
-                          {req.assigned_entry_user_name && (
+                          {typeOf(req) !== 'discount' && typeOf(req) !== 'non_cash' && typeOf(req) !== 'stock_transfer' && (
                             <div className="flex items-center gap-1.5 text-xs text-sky-800 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200">
                               <Wallet className="w-3 h-3 text-sky-600" />
-                              <span>Entry: <strong>{req.assigned_entry_user_name}</strong></span>
-                              {entries.length === 0 && (isAdmin || user?.role === 'clerk' || user?.role === 'head') && (
+                              <span>Entry: <strong>{req.assigned_entry_user_name || <span className="text-amber-700 italic font-medium">Not assigned yet</span>}</strong></span>
+                              {entries.length === 0 && (isAdmin || user?.role === 'clerk' || user?.role === 'head' || user?.role === 'regional_head') && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -457,7 +457,7 @@ export const DisbursementPage: React.FC = () => {
                                   }}
                                   className="ml-1 text-[10px] font-bold text-sky-700 underline hover:text-sky-900 cursor-pointer"
                                 >
-                                  [Change]
+                                  {req.assigned_entry_user_id ? '[Change]' : '[Assign]'}
                                 </button>
                               )}
                             </div>
