@@ -30,7 +30,12 @@ import { useAuth } from '../../context/AuthContext';
 import { downloadSignedPacket } from '../../lib/files';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { useDirectory } from '../../lib/directory';
-import { isPaymentUserAllowedForEntry } from '../../lib/disbursementRouting';
+import {
+  isPaymentUserAllowedForEntry,
+  canPaymentUserViewAwaitingRequest,
+  canPaymentUserViewPaidRequest,
+  isEntryAssociatedWithPaymentUser,
+} from '../../lib/disbursementRouting';
 
 export const DisbursementPage: React.FC = () => {
   const { requests, markAsPaid, addDisbursementEntry, editRejectedDisbursementEntry } = useRequests();
@@ -83,19 +88,9 @@ export const DisbursementPage: React.FC = () => {
     : payable;
 
   // Awaiting payment: status === 'approved'
-  // For Payment-Only Cashiers: ONLY show requests that have at least one verified (approved) entry ready to be paid!
-  // Any request that does NOT have an entry created or whose entries are unverified (pending_approval/rejected) will NOT appear here.
+  // For Payment-Only Cashiers: ONLY show requests that have at least one verified (approved) entry ready to be paid by THIS cashier!
   const awaitingQueue = isPaymentOnly
-    ? payable.filter(
-        (r) =>
-          r.status === 'approved' &&
-          (r.disbursement_entries || []).some(
-            (e) =>
-              e.status === 'approved' &&
-              entryPayable(e) > 0 &&
-              isPaymentUserAllowedForEntry(user, e, r, dir.users).allowed
-          )
-      )
+    ? payable.filter((r) => canPaymentUserViewAwaitingRequest(user, r, dir.users))
     : entryFilteredPayable.filter((r) => r.status === 'approved');
 
   // Under Clarification: approved but waiting for Head's response
@@ -111,12 +106,9 @@ export const DisbursementPage: React.FC = () => {
   );
 
   // Paid history: status === 'paid' or requests with entries paid by cashier
+  // For Payment-Only Cashiers: ONLY show requests where THIS cashier made payments or associated entries are paid/settled!
   const paidQueue = isPaymentOnly
-    ? payable.filter(
-        (r) =>
-          r.status === 'paid' ||
-          (r.disbursement_entries || []).some((e) => Number(e.paid_amount || 0) > 0)
-      )
+    ? payable.filter((r) => canPaymentUserViewPaidRequest(user, r, dir.users))
     : entryFilteredPayable.filter((r) => r.status === 'paid');
 
   const currentList =
@@ -133,7 +125,15 @@ export const DisbursementPage: React.FC = () => {
   });
   const search = filters.q;
   const partialCount = awaitingQueue.filter((r) => paymentSummary(r).partial).length;
-  const awaitingBalance = awaitingQueue.reduce((s, r) => s + paymentSummary(r).balance, 0);
+  const awaitingBalance = awaitingQueue.reduce((s, r) => {
+    if (isPaymentOnly) {
+      const myEntries = (r.disbursement_entries || []).filter(
+        (e) => e.status === 'approved' && isPaymentUserAllowedForEntry(user, e, r, dir.users).allowed
+      );
+      return s + myEntries.reduce((acc, e) => acc + entryPayable(e), 0);
+    }
+    return s + paymentSummary(r).balance;
+  }, 0);
 
   return (
     <div className="max-w-5xl mx-auto px-1 sm:px-4 py-4 sm:py-8 space-y-6 pb-24">
@@ -438,7 +438,16 @@ export const DisbursementPage: React.FC = () => {
                 const entries: DisbursementEntry[] = (req.disbursement_entries || []).filter((e) => {
                   if (e.status === 'cancelled') return false;
                   if (isPaymentOnly) {
-                    // Payment account only sees entries that are verified (approved) or already paid
+                    // Payment account strictly only sees entries associated with this payment cashier:
+                    if (!isEntryAssociatedWithPaymentUser(user, e, req, dir.users)) {
+                      return false;
+                    }
+                    if (activeTab === 'awaiting') {
+                      return e.status === 'approved' && entryPayable(e) > 0;
+                    }
+                    if (activeTab === 'paid') {
+                      return Number(e.paid_amount || 0) > 0 || e.status === 'paid';
+                    }
                     return e.status === 'approved' || Number(e.paid_amount || 0) > 0;
                   }
                   return true;

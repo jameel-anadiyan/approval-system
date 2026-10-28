@@ -42,7 +42,7 @@ import {
 import { DisbursementEntry, entriesTotal, entryAvailable, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, paymentSummary } from '../../types/database';
 import { useDirectory } from '../../lib/directory';
 import { useEntryLock } from '../../lib/entryLock';
-import { isPaymentUserAllowedForEntry } from '../../lib/disbursementRouting';
+import { isPaymentUserAllowedForEntry, isEntryAssociatedWithPaymentUser } from '../../lib/disbursementRouting';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { downloadStoredFile } from '../../lib/files';
 import {
@@ -319,9 +319,13 @@ export const RequestDetailPage: React.FC = () => {
     return ent.status === 'approved' || ent.status === 'pending';
   };
 
-  const entries: DisbursementEntry[] = (request.disbursement_entries || []).filter(
-    (e) => e.status !== 'cancelled'
-  );
+  const entries: DisbursementEntry[] = (request.disbursement_entries || []).filter((e) => {
+    if (e.status === 'cancelled') return false;
+    if (isPaymentOnly) {
+      return isEntryAssociatedWithPaymentUser(user, e, request, dir.users);
+    }
+    return true;
+  });
   // Entries the cashier can pay right now (approved by the Entry Approver)
   const pendingEntries = entries.filter((e) => e.status === 'pending' || e.status === 'approved');
   const totalEntered = entriesTotal(entries);
@@ -364,7 +368,18 @@ export const RequestDetailPage: React.FC = () => {
   const showOriginals = role !== 'disbursement';
   const editable = isOwner && (request.status === 'draft' || request.status === 'returned');
   const pay = paymentSummary(request);
-  const payments = request.payments || [];
+  const payments = (request.payments || []).filter((p) => {
+    if (!isPaymentOnly) return true;
+    if (p.paid_by === user?.id) return true;
+    if (p.is_adjustment) return true;
+    const mode = (p.payment_mode || '').toLowerCase();
+    const isCash = mode === 'cash';
+    const isBank = mode === 'bank' || mode === 'neft' || mode === 'rtgs' || mode === 'cheque' || mode === 'upi';
+    const dealerType = (user?.payment_dealer_type || 'both').toLowerCase();
+    if (dealerType === 'cash' && isBank) return false;
+    if (dealerType === 'bank' && isCash) return false;
+    return true;
+  });
   const clarifications = request.disbursement_clarifications || [];
   const latestClarification = clarifications[0];
   const isPendingDisbursementClarification = latestClarification?.status === 'pending_head';

@@ -34,9 +34,11 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
+import { useDirectory } from '../../lib/directory';
 import { canViewDiscountReport } from '../../lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTransferReport';
 import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
+import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
 import { entryPayable, entryOutstanding } from '../../types/database';
 
 interface NavItem {
@@ -52,6 +54,7 @@ interface NavItem {
 export const Navigation: React.FC = () => {
   const { role, user } = useAuth();
   const { requests } = useRequests();
+  const { users } = useDirectory();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   if (!role) return null;
@@ -105,10 +108,8 @@ export const Navigation: React.FC = () => {
       return !r.assigned_entry_user_id || r.assigned_entry_user_id === user?.id;
     }
     if (isPaymentOnlyUser) {
-      // Payment accounts only receive verified payable entries
-      return (r.disbursement_entries || []).some(
-        (e) => e.status === 'approved' && entryPayable(e) > 0
-      );
+      // Payment accounts only receive verified payable entries associated with this cashier
+      return canPaymentUserViewAwaitingRequest(user, r, users);
     }
     return true;
   }).length;

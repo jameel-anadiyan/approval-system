@@ -1,7 +1,8 @@
 // Small workflow helpers shared by inbox pages, navigation badges and the request detail page.
 import type { Profile, RequestRecord } from '../types/database';
+import { isRequestAssociatedWithPaymentUser } from './disbursementRouting';
 
-type Me = Pick<Profile, 'id' | 'role' | 'department_id'> | null | undefined;
+type Me = (Profile | (Pick<Profile, 'id' | 'role' | 'department_id'> & Partial<Profile>)) | null | undefined;
 
 /**
  * Clerk queue: a submitted request of my department whose work category is handled by me
@@ -30,7 +31,7 @@ export function isMyRegionalRequest(r: RequestRecord, me: Me): boolean {
  * - Head: only the respective head's approvals (approved by this head himself, or department/targeted requests
  *   approved by admin, or requests requested by this head, or consultations agreed by this head)
  */
-export function canUserViewApprovedRequest(r: RequestRecord, me: Me): boolean {
+export function canUserViewApprovedRequest(r: RequestRecord, me: Me, allUsers: Profile[] = []): boolean {
   if (!me || !me.role) return false;
 
   // Request must be approved or paid
@@ -39,8 +40,13 @@ export function canUserViewApprovedRequest(r: RequestRecord, me: Me): boolean {
   // 1. Admin sees all approved requests
   if (me.role === 'admin') return true;
 
-  // 2. Disbursement sees approved/paid
-  if (me.role === 'disbursement') return true;
+  // 2. Disbursement: Payment-Only cashiers only see requests associated with their account
+  if (me.role === 'disbursement') {
+    if (me.disbursement_type === 'payment_only') {
+      return isRequestAssociatedWithPaymentUser(me as Profile, r, allUsers);
+    }
+    return true;
+  }
 
   // 3. User is the requester: always see their own approved requests
   if (r.requester_id === me.id) return true;

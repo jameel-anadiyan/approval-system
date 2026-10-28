@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState';
 import { canUserViewApprovedRequest } from '../../lib/workflow';
+import { useDirectory } from '../../lib/directory';
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { downloadSignedPacket } from '../../lib/files';
@@ -17,6 +18,7 @@ import type { RequestType, RequestRecord } from '../../types/database';
 export const ApprovedRequestsPage: React.FC = () => {
   const { user, role, isBackendConnected } = useAuth();
   const { requests } = useRequests();
+  const dir = useDirectory();
   const navigate = useNavigate();
 
   const [query, setQuery] = useState('');
@@ -38,9 +40,10 @@ export const ApprovedRequestsPage: React.FC = () => {
   // - Regional Head: only applications they touched (forwarded/managed by them or acted on)
   // - Employee: strictly their own requests
   // - Admin: all approved
+  // - Disbursement (payment_only): only associated approved/paid requests
   const approvedList = useMemo(() => {
-    return requests.filter((r) => canUserViewApprovedRequest(r, user));
-  }, [requests, user]);
+    return requests.filter((r) => canUserViewApprovedRequest(r, user, dir.users));
+  }, [requests, user, dir.users]);
 
   const filtered = useMemo(() => {
     return approvedList.filter((r) => {

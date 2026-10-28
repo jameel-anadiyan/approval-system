@@ -29,7 +29,26 @@ async function loadProfile(userId: string): Promise<Profile | null> {
     .eq('id', userId)
     .maybeSingle();
   if (error || !data) return null;
-  return data as Profile;
+
+  let connectedEntries: { entry_user_id: string }[] = [];
+  if (data.role === 'disbursement' && data.disbursement_type === 'payment_only') {
+    try {
+      const { data: mappings } = await supabase
+        .from('payment_entry_account_mappings')
+        .select('entry_user_id')
+        .eq('payment_user_id', userId);
+      if (mappings && mappings.length > 0) {
+        connectedEntries = mappings as { entry_user_id: string }[];
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return {
+    ...data,
+    connected_entry_accounts: connectedEntries,
+  } as Profile;
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
