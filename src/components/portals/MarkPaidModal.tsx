@@ -5,7 +5,8 @@ import { DisbursementEntry, RequestRecord, entryPayable, paymentSummary } from '
 import { formatINR, formatISTDate } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
 import type { PaymentInput } from '../../context/RequestContext';
-import { Banknote, CheckCircle, History, Percent, FileText, Lock } from 'lucide-react';
+import { downloadStoredFile } from '../../lib/files';
+import { Banknote, CheckCircle, History, Percent, FileText, Lock, Paperclip, Upload, X } from 'lucide-react';
 import { PasskeyField, isValidPasskey } from '../common/PasskeyField';
 
 interface MarkPaidModalProps {
@@ -29,13 +30,19 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   const { paid, balance } = paymentSummary(request);
   const { user } = useAuth();
   const dealerType = user?.payment_dealer_type;
+  const entryType = entry?.entry_type; // 'cash' | 'bank' | undefined
   const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
   const availableModes = React.useMemo(() => {
+    // When entry is defined as cash: ONLY Cash is available (all others hidden)
+    if (entryType === 'cash') return ['Cash'];
+    // When entry is defined as bank: ONLY bank modes are available (Cash hidden)
+    if (entryType === 'bank') return ['NEFT', 'RTGS', 'UPI', 'Cheque', 'Bank Transfer'];
+    // Fallback if no entry attached: use account dealer type
     if (dealerType === 'cash') return ['Cash'];
     if (dealerType === 'bank') return ['NEFT', 'RTGS', 'UPI', 'Cheque', 'Bank Transfer'];
     return ['NEFT', 'RTGS', 'UPI', 'Cheque', 'Bank Transfer', 'Cash'];
-  }, [dealerType]);
+  }, [entryType, dealerType]);
 
   const entryAdjustment = entry ? Number(entry.adjustment_amount || 0) : 0;
   // The cashier pays EXACTLY what the Entry Approver approved (full entry balance, or the partial figure)
@@ -45,28 +52,27 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   // TDS is deducted from the request balance with this entry's first payment
   const tdsNow = entry && Number(entry.tds_amount || 0) > 0 && !entry.tds_settled ? Number(entry.tds_amount) : 0;
 
-  const [paymentMode, setPaymentMode] = useState(dealerType === 'cash' ? 'Cash' : 'NEFT');
+  const [paymentMode, setPaymentMode] = useState(entryType === 'cash' || dealerType === 'cash' ? 'Cash' : 'NEFT');
   const [paymentDate, setPaymentDate] = useState(todayIST);
   const [paymentRef, setPaymentRef] = useState('');
   const [passkey, setPasskey] = useState('');
   const [paymentRemarks, setPaymentRemarks] = useState(
     entry ? `Disbursement for Entry #${entry.entry_no}` : ''
   );
+  const [paymentDoc, setPaymentDoc] = useState<File | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setPaymentRemarks(entry ? `Disbursement for Entry #${entry.entry_no}` : '');
-    if (dealerType === 'cash') {
-      setPaymentMode('Cash');
-    } else if (dealerType === 'bank') {
-      setPaymentMode(entry?.entry_type === 'cash' ? 'Bank Transfer' : 'NEFT');
-    } else if (entry?.entry_type === 'cash') {
+    if (entry?.entry_type === 'cash' || dealerType === 'cash') {
       setPaymentMode('Cash');
     } else {
       setPaymentMode('NEFT');
     }
     setPasskey('');
+    setPaymentDoc(null);
     setError(null);
   }, [entry?.id, entry?.entry_type, exactAmount, dealerType]);
 
@@ -101,6 +107,7 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
         payment_remarks: paymentRemarks.trim() || undefined,
         entry_id: entry ? entry.id : undefined,
         passkey,
+        document: paymentDoc,
       });
       onClose();
     } catch (err: unknown) {
@@ -212,17 +219,30 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
             <ul className="divide-y divide-slate-100 max-h-36 overflow-y-auto">
               {payments.map((p) => (
                 <li key={p.id} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
-                  <span className="text-slate-600 min-w-0 truncate">
-                    {formatISTDate(p.payment_date, false)}
-                    {p.is_adjustment
-                      ? p.payment_mode === 'TDS'
-                        ? ' · TDS deducted'
-                        : ' · Old balance / advance adjustment'
-                      : p.payment_mode
-                      ? ` · ${p.payment_mode}`
-                      : ''}
-                    {p.payment_ref ? ` · ${p.payment_ref}` : ''}
-                  </span>
+                  <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-slate-600 truncate">
+                      {formatISTDate(p.payment_date, false)}
+                      {p.is_adjustment
+                        ? p.payment_mode === 'TDS'
+                          ? ' · TDS deducted'
+                          : ' · Old balance / advance adjustment'
+                        : p.payment_mode
+                        ? ` · ${p.payment_mode}`
+                        : ''}
+                      {p.payment_ref ? ` · ${p.payment_ref}` : ''}
+                    </span>
+                    {p.document_storage_path && (
+                      <button
+                        type="button"
+                        onClick={() => downloadStoredFile('request-files', p.document_storage_path!, p.document_name || 'payment_receipt')}
+                        className="inline-flex items-center gap-0.5 text-[10px] font-bold text-teal-700 hover:text-teal-950 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                        title="Download payment reference document"
+                      >
+                        <Paperclip className="w-2.5 h-2.5 text-teal-600" />
+                        <span>Doc</span>
+                      </button>
+                    )}
+                  </div>
                   <span className="font-bold text-slate-900 shrink-0">{formatINR(p.amount)}</span>
                 </li>
               ))}
@@ -257,18 +277,25 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
 
         {/* Payment Mode Selection */}
         <div>
-          <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
             <span className="text-xs font-bold text-slate-700">Payment Mode</span>
-            {dealerType === 'cash' && (
+            {entry?.entry_type === 'cash' ? (
+              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                Entry Defined as Cash Only
+              </span>
+            ) : entry?.entry_type === 'bank' ? (
+              <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                Entry Defined as Bank Transfer (Cash Disabled)
+              </span>
+            ) : dealerType === 'cash' ? (
               <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                 Cash Account Only
               </span>
-            )}
-            {dealerType === 'bank' && (
+            ) : dealerType === 'bank' ? (
               <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
                 Bank Account Only (Cash Disabled)
               </span>
-            )}
+            ) : null}
           </div>
           <div className={`grid ${availableModes.length === 1 ? 'grid-cols-1' : 'grid-cols-3'} gap-2`}>
             {availableModes.map((mode) => (
@@ -305,6 +332,62 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
           <label htmlFor="payment-remarks" className="text-xs font-bold text-slate-700 block mb-1">Remarks (Optional)</label>
           <textarea id="payment-remarks" rows={2} value={paymentRemarks} onChange={(e) => setPaymentRemarks(e.target.value)}
             placeholder="e.g. Disbursed against Entry #1" className={inputCls} />
+        </div>
+
+        {/* Optional Document Upload for Reference */}
+        <div>
+          <label className="text-xs font-bold text-slate-700 flex items-center justify-between mb-1">
+            <span className="flex items-center gap-1.5">
+              <Paperclip className="w-3.5 h-3.5 text-slate-500" />
+              <span>Reference Document (Optional)</span>
+            </span>
+            <span className="text-[11px] font-normal text-slate-500">
+              Any file type · For future reference
+            </span>
+          </label>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) setPaymentDoc(f);
+            }}
+            className="hidden"
+            id="payment-doc-upload-field"
+          />
+
+          {paymentDoc ? (
+            <div className="flex items-center justify-between p-2.5 bg-teal-50 border border-teal-200 rounded-xl text-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-4 h-4 text-teal-600 shrink-0" />
+                <span className="font-semibold text-teal-950 truncate">{paymentDoc.name}</span>
+                <span className="text-[10px] text-teal-700 shrink-0">
+                  ({(paymentDoc.size / 1024).toFixed(0)} KB)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentDoc(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition-colors cursor-pointer"
+                title="Remove file"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 p-2.5 border border-dashed border-slate-300 hover:border-teal-500 hover:bg-teal-50/30 rounded-xl text-xs font-medium text-slate-600 hover:text-teal-900 transition-colors cursor-pointer"
+            >
+              <Upload className="w-4 h-4 text-slate-400" />
+              <span>Attach Payment Document / Receipt (Any file type)</span>
+            </button>
+          )}
         </div>
 
         {/* Who is paying */}

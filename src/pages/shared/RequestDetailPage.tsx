@@ -44,6 +44,7 @@ import { useDirectory } from '../../lib/directory';
 import { useEntryLock } from '../../lib/entryLock';
 import { isPaymentUserAllowedForEntry } from '../../lib/disbursementRouting';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
+import { downloadStoredFile } from '../../lib/files';
 import {
   ArrowLeft,
   Send,
@@ -77,6 +78,7 @@ import {
   Eye,
   Lock,
   ExternalLink,
+  Paperclip,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -1464,6 +1466,17 @@ export const RequestDetailPage: React.FC = () => {
                             ].filter(Boolean).join(' · ') || '—'}
                           </p>
                           {p.remarks && <p className="text-[11px] text-slate-500 italic break-words">{p.remarks}</p>}
+                          {p.document_storage_path && (
+                            <button
+                              type="button"
+                              onClick={() => downloadStoredFile('request-files', p.document_storage_path!, p.document_name || 'payment_document')}
+                              className="inline-flex items-center gap-1 mt-1 text-[11px] font-bold text-teal-700 hover:text-teal-950 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2 py-0.5 rounded-md cursor-pointer transition-colors shadow-2xs"
+                              title={`Download ${p.document_name || 'payment document'}`}
+                            >
+                              <Paperclip className="w-3 h-3 text-teal-600" />
+                              <span>{p.document_name || 'Payment Document'}</span>
+                            </button>
+                          )}
                         </div>
                         <span className={`font-bold shrink-0 ${p.payment_mode === 'TDS' ? 'text-amber-700' : p.is_adjustment ? 'text-violet-700' : 'text-teal-700'}`}>{formatINR(p.amount)}</span>
                       </li>

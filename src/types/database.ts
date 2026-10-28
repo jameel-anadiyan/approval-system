@@ -503,6 +503,9 @@ export interface RequestPayment {
   entry_id?: string | null;
   /** Auto-recorded old balance / old advance adjustment / TDS deduction (not a real payout) */
   is_adjustment?: boolean;
+  /** Optional document uploaded during payment for future reference / audit */
+  document_storage_path?: string | null;
+  document_name?: string | null;
 }
 
 /** Paid so far, balance left, and whether some (but not all) has been paid. */

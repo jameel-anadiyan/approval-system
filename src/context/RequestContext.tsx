@@ -59,6 +59,10 @@ export interface PaymentInput {
   entry_id?: string;
   /** 4-digit passkey of the person at the Payment account making this payment */
   passkey?: string;
+  /** Optional file uploaded during payment for future reference */
+  document?: File | null;
+  document_storage_path?: string | null;
+  document_name?: string | null;
 }
 
 /** Extra details sent with a disbursement entry: TDS amount + the entering person's 4-digit passkey. */
@@ -1375,6 +1379,32 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       };
     }
 
+    let storagePath = details.document_storage_path || null;
+    let docName = details.document_name || null;
+
+    if (details.document && isBackendConnected) {
+      try {
+        const file = details.document;
+        const contentType = (file.type || '').split(';')[0] || 'application/octet-stream';
+        const safe = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
+        const reqId = id || 'payments';
+        storagePath = `${reqId}/payment-${crypto.randomUUID()}-${safe}`;
+        docName = file.name;
+
+        const { error: upErr } = await supabase.storage
+          .from('request-files')
+          .upload(storagePath, file, { contentType, upsert: false });
+        if (upErr) {
+          throw new Error(`Failed to upload payment document: ${upErr.message}`);
+        }
+      } catch (uploadErr: unknown) {
+        return { success: false, error: errMsg(uploadErr) };
+      }
+    } else if (details.document && !isBackendConnected) {
+      docName = details.document.name;
+      storagePath = `mock/payment-${details.document.name}`;
+    }
+
     if (isBackendConnected) {
       try {
         const { data, error } = await supabase.rpc('pay_disbursement_entry', {
@@ -1385,8 +1415,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_payment_ref: details.payment_ref || null,
           p_remarks: details.payment_remarks || null,
           p_passkey: details.passkey || null,
+          p_document_storage_path: storagePath,
+          p_document_name: docName,
         });
-        if (error) throw error;
+        if (error) {
+          if (storagePath && isBackendConnected) {
+            await supabase.storage.from('request-files').remove([storagePath]);
+          }
+          throw error;
+        }
         await loadRequests();
         return { success: true, fully_paid: !!(data as { fully_paid?: boolean } | null)?.fully_paid };
       } catch (err: unknown) {
@@ -1477,6 +1514,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   payment_mode: details.payment_mode || null, payment_ref: details.payment_ref || null,
                   remarks: details.payment_remarks || null, paid_by: user.id, paid_by_name: user.full_name, created_at: now,
                   entry_id: details.entry_id || null,
+                  document_storage_path: storagePath,
+                  document_name: docName,
                 },
               ],
               actions: [action, ...(r.actions || [])],
