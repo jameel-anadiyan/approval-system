@@ -23,10 +23,12 @@ import {
   AlertCircle,
   RotateCcw,
   ExternalLink,
+  Eye,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { downloadSignedPacket } from '../../lib/files';
+import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { useDirectory } from '../../lib/directory';
 import { isPaymentUserAllowedForEntry } from '../../lib/disbursementRouting';
 
@@ -54,6 +56,11 @@ export const DisbursementPage: React.FC = () => {
   const [assignEntryTarget, setAssignEntryTarget] = useState<RequestRecord | null>(null);
   const [clarifyTarget, setClarifyTarget] = useState<RequestRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [previewSignedDoc, setPreviewSignedDoc] = useState<{
+    path: string;
+    name: string;
+    approvalNo?: string | null;
+  } | null>(null);
 
   useEffect(() => {
     setActiveTab(location.pathname.endsWith('/paid') ? 'paid' : 'awaiting');
@@ -76,7 +83,20 @@ export const DisbursementPage: React.FC = () => {
     : payable;
 
   // Awaiting payment: status === 'approved'
-  const awaitingQueue = entryFilteredPayable.filter((r) => r.status === 'approved');
+  // For Payment-Only Cashiers: ONLY show requests that have at least one verified (approved) entry ready to be paid!
+  // Any request that does NOT have an entry created or whose entries are unverified (pending_approval/rejected) will NOT appear here.
+  const awaitingQueue = isPaymentOnly
+    ? payable.filter(
+        (r) =>
+          r.status === 'approved' &&
+          (r.disbursement_entries || []).some(
+            (e) =>
+              e.status === 'approved' &&
+              entryPayable(e) > 0 &&
+              isPaymentUserAllowedForEntry(user, e, r, dir.users).allowed
+          )
+      )
+    : entryFilteredPayable.filter((r) => r.status === 'approved');
 
   // Under Clarification: approved but waiting for Head's response
   const underClarificationQueue = awaitingQueue.filter((r) =>
@@ -90,8 +110,14 @@ export const DisbursementPage: React.FC = () => {
       .map((e) => ({ entry: e, request: r }))
   );
 
-  // Paid history: status === 'paid'
-  const paidQueue = entryFilteredPayable.filter((r) => r.status === 'paid');
+  // Paid history: status === 'paid' or requests with entries paid by cashier
+  const paidQueue = isPaymentOnly
+    ? payable.filter(
+        (r) =>
+          r.status === 'paid' ||
+          (r.disbursement_entries || []).some((e) => Number(e.paid_amount || 0) > 0)
+      )
+    : entryFilteredPayable.filter((r) => r.status === 'paid');
 
   const currentList =
     activeTab === 'awaiting'
@@ -409,9 +435,14 @@ export const DisbursementPage: React.FC = () => {
                 const isPendingHead = latestClarification?.status === 'pending_head';
                 const isClarified = latestClarification?.status === 'clarified';
 
-                const entries: DisbursementEntry[] = (req.disbursement_entries || []).filter(
-                  (e) => e.status !== 'cancelled'
-                );
+                const entries: DisbursementEntry[] = (req.disbursement_entries || []).filter((e) => {
+                  if (e.status === 'cancelled') return false;
+                  if (isPaymentOnly) {
+                    // Payment account only sees entries that are verified (approved) or already paid
+                    return e.status === 'approved' || Number(e.paid_amount || 0) > 0;
+                  }
+                  return true;
+                });
                 const totalEntered = entriesTotal(entries);
                 const remainingUnentered = entryAvailable(req);
                 const nextEntryNo = entries.reduce((m, e) => Math.max(m, e.entry_no || 0), 0) + 1;
@@ -514,28 +545,49 @@ export const DisbursementPage: React.FC = () => {
                           )}
                         </div>
 
-                        {req.status === 'approved' ? (
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setClarifyTarget(req)}
-                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 font-semibold text-xs transition-colors cursor-pointer"
-                              title="Send back to Request Owner Head for clarification with voice or text message"
-                            >
-                              <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
-                              <span>{isPendingHead ? 'Ask More' : 'Ask Head'}</span>
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleDownload(req)}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Signed PDF</span>
-                          </button>
-                        )}
+                        {(() => {
+                          const packet = (req.signed_files || []).find((s) => s.is_packet) || (req.signed_files || [])[0];
+                          return (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {packet && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPreviewSignedDoc({
+                                      path: packet.storage_path,
+                                      name: packet.file_name || `${req.approval_no || req.request_no}_packet.pdf`,
+                                      approvalNo: req.approval_no,
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold text-xs transition-colors cursor-pointer"
+                                  title="Preview official approved signed document"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                                  <span>Preview Approved Doc</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDownload(req)}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Signed PDF</span>
+                              </button>
+                              {req.status === 'approved' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setClarifyTarget(req)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 font-semibold text-xs transition-colors cursor-pointer"
+                                  title="Send back to Request Owner Head for clarification with voice or text message"
+                                >
+                                  <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>{isPendingHead ? 'Ask More' : 'Ask Head'}</span>
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -846,6 +898,15 @@ export const DisbursementPage: React.FC = () => {
           onSuccess={() => setNotice('Clarification query sent to Request Owner Head.')}
         />
       )}
+
+      {/* Signed Document Preview Modal */}
+      <SignedDocPreviewModal
+        isOpen={Boolean(previewSignedDoc)}
+        onClose={() => setPreviewSignedDoc(null)}
+        storagePath={previewSignedDoc?.path || null}
+        fileName={previewSignedDoc?.name || 'signed_approval.pdf'}
+        approvalNo={previewSignedDoc?.approvalNo}
+      />
     </div>
   );
 };

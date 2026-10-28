@@ -16,7 +16,9 @@ import {
   Stamp,
   Sparkles,
   AlertTriangle,
+  Eye,
 } from 'lucide-react';
+import { SignedDocPreviewModal } from '../requests/SignedDocPreviewModal';
 
 interface ApproveModalProps {
   isOpen: boolean;
@@ -40,6 +42,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creds, setCreds] = useState<{ seal_url: string | null; signature_url: string | null } | null>(null);
   const [credsLoading, setCredsLoading] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
 
   // Live: fetch my own seal/signature (short-lived URLs) so the approver sees exactly what gets stamped.
   useEffect(() => {
@@ -372,10 +375,31 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
           )}
           {/* Action buttons */}
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            {(() => {
+              const fresh = getRequestById(request.id);
+              const packet = fresh?.signed_files?.find((s) => s.is_packet) || fresh?.signed_files?.[0];
+              if (!packet) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPreviewDoc({
+                      path: packet.storage_path,
+                      name: packet.file_name || `${generatedApprovalNo || 'approval'}_packet.pdf`,
+                      approvalNo: generatedApprovalNo,
+                    })
+                  }
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold text-xs transition-all cursor-pointer shadow-xs"
+                >
+                  <Eye className="w-4 h-4 text-emerald-700" />
+                  <span>Preview Approved Doc</span>
+                </button>
+              );
+            })()}
             <button
               type="button"
               onClick={handleDownload}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-md shadow-indigo-200 transition-all"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-md shadow-indigo-200 transition-all cursor-pointer"
             >
               <Download className="w-4 h-4" />
               <span>Download Stamped Packet</span>
@@ -383,13 +407,22 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             <button
               type="button"
               onClick={resetAndClose}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-100 transition-colors"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-100 transition-colors cursor-pointer"
             >
               Done
             </button>
           </div>
         </div>
       )}
+
+      {/* Signed Document Preview Modal */}
+      <SignedDocPreviewModal
+        isOpen={Boolean(previewDoc)}
+        onClose={() => setPreviewDoc(null)}
+        storagePath={previewDoc?.path || null}
+        fileName={previewDoc?.name || 'signed_approval.pdf'}
+        approvalNo={previewDoc?.approvalNo}
+      />
     </Modal>
   );
 };

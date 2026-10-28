@@ -10,10 +10,12 @@ import {
 import { EmptyState } from '../../components/common/EmptyState';
 import { canUserViewApprovedRequest } from '../../lib/workflow';
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
+import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
+import { downloadSignedPacket } from '../../lib/files';
 import type { RequestType, RequestRecord } from '../../types/database';
 
 export const ApprovedRequestsPage: React.FC = () => {
-  const { user, role } = useAuth();
+  const { user, role, isBackendConnected } = useAuth();
   const { requests } = useRequests();
   const navigate = useNavigate();
 
@@ -21,6 +23,11 @@ export const ApprovedRequestsPage: React.FC = () => {
   const [selectedType, setSelectedType] = useState<string>('all');
   const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
   const [assignTarget, setAssignTarget] = useState<RequestRecord | null>(null);
+  const [previewSignedDoc, setPreviewSignedDoc] = useState<{
+    path: string;
+    name: string;
+    approvalNo?: string | null;
+  } | null>(null);
 
   const isHeadRole = role === 'head' || role === 'regional_head';
   const canManageEntryAccount = role === 'admin' || role === 'clerk' || isHeadRole;
@@ -65,13 +72,18 @@ export const ApprovedRequestsPage: React.FC = () => {
     });
   }, [approvedList, selectedType, dateRange, query]);
 
-  const handleDownloadPacket = (r: RequestRecord, e: React.MouseEvent) => {
+  const handleDownloadPacket = async (r: RequestRecord, e: React.MouseEvent) => {
     e.stopPropagation();
-    const signed = (r.files || []).find((f) => f.kind === 'document' && f.original_name?.toLowerCase().includes('approval'));
-    if (signed?.public_url) {
-      window.open(signed.public_url, '_blank');
+    const packet = (r.signed_files || []).find((s) => s.is_packet) || (r.signed_files || [])[0];
+    if (packet) {
+      await downloadSignedPacket(r, isBackendConnected);
     } else {
-      navigate(`/requests/${r.id}`);
+      const signed = (r.files || []).find((f) => f.kind === 'document' && f.original_name?.toLowerCase().includes('approval'));
+      if (signed?.public_url) {
+        window.open(signed.public_url, '_blank');
+      } else {
+        navigate(`/requests/${r.id}`);
+      }
     }
   };
 
@@ -282,22 +294,44 @@ export const ApprovedRequestsPage: React.FC = () => {
                   <span className="text-[11px] text-slate-400 font-mono">
                     {req.request_no || 'REQ'}
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate(`/requests/${req.id}`);
                       }}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5" />
                       <span>Details</span>
                     </button>
+                    {(() => {
+                      const packet = (req.signed_files || []).find((s) => s.is_packet) || (req.signed_files || [])[0];
+                      if (!packet) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewSignedDoc({
+                              path: packet.storage_path,
+                              name: packet.file_name || `${req.approval_no || req.request_no}_packet.pdf`,
+                              approvalNo: req.approval_no,
+                            });
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold text-xs transition-colors cursor-pointer"
+                          title="Preview official approved signed document"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Preview Approved Doc</span>
+                        </button>
+                      );
+                    })()}
                     <button
                       type="button"
                       onClick={(e) => handleDownloadPacket(req, e)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>Packet</span>
@@ -318,6 +352,15 @@ export const ApprovedRequestsPage: React.FC = () => {
           request={assignTarget}
         />
       )}
+
+      {/* Signed Document Preview Modal */}
+      <SignedDocPreviewModal
+        isOpen={Boolean(previewSignedDoc)}
+        onClose={() => setPreviewSignedDoc(null)}
+        storagePath={previewSignedDoc?.path || null}
+        fileName={previewSignedDoc?.name || 'signed_approval.pdf'}
+        approvalNo={previewSignedDoc?.approvalNo}
+      />
     </div>
   );
 };

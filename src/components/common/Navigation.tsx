@@ -37,6 +37,7 @@ import { useRequests } from '../../context/RequestContext';
 import { canViewDiscountReport } from '../../lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTransferReport';
 import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
+import { entryPayable, entryOutstanding } from '../../types/database';
 
 interface NavItem {
   label: string;
@@ -83,18 +84,31 @@ export const Navigation: React.FC = () => {
 
   const entryApprovalsCount = requests.reduce((count, r) => {
     const pendingInReq = (r.disbursement_entries || []).filter(
-      (e) => e.status === 'pending_approval'
+      (e) =>
+        e.status === 'pending_approval' ||
+        (e.status === 'approved' &&
+          e.approved_amount !== null &&
+          e.approved_amount !== undefined &&
+          Number(e.approved_amount) > 0 &&
+          entryOutstanding(e) > Number(e.approved_amount))
     ).length;
     return count + pendingInReq;
   }, 0);
 
   const isEntryOnlyUser = role === 'disbursement' && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
+  const isPaymentOnlyUser = role === 'disbursement' && user?.disbursement_type === 'payment_only';
   const disbAwaitingCount = requests.filter((r) => {
     if (r.status !== 'approved' || r.request_type === 'discount' || r.request_type === 'non_cash' || r.request_type === 'stock_transfer') {
       return false;
     }
     if (isEntryOnlyUser) {
-      return r.assigned_entry_user_id === user?.id;
+      return !r.assigned_entry_user_id || r.assigned_entry_user_id === user?.id;
+    }
+    if (isPaymentOnlyUser) {
+      // Payment accounts only receive verified payable entries
+      return (r.disbursement_entries || []).some(
+        (e) => e.status === 'approved' && entryPayable(e) > 0
+      );
     }
     return true;
   }).length;

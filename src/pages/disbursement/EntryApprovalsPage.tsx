@@ -28,7 +28,9 @@ import {
   PieChart,
   Percent,
   UserCheck,
+  Eye,
 } from 'lucide-react';
+import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 
 interface EntryWithRequest {
   entry: DisbursementEntry;
@@ -51,6 +53,11 @@ export const EntryApprovalsPage: React.FC = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [modeFilter, setModeFilter] = useState<'all' | 'cash' | 'bank'>('all');
+  const [previewSignedDoc, setPreviewSignedDoc] = useState<{
+    path: string;
+    name: string;
+    approvalNo?: string | null;
+  } | null>(null);
 
   // Collect all entries across payable approved requests
   const allEntriesWithRequests: EntryWithRequest[] = useMemo(() => {
@@ -67,11 +74,29 @@ export const EntryApprovalsPage: React.FC = () => {
     return list.sort((a, b) => new Date(b.entry.created_at).getTime() - new Date(a.entry.created_at).getTime());
   }, [requests]);
 
-  // Tab queues
+  // An entry is partially approved and in progress with the cashier when:
+  // - status === 'approved'
+  // - approved_amount is set and < outstanding balance
+  // - cashier has not yet settled the partial payment
+  const isPartialInProgress = (e: DisbursementEntry) => {
+    const outstanding = entryOutstanding(e);
+    const approved = Number(e.approved_amount || 0);
+    return (
+      e.status === 'approved' &&
+      approved > 0 &&
+      outstanding > approved &&
+      Number(e.paid_amount || 0) < Number(e.amount || 0)
+    );
+  };
+
+  // Tab queues: partial approvals in progress stay visible in the pending tab so they don't disappear!
   const pendingQueue = useMemo(
     () =>
       allEntriesWithRequests.filter(
-        (item) => item.entry.status === 'pending_approval' || item.entry.status === 'pending'
+        (item) =>
+          item.entry.status === 'pending_approval' ||
+          item.entry.status === 'pending' ||
+          isPartialInProgress(item.entry)
       ),
     [allEntriesWithRequests]
   );
@@ -512,7 +537,8 @@ export const EntryApprovalsPage: React.FC = () => {
           {filteredList.map(({ entry, request }) => {
             const isSelected = selectedIds.has(entry.id);
             const isCash = entry.entry_type === 'cash';
-            const isPending = entry.status === 'pending_approval' || entry.status === 'pending';
+            const isPartialActive = isPartialInProgress(entry);
+            const isPending = (entry.status === 'pending_approval' || entry.status === 'pending') && !isPartialActive;
             const outstanding = entryOutstanding(entry);
             const paidSoFar = Number(entry.paid_amount || 0);
             const tdsAmt = Number(entry.tds_amount || 0);
@@ -529,6 +555,8 @@ export const EntryApprovalsPage: React.FC = () => {
                 className={`bg-white rounded-2xl border p-4 sm:p-5 shadow-xs transition-all space-y-3 ${
                   isSelected
                     ? 'border-indigo-500 ring-2 ring-indigo-200'
+                    : isPartialActive
+                    ? 'border-amber-300 bg-amber-50/15'
                     : isPending
                     ? 'border-slate-200/90 hover:border-amber-300'
                     : 'border-slate-200'
@@ -591,7 +619,12 @@ export const EntryApprovalsPage: React.FC = () => {
                         </span>
 
                         {/* Status */}
-                        {isPending ? (
+                        {isPartialActive ? (
+                          <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-xs">
+                            <Clock className="w-3 h-3 text-amber-700 animate-pulse" />
+                            <span>Partial Payment in Progress</span>
+                          </span>
+                        ) : isPending ? (
                           balanceAwaiting ? (
                             <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
                               Balance Awaiting Verification
@@ -635,12 +668,28 @@ export const EntryApprovalsPage: React.FC = () => {
 
                   {/* Prominent Amount */}
                   <div className="text-right shrink-0">
-                    <span className="text-[10px] font-bold uppercase text-slate-400 block">
-                      {paidSoFar > 0 && isPending ? 'Balance To Verify' : 'Entry Amount'}
-                    </span>
-                    <span className="font-display font-extrabold text-base sm:text-xl text-slate-900">
-                      {formatINR(isPending ? outstanding : entry.amount)}
-                    </span>
+                    {isPartialActive ? (
+                      <>
+                        <span className="text-[10px] font-bold uppercase text-amber-700 block">
+                          Approved For Cashier
+                        </span>
+                        <span className="font-display font-extrabold text-base sm:text-xl text-teal-700">
+                          {formatINR(Number(entry.approved_amount))}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-600 block mt-0.5">
+                          Remaining Balance: {formatINR(outstanding - Number(entry.approved_amount))}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                          {paidSoFar > 0 && isPending ? 'Balance To Verify' : 'Entry Amount'}
+                        </span>
+                        <span className="font-display font-extrabold text-base sm:text-xl text-slate-900">
+                          {formatINR(isPending ? outstanding : entry.amount)}
+                        </span>
+                      </>
+                    )}
                     {paidSoFar > 0 && (
                       <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200 block mt-0.5">
                         Paid so far: {formatINR(paidSoFar)} of {formatINR(Number(entry.amount))}
@@ -671,7 +720,7 @@ export const EntryApprovalsPage: React.FC = () => {
                 {/* Associated Request Summary Box */}
                 <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Link
                         to={`/requests/${request.id}`}
                         className="font-mono font-bold text-indigo-700 hover:underline flex items-center gap-1"
@@ -679,6 +728,27 @@ export const EntryApprovalsPage: React.FC = () => {
                         <span>{request.approval_no || request.request_no}</span>
                         <ChevronRight className="w-3 h-3" />
                       </Link>
+                      {(() => {
+                        const reqPacket = (request.signed_files || []).find((s) => s.is_packet) || (request.signed_files || [])[0];
+                        if (!reqPacket) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewSignedDoc({
+                                path: reqPacket.storage_path,
+                                name: reqPacket.file_name || `${request.approval_no || request.request_no}_packet.pdf`,
+                                approvalNo: request.approval_no,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                            title="Preview approved stamped document"
+                          >
+                            <Eye className="w-3 h-3 text-emerald-700" />
+                            <span>Preview Doc</span>
+                          </button>
+                        );
+                      })()}
                       <span className="text-slate-400">·</span>
                       <span className="text-slate-600 font-medium">Beneficiary: <strong>{request.requester_name}</strong></span>
                     </div>
@@ -717,7 +787,17 @@ export const EntryApprovalsPage: React.FC = () => {
                 </div>
 
                 {/* Decision buttons for pending entries: Reject / Approve Partial / Approve Full */}
-                {isPending && (
+                {isPartialActive ? (
+                  <div className="pt-2 border-t border-slate-100">
+                    <div className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-50/80 border border-amber-200 text-xs text-amber-950">
+                      <Clock className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" />
+                      <div>
+                        <strong>Partial Payment in Progress: </strong>
+                        Cashier has been authorized to release <strong>{formatINR(Number(entry.approved_amount))}</strong>. Once paid by cashier, the remaining balance of <strong>{formatINR(outstanding - Number(entry.approved_amount))}</strong> will appear here for your next verification.
+                      </div>
+                    </div>
+                  </div>
+                ) : isPending && (
                   <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
                     {balanceAwaiting && (
                       <span className="mr-auto text-[11px] text-violet-800 font-semibold">
@@ -931,6 +1011,15 @@ export const EntryApprovalsPage: React.FC = () => {
           </form>
         </Modal>
       )}
+
+      {/* Signed Document Preview Modal */}
+      <SignedDocPreviewModal
+        isOpen={Boolean(previewSignedDoc)}
+        onClose={() => setPreviewSignedDoc(null)}
+        storagePath={previewSignedDoc?.path || null}
+        fileName={previewSignedDoc?.name || 'signed_approval.pdf'}
+        approvalNo={previewSignedDoc?.approvalNo}
+      />
     </div>
   );
 };

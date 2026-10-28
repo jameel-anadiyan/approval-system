@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
+import { useAuth } from '../../context/AuthContext';
 import { DisbursementEntry, RequestRecord, entryPayable, paymentSummary } from '../../types/database';
 import { formatINR, formatISTDate } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
@@ -26,7 +27,15 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   onMarkPaid,
 }) => {
   const { paid, balance } = paymentSummary(request);
+  const { user } = useAuth();
+  const dealerType = user?.payment_dealer_type;
   const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+  const availableModes = React.useMemo(() => {
+    if (dealerType === 'cash') return ['Cash'];
+    if (dealerType === 'bank') return ['NEFT', 'RTGS', 'UPI', 'Cheque', 'Bank Transfer'];
+    return ['NEFT', 'RTGS', 'UPI', 'Cheque', 'Bank Transfer', 'Cash'];
+  }, [dealerType]);
 
   const entryAdjustment = entry ? Number(entry.adjustment_amount || 0) : 0;
   // The cashier pays EXACTLY what the Entry Approver approved (full entry balance, or the partial figure)
@@ -36,7 +45,7 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
   // TDS is deducted from the request balance with this entry's first payment
   const tdsNow = entry && Number(entry.tds_amount || 0) > 0 && !entry.tds_settled ? Number(entry.tds_amount) : 0;
 
-  const [paymentMode, setPaymentMode] = useState('NEFT');
+  const [paymentMode, setPaymentMode] = useState(dealerType === 'cash' ? 'Cash' : 'NEFT');
   const [paymentDate, setPaymentDate] = useState(todayIST);
   const [paymentRef, setPaymentRef] = useState('');
   const [passkey, setPasskey] = useState('');
@@ -48,14 +57,18 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
 
   useEffect(() => {
     setPaymentRemarks(entry ? `Disbursement for Entry #${entry.entry_no}` : '');
-    if (entry?.entry_type === 'cash') {
+    if (dealerType === 'cash') {
+      setPaymentMode('Cash');
+    } else if (dealerType === 'bank') {
+      setPaymentMode(entry?.entry_type === 'cash' ? 'Bank Transfer' : 'NEFT');
+    } else if (entry?.entry_type === 'cash') {
       setPaymentMode('Cash');
     } else {
       setPaymentMode('NEFT');
     }
     setPasskey('');
     setError(null);
-  }, [entry?.id, entry?.entry_type, exactAmount]);
+  }, [entry?.id, entry?.entry_type, exactAmount, dealerType]);
 
   const amount = exactAmount;
   const isFull = amount + tdsNow >= balance && amount > 0;
@@ -244,9 +257,21 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
 
         {/* Payment Mode Selection */}
         <div>
-          <span className="text-xs font-bold text-slate-700 block mb-1.5">Payment Mode</span>
-          <div className="grid grid-cols-3 gap-2">
-            {['NEFT', 'RTGS', 'UPI', 'Cheque', 'Bank Transfer', 'Cash'].map((mode) => (
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-bold text-slate-700">Payment Mode</span>
+            {dealerType === 'cash' && (
+              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                Cash Account Only
+              </span>
+            )}
+            {dealerType === 'bank' && (
+              <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                Bank Account Only (Cash Disabled)
+              </span>
+            )}
+          </div>
+          <div className={`grid ${availableModes.length === 1 ? 'grid-cols-1' : 'grid-cols-3'} gap-2`}>
+            {availableModes.map((mode) => (
               <button
                 key={mode}
                 type="button"

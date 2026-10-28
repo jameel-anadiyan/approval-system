@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowRight, PackageCheck, PackageSearch, Truck, Layers, ListOrdered, Download, ChevronDown, ChevronUp,
-  Scale, IndianRupee, Boxes, CheckCircle2, Clock, BarChart3, UserCheck,
+  Scale, IndianRupee, Boxes, CheckCircle2, Clock, BarChart3, UserCheck, Eye,
 } from 'lucide-react';
 import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
 import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { EmptyState } from '../../components/common/EmptyState';
 import { CompleteTransferModal } from '../../components/portals/CompleteTransferModal';
+import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { formatINR, formatISTDate } from '../../lib/formatters';
 import { downloadSignedPacket } from '../../lib/files';
 import { canViewStockTransferReport } from '../../lib/stockTransferReport';
@@ -38,6 +39,11 @@ export const StockTransferMonitorPage: React.FC = () => {
   const [target, setTarget] = useState<RequestRecord | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [previewSignedDoc, setPreviewSignedDoc] = useState<{
+    path: string;
+    name: string;
+    approvalNo?: string | null;
+  } | null>(null);
 
   useEffect(() => setTab(tabFromPath()), [location.pathname]);
 
@@ -285,11 +291,32 @@ export const StockTransferMonitorPage: React.FC = () => {
                     {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     {isOpen ? 'Hide products' : items.length ? `Show ${items.length} product${items.length === 1 ? '' : 's'}` : 'Show details'}
                   </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(() => {
+                      const packet = (req.signed_files || []).find((s) => s.is_packet) || (req.signed_files || [])[0];
+                      if (!packet) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewSignedDoc({
+                              path: packet.storage_path,
+                              name: packet.file_name || `${req.approval_no || req.request_no}_packet.pdf`,
+                              approvalNo: req.approval_no,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold text-xs transition-colors cursor-pointer"
+                          title="Preview official approved signed document"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Preview Approved Doc</span>
+                        </button>
+                      );
+                    })()}
                     <button
                       type="button"
                       onClick={() => handleDownload(req)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
                     >
                       <Download className="w-3.5 h-3.5" /> Signed PDF
                     </button>
@@ -298,7 +325,7 @@ export const StockTransferMonitorPage: React.FC = () => {
                         type="button"
                         id={`mark-transfer-complete-${req.id}`}
                         onClick={() => setTarget(req)}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-200 transition-all active:scale-95"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-200 transition-all active:scale-95 cursor-pointer"
                       >
                         <PackageCheck className="w-4 h-4" /> Mark Transfer Complete
                       </button>
@@ -325,6 +352,15 @@ export const StockTransferMonitorPage: React.FC = () => {
           }}
         />
       )}
+
+      {/* Signed Document Preview Modal */}
+      <SignedDocPreviewModal
+        isOpen={Boolean(previewSignedDoc)}
+        onClose={() => setPreviewSignedDoc(null)}
+        storagePath={previewSignedDoc?.path || null}
+        fileName={previewSignedDoc?.name || 'signed_approval.pdf'}
+        approvalNo={previewSignedDoc?.approvalNo}
+      />
     </div>
   );
 };
