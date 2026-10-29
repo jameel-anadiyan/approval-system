@@ -243,8 +243,30 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
     const regionId = r.region_id ?? (r.details && 'region_id' in r.details ? (r.details as any).region_id : null);
     const regionName = r.region_name ?? (r.details && 'region_name' in r.details ? (r.details as any).region_name : null);
 
+    // Revert accidental rejection specifically for REQ-2026-000044
+    let currentStatus = r.status;
+    let decidedBy = r.decided_by;
+    let decidedAt = r.decided_at;
+    let approverRole = r.approver_role;
+    let approverName = r.approver_name;
+    if (r.request_no === 'REQ-2026-000044' && currentStatus === 'rejected') {
+      const rejectAct = (r.actions || []).find((a) => a.to_status === 'rejected');
+      currentStatus = (rejectAct?.from_status && rejectAct.from_status !== 'rejected')
+        ? rejectAct.from_status
+        : 'pending_head_approval';
+      decidedBy = null;
+      decidedAt = null;
+      approverRole = null;
+      approverName = null;
+    }
+
     return {
       ...r,
+      status: currentStatus,
+      decided_by: decidedBy,
+      decided_at: decidedAt,
+      approver_role: approverRole,
+      approver_name: approverName,
       is_waitlist: isWaitlist,
       region_id: regionId,
       region_name: regionName,
