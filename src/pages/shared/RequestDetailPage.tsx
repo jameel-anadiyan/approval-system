@@ -991,17 +991,7 @@ export const RequestDetailPage: React.FC = () => {
 
           {/* Document Viewer (PDF or Photos) */}
           {showOriginals && originalDocs.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Attached Invoices &amp; Documents
-                </h3>
-                <span className="text-xs text-slate-400">
-                  {originalDocs.length} file(s)
-                </span>
-              </div>
-              <DocumentViewer key={originalDocs.map((f) => f.id).join(',')} files={originalDocs} />
-            </div>
+            <DocumentViewer key={originalDocs.map((f) => f.id).join(',')} files={originalDocs} />
           )}
 
           {editable && rType === 'general' && !(request.files || []).some((f) => f.kind === 'document') && (

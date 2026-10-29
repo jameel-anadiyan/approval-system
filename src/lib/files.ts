@@ -11,7 +11,12 @@ export async function getSignedUrl(
   path: string,
   downloadAs?: string
 ): Promise<{ url: string | null; error?: string }> {
-  if (path.startsWith('data:') || path.startsWith('http://') || path.startsWith('https://')) {
+  if (
+    path.startsWith('data:') ||
+    path.startsWith('http://') ||
+    path.startsWith('https://') ||
+    path.startsWith('blob:')
+  ) {
     return { url: path };
   }
   const { data, error } = await supabase.storage
@@ -27,6 +32,21 @@ export async function downloadStoredFile(
   path: string,
   fileName: string
 ): Promise<{ success: boolean; error?: string }> {
+  if (
+    path.startsWith('blob:') ||
+    path.startsWith('data:') ||
+    path.startsWith('http://') ||
+    path.startsWith('https://')
+  ) {
+    const a = document.createElement('a');
+    a.href = path;
+    a.download = fileName;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return { success: true };
+  }
   const { url, error } = await getSignedUrl(bucket, path, fileName);
   if (!url) return { success: false, error };
   const a = document.createElement('a');
@@ -63,8 +83,13 @@ export function useSignedUrl(bucket: Bucket, path: string | undefined | null, li
       setState({ url: null, loading: false });
       return;
     }
-    // Direct data or web URL (e.g. mock or newly uploaded preview)
-    if (path.startsWith('data:') || path.startsWith('http://') || path.startsWith('https://')) {
+    // Direct data, blob, or web URL (e.g. mock or newly uploaded preview)
+    if (
+      path.startsWith('data:') ||
+      path.startsWith('http://') ||
+      path.startsWith('https://') ||
+      path.startsWith('blob:')
+    ) {
       setState({ url: path, loading: false });
       return;
     }

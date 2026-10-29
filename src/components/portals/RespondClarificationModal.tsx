@@ -4,9 +4,10 @@ import { RequestRecord, DisbursementClarification } from '../../types/database';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { ConsultationVoicePlayer } from '../requests/ConsultationVoicePlayer';
-import { Loader2, MessageSquare, AlertCircle, CornerDownLeft, Paperclip, FileText, Image as ImageIcon, X } from 'lucide-react';
+import { Loader2, MessageSquare, AlertCircle, CornerDownLeft, Paperclip, FileText, Image as ImageIcon, X, Eye } from 'lucide-react';
 import { formatISTDate, formatFileSize } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
+import { DocumentPreviewModal } from '../requests/DocumentPreviewModal';
 
 const MAX_FILES = 10;
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -32,6 +33,7 @@ export const RespondClarificationModal: React.FC<RespondClarificationModalProps>
   const [responseNote, setResponseNote] = useState('');
   const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,6 +196,14 @@ export const RespondClarificationModal: React.FC<RespondClarificationModalProps>
                   <span className="text-slate-400 shrink-0">{formatFileSize(f.size)}</span>
                   <button
                     type="button"
+                    onClick={() => setPreviewIndex(i)}
+                    className="p-1 rounded-md text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 cursor-pointer"
+                    title={`Preview ${f.name}`}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setFiles(files.filter((_, j) => j !== i))}
                     className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
                     aria-label={`Remove ${f.name}`}
@@ -208,6 +218,21 @@ export const RespondClarificationModal: React.FC<RespondClarificationModalProps>
             Files are stamped as an <strong>Addendum</strong> with your seal &amp; signature and added to the signed documents and packet for Disbursement.
           </p>
         </div>
+
+        {/* Preview Modal for Attached Files */}
+        <DocumentPreviewModal
+          isOpen={previewIndex !== null}
+          onClose={() => setPreviewIndex(null)}
+          files={files.map((f) => ({
+            name: f.name,
+            publicUrl: URL.createObjectURL(f),
+            mimeType: f.type,
+            sizeBytes: f.size,
+            badge: 'Clarification Addendum',
+          }))}
+          initialIndex={previewIndex ?? 0}
+          title="Clarification Document Preview"
+        />
 
         {/* Action Buttons */}
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">

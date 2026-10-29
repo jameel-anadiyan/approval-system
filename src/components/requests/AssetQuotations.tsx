@@ -3,12 +3,13 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   Award, CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, Plus, Star, Trash2, TrendingDown,
-  UploadCloud, XCircle,
+  UploadCloud, XCircle, Eye,
 } from 'lucide-react';
 import { RequestDetails, RequestFile, RequestRecord } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate } from '../../lib/formatters';
 import { useSignedUrl } from '../../lib/files';
 import { useAuth } from '../../context/AuthContext';
+import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
 
 export const MIN_QUOTES = 2;
 export const MAX_QUOTES = 10;
@@ -182,6 +183,7 @@ export const QuotationsEditor: React.FC<{
   minQuotes?: number;
   maxAmount?: number;
 }> = ({ rows, onChange, onRemoveExisting, disabled, minQuotes = MIN_QUOTES, maxAmount }) => {
+  const [previewDoc, setPreviewDoc] = useState<DocumentPreviewItem | null>(null);
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const { complete, lowest, amount } = quoteSummary(rows);
 
@@ -271,10 +273,29 @@ export const QuotationsEditor: React.FC<{
                   <span className="text-xs font-semibold text-slate-700 truncate">{doc.original_name}</span>
                   {r.existing && <span className="text-[10px] text-slate-400 shrink-0">uploaded</span>}
                 </div>
-                {!r.existing && (
-                  <button type="button" disabled={disabled} onClick={() => inputs.current[r.key]?.click()}
-                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 shrink-0">Change</button>
-                )}
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPreviewDoc({
+                        name: doc.original_name,
+                        publicUrl: doc.public_url,
+                        storagePath: doc.storage_path,
+                        mimeType: doc.mime_type,
+                        sizeBytes: doc.size_bytes,
+                        badge: 'Quotation Bill',
+                      })
+                    }
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Preview</span>
+                  </button>
+                  {!r.existing && (
+                    <button type="button" disabled={disabled} onClick={() => inputs.current[r.key]?.click()}
+                      className="text-[11px] font-bold text-slate-500 hover:text-slate-800">Change</button>
+                  )}
+                </div>
               </div>
             ) : (
               <button type="button" disabled={disabled} id={`quote-file-${i}`} onClick={() => inputs.current[r.key]?.click()}
@@ -301,6 +322,13 @@ export const QuotationsEditor: React.FC<{
           )}
         </div>
       </div>
+
+      <DocumentPreviewModal
+        isOpen={Boolean(previewDoc)}
+        onClose={() => setPreviewDoc(null)}
+        files={previewDoc ? [previewDoc] : []}
+        title="Quotation Document Preview"
+      />
     </div>
   );
 };
@@ -310,16 +338,30 @@ export const QuotationsEditor: React.FC<{
 export const quoteFiles = (r: Pick<RequestRecord, 'files'>): RequestFile[] =>
   (r.files ?? []).filter((f) => f.kind === 'document' && f.quote_amount !== null && f.quote_amount !== undefined);
 
-const QuoteLink: React.FC<{ file: RequestFile }> = ({ file }) => {
+const QuoteLink: React.FC<{ file: RequestFile; onPreview?: () => void }> = ({ file, onPreview }) => {
   const { isBackendConnected } = useAuth();
   const signed = useSignedUrl('request-files', file.storage_path, isBackendConnected);
   const url = isBackendConnected ? signed.url : file.public_url;
-  if (!url) return <span className="text-[11px] text-slate-400">{signed.loading ? 'Loading…' : file.original_name}</span>;
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 max-w-full">
-      <ExternalLink className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{file.original_name}</span>
-    </a>
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {onPreview && (
+        <button
+          type="button"
+          onClick={onPreview}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition-colors cursor-pointer"
+          title={`Preview ${file.original_name}`}
+        >
+          <Eye className="w-3 h-3" />
+          <span>Preview Bill</span>
+        </button>
+      )}
+      {url && (
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-indigo-800 max-w-[140px] truncate">
+          <ExternalLink className="w-3 h-3 shrink-0" /> <span className="truncate">{file.original_name}</span>
+        </a>
+      )}
+    </div>
   );
 };
 
@@ -333,6 +375,7 @@ export const QuotationsPanel: React.FC<{
 }> = ({ request, canSelect, selectorRole, threshold, onSelect }) => {
   const quotes = useMemo(() => quoteFiles(request), [request]);
   const [choice, setChoice] = useState<string | null>(request.selected_quote_id ?? (quotes.length === 1 ? quotes[0].id : null));
+  const [previewDocIndex, setPreviewDocIndex] = useState<number | null>(null);
   const [remarks, setRemarks] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -400,7 +443,7 @@ export const QuotationsPanel: React.FC<{
               </div>
               <div className="mt-1.5 font-bold text-sm text-slate-900 truncate">{q.quote_vendor || 'Vendor'}</div>
               <div className="text-lg font-extrabold font-display text-slate-900">{formatINR(Number(q.quote_amount))}</div>
-              <div className="mt-1.5" onClick={(e) => e.stopPropagation()}><QuoteLink file={q} /></div>
+              <div className="mt-1.5" onClick={(e) => e.stopPropagation()}><QuoteLink file={q} onPreview={() => setPreviewDocIndex(i)} /></div>
               {(isSel || isRej) && (
                 <div className={`mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold tracking-wide ${
                   isSel ? 'bg-emerald-600 text-white' : 'bg-rose-100 text-rose-700'}`}>
@@ -436,6 +479,24 @@ export const QuotationsPanel: React.FC<{
           </button>
         </div>
       )}
+
+      {/* Quotation Bills Full Modal Preview */}
+      <DocumentPreviewModal
+        isOpen={previewDocIndex !== null}
+        onClose={() => setPreviewDocIndex(null)}
+        files={quotes.map((q) => ({
+          id: q.id,
+          name: q.original_name,
+          storagePath: q.storage_path,
+          publicUrl: q.public_url,
+          bucket: 'request-files',
+          mimeType: q.mime_type,
+          sizeBytes: q.size_bytes,
+          badge: q.quote_vendor ? `${q.quote_vendor} · ${formatINR(Number(q.quote_amount))}` : 'Quotation Bill',
+        }))}
+        initialIndex={previewDocIndex ?? 0}
+        title="Quotation Bill Preview"
+      />
     </div>
   );
 };

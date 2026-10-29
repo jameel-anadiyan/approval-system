@@ -1,7 +1,8 @@
-import React, { useRef } from 'react';
-import { UploadCloud, Camera, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { UploadCloud, Camera, FileText, Image as ImageIcon, Trash2, Eye } from 'lucide-react';
 import { RequestFile } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
+import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
 
 interface FileUploaderProps {
   files: RequestFile[];
@@ -16,6 +17,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   onRemoveFile,
   disabled = false,
 }) => {
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -126,11 +128,21 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
       {/* Attached Files List */}
       {files.length > 0 && (
         <div className="space-y-2 mt-3">
-          <label className="text-xs font-semibold text-slate-600 block">
-            Attached Documents ({files.length})
-          </label>
-          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white">
-            {files.map((file) => {
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-slate-700 block">
+              Attached Documents ({files.length})
+            </label>
+            <button
+              type="button"
+              onClick={() => setPreviewIndex(0)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 cursor-pointer"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Preview Attached</span>
+            </button>
+          </div>
+          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+            {files.map((file, idx) => {
               const isPdf = file.mime_type.includes('pdf');
               return (
                 <div
@@ -161,22 +173,51 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                     </div>
                   </div>
 
-                  {!disabled && (
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
-                      onClick={() => onRemoveFile(file.id)}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-                      title="Remove file"
+                      onClick={() => setPreviewIndex(idx)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-800 text-xs font-bold transition-colors cursor-pointer"
+                      title={`Preview ${file.original_name}`}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                      <span className="hidden sm:inline">Preview</span>
                     </button>
-                  )}
+
+                    {!disabled && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveFile(file.id)}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
+                        title="Remove file"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
       )}
+
+      {/* Preview Modal for Uploaded Files */}
+      <DocumentPreviewModal
+        isOpen={previewIndex !== null}
+        onClose={() => setPreviewIndex(null)}
+        files={files.map((f) => ({
+          id: f.id,
+          name: f.original_name,
+          publicUrl: f.public_url,
+          storagePath: f.storage_path,
+          mimeType: f.mime_type,
+          sizeBytes: f.size_bytes,
+          badge: 'Uploaded',
+        }))}
+        initialIndex={previewIndex ?? 0}
+        title="Uploaded Document Preview"
+      />
     </div>
   );
 };
