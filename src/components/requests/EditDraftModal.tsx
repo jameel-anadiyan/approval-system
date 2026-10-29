@@ -282,12 +282,16 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
                   {f.kind === 'voice_note' ? <Mic className="w-4 h-4 text-violet-500" /> : <FileText className="w-4 h-4 text-indigo-500" />}
                   <span className="flex-1 truncate font-medium text-slate-700">{f.original_name}</span>
                   <span className="text-[10px] text-slate-400">{formatFileSize(f.size_bytes)}</span>
-                  {!f.added_by && (
-                    <button type="button" onClick={() => handleRemoveExisting(f.id)} disabled={removingId === f.id}
-                      className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 disabled:opacity-50" aria-label={`Remove ${f.original_name}`}>
-                      {removingId === f.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveExisting(f.id)}
+                    disabled={removingId === f.id}
+                    className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 disabled:opacity-50 cursor-pointer transition-colors"
+                    aria-label={`Remove ${f.original_name}`}
+                    title="Delete attachment"
+                  >
+                    {removingId === f.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  </button>
                 </li>
               ))}
             </ul>

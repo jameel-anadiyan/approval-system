@@ -30,6 +30,7 @@ interface DocumentViewerProps {
   title?: string;
   requestId?: string;
   canAddDocs?: boolean;
+  canDeleteDocs?: boolean;
 }
 
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({
@@ -37,6 +38,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   title = 'Attached Invoices & Documents',
   requestId,
   canAddDocs = false,
+  canDeleteDocs = false,
 }) => {
   const { isBackendConnected, user } = useAuth();
   const { addExtraDocuments, removeExtraDocument } = useRequests();
@@ -359,9 +361,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     activeFile.original_name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/i);
 
   const canDeleteActiveFile = Boolean(
-    canAddDocs &&
     requestId &&
-    (activeFile.added_by === user?.id || user?.role === 'admin')
+    activeFile &&
+    (
+      canDeleteDocs ||
+      (canAddDocs && (activeFile.added_by === user?.id || user?.role === 'admin'))
+    )
   );
 
   const handleDownload = async (file: RequestFile) => {

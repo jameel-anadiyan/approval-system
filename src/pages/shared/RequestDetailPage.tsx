@@ -292,6 +292,10 @@ export const RequestDetailPage: React.FC = () => {
     (Boolean(request.owner_head_id) && user?.id === request.owner_head_id) ||
     isOwningHead;
   const canHeadAddDocs = Boolean((isHead || role === 'admin') && !isFinalized);
+  const canDeleteDocsOnReturned = Boolean(
+    (request.status === 'returned' || request.status === 'draft') &&
+    (isOwner || role === 'admin' || isHead || role === 'clerk')
+  );
   const canManageEntryAccount =
     isPaymentNeeded &&
     (role === 'admin' || role === 'clerk' || isHead) &&
@@ -997,6 +1001,7 @@ export const RequestDetailPage: React.FC = () => {
               files={originalDocs}
               requestId={request.id}
               canAddDocs={canHeadAddDocs}
+              canDeleteDocs={canDeleteDocsOnReturned}
             />
           )}
 

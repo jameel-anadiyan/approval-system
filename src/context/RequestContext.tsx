@@ -790,11 +790,35 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const removeFile = async (requestId: string, fileId: string): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (isBackendConnected) {
-      const { data: path, error } = await supabase.rpc('remove_file', { p_file_id: fileId });
-      if (error) return { success: false, error: errMsg(error) };
-      if (path) await supabase.storage.from('request-files').remove([path as string]);
-      await loadRequests();
-      return { success: true };
+      const { data: path, error: rpcErr } = await supabase.rpc('remove_file', { p_file_id: fileId });
+
+      if (!rpcErr) {
+        if (path) {
+          try {
+            await supabase.storage.from('request-files').remove([path as string]);
+          } catch {
+            // ignore storage error if already removed
+          }
+        }
+        updateLocalRequests((prev) =>
+          prev.map((r) => (r.id === requestId ? { ...r, files: (r.files || []).filter((f) => f.id !== fileId) } : r))
+        );
+        await loadRequests(true);
+        return { success: true };
+      }
+
+      console.warn('remove_file RPC failed, trying direct table delete fallback:', rpcErr);
+
+      const { error: delErr } = await supabase.from('request_files').delete().eq('id', fileId);
+      if (!delErr) {
+        updateLocalRequests((prev) =>
+          prev.map((r) => (r.id === requestId ? { ...r, files: (r.files || []).filter((f) => f.id !== fileId) } : r))
+        );
+        await loadRequests(true);
+        return { success: true };
+      }
+
+      return { success: false, error: rpcErr.message || delErr.message };
     }
     updateLocalRequests((prev) =>
       prev.map((r) => (r.id === requestId ? { ...r, files: (r.files || []).filter((f) => f.id !== fileId) } : r))
