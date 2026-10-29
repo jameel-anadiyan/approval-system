@@ -4,15 +4,17 @@ import { MousePointer, ZoomIn } from 'lucide-react';
 export interface UseDocumentMouseFollowOptions {
   multiplier: number;
   initialEnabled?: boolean;
+  easeSpeed?: number;
 }
 
 /**
  * Hook to manage automatic document panning following mouse movement when zoomed in (>1x).
- * Uses smooth lerp interpolation via requestAnimationFrame for silky 60fps movement.
+ * Uses smooth lerp interpolation via requestAnimationFrame with a gentle, relaxed speed.
  */
 export function useDocumentMouseFollow({
   multiplier,
   initialEnabled = true,
+  easeSpeed = 0.05, // Slower, calmer glide pace (reduced from 0.16)
 }: UseDocumentMouseFollowOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [mouseFollowEnabled, setMouseFollowEnabled] = useState(initialEnabled);
@@ -63,10 +65,10 @@ export function useDocumentMouseFollow({
         const dx = target.x - currentX;
         const dy = target.y - currentY;
 
-        // Smooth glide towards mouse target
+        // Smooth glide towards mouse target at a gentle, comfortable pace
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-          container.scrollLeft = currentX + dx * 0.16;
-          container.scrollTop = currentY + dy * 0.16;
+          container.scrollLeft = currentX + dx * easeSpeed;
+          container.scrollTop = currentY + dy * easeSpeed;
         }
       }
       animFrameRef.current = requestAnimationFrame(step);

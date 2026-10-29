@@ -1342,7 +1342,7 @@ begin
     update public.requests set
       status = 'pending_admin_approval',
       request_no = v_no,
-      route = 'A',
+      route = 'A'::public.approval_route,
       routed_by = me.id,
       routed_at = now(),
       reviewed_by = me.id,
@@ -1362,7 +1362,7 @@ begin
     update public.requests set
       status = v_next,
       request_no = v_no,
-      route = case when v_next = 'pending_head_review' then 'A' else 'B' end,
+      route = (case when v_next = 'pending_head_review' then 'A'::public.approval_route else 'B'::public.approval_route end),
       routed_by = me.id,
       routed_at = now(),
       reviewed_by = null,
