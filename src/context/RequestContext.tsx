@@ -2134,12 +2134,55 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     requestId?: string
   ): Promise<Result> => {
     if (isBackendConnected) {
-      const { error } = await supabase.rpc('cancel_head_consultation', {
+      // 1. Try RPC cancel_head_consultation
+      const { error: rpcErr } = await supabase.rpc('cancel_head_consultation', {
         p_consultation_id: consultationId,
       });
-      if (error) return { success: false, error: errMsg(error) };
-      await loadRequests(true);
-      return { success: true };
+
+      if (!rpcErr) {
+        if (requestId) {
+          updateLocalRequests((prev) =>
+            prev.map((r) =>
+              r.id === requestId
+                ? {
+                    ...r,
+                    consultations: (r.consultations || []).filter((c) => c.id !== consultationId),
+                  }
+                : r
+            )
+          );
+        }
+        await loadRequests(true);
+        return { success: true };
+      }
+
+      console.warn('cancel_head_consultation RPC failed, trying direct table delete fallback:', rpcErr);
+
+      // 2. Direct delete fallback if RPC errored or is outdated
+      const { error: delErr } = await supabase
+        .from('head_consultations')
+        .delete()
+        .eq('id', consultationId);
+
+      if (!delErr) {
+        if (requestId) {
+          updateLocalRequests((prev) =>
+            prev.map((r) =>
+              r.id === requestId
+                ? {
+                    ...r,
+                    consultations: (r.consultations || []).filter((c) => c.id !== consultationId),
+                  }
+                : r
+            )
+          );
+        }
+        await loadRequests(true);
+        return { success: true };
+      }
+
+      console.error('Direct delete also failed:', delErr);
+      return { success: false, error: rpcErr.message || delErr.message };
     }
 
     // Mock mode

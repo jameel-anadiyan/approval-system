@@ -60,10 +60,11 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
   if (!consultations || consultations.length === 0) return null;
 
   const firstConsultation = consultations[0];
+  const isHeadUser = user?.role === 'head' || user?.role === 'regional_head' || user?.role === 'admin';
   const isRequester =
     firstConsultation?.requested_by === user?.id ||
     (ownerHeadName && user?.full_name === ownerHeadName);
-  const canManageConsultations = Boolean(isRequester || user?.role === 'admin');
+  const canManageConsultations = Boolean(isHeadUser || isRequester);
 
   // Check if current logged-in user is one of the consulted heads
   const myConsultation = consultations.find((c) => c.head_id === user?.id);
@@ -206,6 +207,20 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
               type="button"
               onClick={() => setSuccessBanner(null)}
               className="font-bold text-emerald-700 hover:text-emerald-900"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Error Banner */}
+        {error && (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center justify-between">
+            <span className="font-semibold">{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="font-bold text-rose-700 hover:text-rose-900 ml-2"
             >
               ×
             </button>

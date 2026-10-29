@@ -197,10 +197,13 @@ begin
     raise exception 'Only pending consultations can be cancelled or removed';
   end if;
 
-  -- Allowed if caller requested it, or is the owning head of the request, or admin
-  can_cancel := (c.requested_by = me.id)
-    or (me.role = 'head' and (r.department_id = me.department_id or r.owner_head_id = me.id))
-    or (me.role = 'admin');
+  -- Allowed if caller requested it, or is the owning head of the request, or admin/head/regional_head
+  can_cancel := (
+    c.requested_by = me.id
+    or r.owner_head_id = me.id
+    or r.department_id = me.department_id
+    or me.role in ('admin', 'head', 'regional_head')
+  );
 
   if not can_cancel then
     raise exception 'You do not have permission to cancel this consultation';
@@ -208,12 +211,16 @@ begin
 
   delete from public.head_consultations where id = c.id;
 
-  -- Clean up unread consultation notification for the target head if exists
-  delete from public.notifications
-  where user_id = c.head_id
-    and request_id = r.id
-    and title like 'Consultation Request:%'
-    and read_at is null;
+  -- Clean up unread consultation notification for the target head if exists (safe block)
+  begin
+    delete from public.notifications
+    where user_id = c.head_id
+      and request_id = r.id
+      and read_at is null
+      and title like 'Consultation Request:%';
+  exception when others then
+    null;
+  end;
 
   perform public._log_action(
     r.id, me, 'consultation_cancelled', r.status, r.status,
@@ -230,6 +237,22 @@ end $$;
 
 revoke execute on function public.cancel_head_consultation(uuid) from public, anon;
 grant execute on function public.cancel_head_consultation(uuid) to authenticated;
+
+-- RLS policies for delete and update on head_consultations
+drop policy if exists head_consultations_delete on public.head_consultations;
+create policy head_consultations_delete on public.head_consultations for delete to authenticated
+  using (
+    (select public.my_role()) in ('admin', 'head', 'regional_head')
+    or requested_by = (select auth.uid())
+  );
+
+drop policy if exists head_consultations_update on public.head_consultations;
+create policy head_consultations_update on public.head_consultations for update to authenticated
+  using (
+    (select public.my_role()) in ('admin', 'head', 'regional_head')
+    or requested_by = (select auth.uid())
+    or head_id = (select auth.uid())
+  );
 
 -- 5. Edit consultation message / note while in pending status
 create or replace function public.update_head_consultation_note(
