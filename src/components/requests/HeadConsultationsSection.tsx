@@ -19,6 +19,8 @@ import {
   Edit3,
   X,
   RotateCcw,
+  Trash2,
+  Check,
 } from 'lucide-react';
 
 interface HeadConsultationsSectionProps {
@@ -39,7 +41,7 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
   ownerHeadName,
 }) => {
   const { user } = useAuth();
-  const { respondHeadConsultation } = useRequests();
+  const { respondHeadConsultation, cancelHeadConsultation, updateHeadConsultationNote } = useRequests();
 
   const [responseRemarks, setResponseRemarks] = useState('');
   const [responseVoice, setResponseVoice] = useState<ActionVoice | null>(null);
@@ -48,7 +50,20 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
   const [error, setError] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
+  // States for Editing Forwarder Note and Cancelling Consultation
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [editedNote, setEditedNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
   if (!consultations || consultations.length === 0) return null;
+
+  const firstConsultation = consultations[0];
+  const isRequester =
+    firstConsultation?.requested_by === user?.id ||
+    (ownerHeadName && user?.full_name === ownerHeadName);
+  const canManageConsultations = Boolean(isRequester || user?.role === 'admin');
 
   // Check if current logged-in user is one of the consulted heads
   const myConsultation = consultations.find((c) => c.head_id === user?.id);
@@ -92,7 +107,36 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
     }
   };
 
-  const firstConsultation = consultations[0];
+  const handleUpdateNote = async () => {
+    if (!firstConsultation) return;
+    setSavingNote(true);
+    setError(null);
+    try {
+      const res = await updateHeadConsultationNote(firstConsultation.id, editedNote.trim(), _requestId);
+      if (!res.success) throw new Error(res.error || 'Failed to update consultation message');
+      setIsEditingNote(false);
+      setSuccessBanner('Updated message for all pending consultations successfully.');
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const handleCancelConsultation = async (consultationId: string, headName: string) => {
+    setCancellingId(consultationId);
+    setError(null);
+    try {
+      const res = await cancelHeadConsultation(consultationId, _requestId);
+      if (!res.success) throw new Error(res.error || 'Failed to remove consultation');
+      setConfirmCancelId(null);
+      setSuccessBanner(`Removed consultation request with ${headName}.`);
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   return (
     <div className="bg-white rounded-2xl border border-purple-200/90 shadow-xs overflow-hidden">
@@ -169,19 +213,78 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
         )}
 
         {/* Forwarder's note/question and audio record */}
-        {(firstConsultation.request_note || firstConsultation.request_voice_path) && (
+        {(firstConsultation.request_note || firstConsultation.request_voice_path || (canManageConsultations && pendingCount > 0)) && (
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 space-y-2">
-            <div className="flex items-start gap-2.5">
-              <MessageSquare className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-slate-800">Forwarder's Note / Question:</span>
-                {firstConsultation.request_note ? (
-                  <p className="mt-0.5 text-slate-600 italic">"{firstConsultation.request_note}"</p>
-                ) : (
-                  <p className="mt-0.5 text-slate-500 italic">Audio record attached below</p>
+            {!isEditingNote ? (
+              <div className="flex items-start justify-between gap-2.5">
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <MessageSquare className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <span className="font-bold text-slate-800">Forwarder's Note / Question:</span>
+                    {firstConsultation.request_note ? (
+                      <p className="mt-0.5 text-slate-600 italic">"{firstConsultation.request_note}"</p>
+                    ) : (
+                      <p className="mt-0.5 text-slate-400 italic">No message provided yet</p>
+                    )}
+                  </div>
+                </div>
+
+                {canManageConsultations && pendingCount > 0 && !isFinalized && (
+                  <button
+                    type="button"
+                    id="edit-consultation-message-btn"
+                    onClick={() => {
+                      setEditedNote(firstConsultation.request_note || '');
+                      setIsEditingNote(true);
+                      setError(null);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-purple-200 text-purple-700 hover:bg-purple-50 font-semibold text-[11px] shadow-xs transition-all shrink-0 cursor-pointer"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    <span>Edit Message</span>
+                  </button>
                 )}
               </div>
-            </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <Edit3 className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Edit Message to Consulted Head(s)</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Updates message for pending consultations
+                  </span>
+                </div>
+                <textarea
+                  rows={2}
+                  value={editedNote}
+                  onChange={(e) => setEditedNote(e.target.value)}
+                  placeholder="Type updated question or message for the consulted head..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-purple-200 bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-hidden"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={savingNote}
+                    onClick={() => setIsEditingNote(false)}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 font-semibold text-xs transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    id="save-consultation-message-btn"
+                    disabled={savingNote}
+                    onClick={handleUpdateNote}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {savingNote ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                    <span>Save Message</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {firstConsultation.request_voice_path && (
               <div className="pt-2 border-t border-slate-200/80">
@@ -505,6 +608,57 @@ export const HeadConsultationsSection: React.FC<HeadConsultationsSectionProps> =
                     {c.responded_at && (
                       <div className="text-[10px] text-slate-400">
                         Responded {formatISTDate(c.responded_at)}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Remove Request Option: Requester can remove pending consultation */}
+                {isPendingConsult && canManageConsultations && !isFinalized && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-200/60">
+                    {confirmCancelId === c.id ? (
+                      <div className="p-2 bg-amber-50/90 border border-amber-200 rounded-lg flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-amber-900">
+                          Remove request to this head?
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            disabled={cancellingId === c.id}
+                            onClick={() => handleCancelConsultation(c.id, c.head_name)}
+                            className="px-2 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] shadow-xs cursor-pointer inline-flex items-center gap-1 disabled:opacity-50"
+                          >
+                            {cancellingId === c.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3 h-3" />
+                            )}
+                            <span>Yes, Remove</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={cancellingId === c.id}
+                            onClick={() => setConfirmCancelId(null)}
+                            className="px-2 py-1 rounded-md bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium text-[10px] cursor-pointer"
+                          >
+                            Keep
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-amber-700 font-medium italic">
+                          Awaiting response
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmCancelId(c.id)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 font-bold text-[10px] transition-all cursor-pointer"
+                          title="Remove consultation request"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Remove Request</span>
+                        </button>
                       </div>
                     )}
                   </div>

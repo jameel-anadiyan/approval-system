@@ -291,6 +291,7 @@ export const RequestDetailPage: React.FC = () => {
     role === 'regional_head' ||
     (Boolean(request.owner_head_id) && user?.id === request.owner_head_id) ||
     isOwningHead;
+  const canHeadAddDocs = Boolean((isHead || role === 'admin') && !isFinalized);
   const canManageEntryAccount =
     isPaymentNeeded &&
     (role === 'admin' || role === 'clerk' || isHead) &&
@@ -990,8 +991,13 @@ export const RequestDetailPage: React.FC = () => {
           {showOriginals && voiceNotes.map((vn) => <VoiceNoteItem key={vn.id} file={vn} />)}
 
           {/* Document Viewer (PDF or Photos) */}
-          {showOriginals && originalDocs.length > 0 && (
-            <DocumentViewer key={originalDocs.map((f) => f.id).join(',')} files={originalDocs} />
+          {showOriginals && (originalDocs.length > 0 || canHeadAddDocs) && (
+            <DocumentViewer
+              key={originalDocs.map((f) => f.id).join(',')}
+              files={originalDocs}
+              requestId={request.id}
+              canAddDocs={canHeadAddDocs}
+            />
           )}
 
           {editable && rType === 'general' && !(request.files || []).some((f) => f.kind === 'document') && (

@@ -160,6 +160,23 @@ interface RequestContextType {
     voice?: ActionVoice | null,
     requestId?: string
   ) => Promise<Result>;
+  cancelHeadConsultation: (
+    consultationId: string,
+    requestId?: string
+  ) => Promise<Result>;
+  updateHeadConsultationNote: (
+    consultationId: string,
+    note: string,
+    requestId?: string
+  ) => Promise<Result>;
+  addExtraDocuments: (
+    requestId: string,
+    files: File[]
+  ) => Promise<Result>;
+  removeExtraDocument: (
+    requestId: string,
+    fileId: string
+  ) => Promise<Result>;
   loadConsultableHeads: () => Promise<Profile[]>;
   requestDisbursementClarification: (
     requestId: string,
@@ -2112,6 +2129,230 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const cancelHeadConsultation = async (
+    consultationId: string,
+    requestId?: string
+  ): Promise<Result> => {
+    if (isBackendConnected) {
+      const { error } = await supabase.rpc('cancel_head_consultation', {
+        p_consultation_id: consultationId,
+      });
+      if (error) return { success: false, error: errMsg(error) };
+      await loadRequests(true);
+      return { success: true };
+    }
+
+    // Mock mode
+    if (requestId) {
+      updateLocalRequests((prev) =>
+        prev.map((r) => {
+          if (r.id !== requestId) return r;
+          const targetConsult = (r.consultations || []).find((c) => c.id === consultationId);
+          return {
+            ...r,
+            consultations: (r.consultations || []).filter((c) => c.id !== consultationId),
+            actions: [
+              {
+                id: `act-${Date.now()}`,
+                request_id: r.id,
+                actor_id: user?.id || 'user',
+                actor_name: user?.full_name || 'Department Head',
+                actor_role: user?.role || 'head',
+                action: 'consultation_cancelled',
+                from_status: r.status,
+                to_status: r.status,
+                remarks: `Cancelled Inter-Department consultation with ${targetConsult?.head_name || 'head'}`,
+                visible_to_requester: true,
+                created_at: new Date().toISOString(),
+              },
+              ...(r.actions || []),
+            ],
+          };
+        })
+      );
+    }
+    return { success: true };
+  };
+
+  const updateHeadConsultationNote = async (
+    consultationId: string,
+    note: string,
+    requestId?: string
+  ): Promise<Result> => {
+    if (isBackendConnected) {
+      const { error } = await supabase.rpc('update_head_consultation_note', {
+        p_consultation_id: consultationId,
+        p_note: note,
+        p_request_id: requestId || null,
+      });
+      if (error) return { success: false, error: errMsg(error) };
+      await loadRequests(true);
+      return { success: true };
+    }
+
+    // Mock mode
+    if (requestId) {
+      updateLocalRequests((prev) =>
+        prev.map((r) => {
+          if (r.id !== requestId) return r;
+          return {
+            ...r,
+            consultations: (r.consultations || []).map((c) =>
+              c.status === 'pending' ? { ...c, request_note: note } : c
+            ),
+            actions: [
+              {
+                id: `act-${Date.now()}`,
+                request_id: r.id,
+                actor_id: user?.id || 'user',
+                actor_name: user?.full_name || 'Department Head',
+                actor_role: user?.role || 'head',
+                action: 'consultation_note_updated',
+                from_status: r.status,
+                to_status: r.status,
+                remarks: `Updated Inter-Department consultation note: "${note}"`,
+                visible_to_requester: true,
+                created_at: new Date().toISOString(),
+              },
+              ...(r.actions || []),
+            ],
+          };
+        })
+      );
+    }
+    return { success: true };
+  };
+
+  const addExtraDocuments = async (
+    requestId: string,
+    files: File[]
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!files.length) return { success: false, error: 'No files provided' };
+
+    if (isBackendConnected) {
+      for (const file of files) {
+        const contentType = file.type || 'application/pdf';
+        const safe = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
+        const path = `${requestId}/${crypto.randomUUID()}-${safe}`;
+        const { error: upErr } = await supabase.storage
+          .from('request-files')
+          .upload(path, file, { contentType, upsert: false });
+        if (upErr) return { success: false, error: `Upload failed for ${file.name}: ${upErr.message}` };
+
+        const { error: regErr } = await supabase.rpc('register_file', {
+          p_request_id: requestId,
+          p_kind: 'document',
+          p_storage_path: path,
+          p_original_name: file.name,
+          p_mime_type: contentType,
+          p_size_bytes: file.size,
+          p_page_count: null,
+          p_duration_sec: null,
+        });
+        if (regErr) {
+          await supabase.storage.from('request-files').remove([path]);
+          return { success: false, error: `Could not register ${file.name}: ${regErr.message}` };
+        }
+      }
+      await loadRequests(true);
+      return { success: true };
+    }
+
+    // Mock mode
+    const newFiles: RequestFile[] = files.map((f, i) => ({
+      id: `file-extra-${Date.now()}-${i}`,
+      request_id: requestId,
+      kind: 'document',
+      storage_path: `mock/${requestId}/${f.name}`,
+      original_name: f.name,
+      mime_type: f.type || 'application/pdf',
+      size_bytes: f.size,
+      page_count: 1,
+      duration_sec: null,
+      sha256: null,
+      created_at: new Date().toISOString(),
+      public_url: URL.createObjectURL(f),
+      added_by: user.id,
+      added_by_name: user.full_name,
+      added_by_role: user.role,
+    }));
+
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== requestId) return r;
+        return {
+          ...r,
+          files: [...(r.files || []), ...newFiles],
+          actions: [
+            {
+              id: `act-${Date.now()}`,
+              request_id: r.id,
+              actor_id: user.id,
+              actor_name: user.full_name,
+              actor_role: user.role,
+              action: 'file_attached',
+              from_status: r.status,
+              to_status: r.status,
+              remarks: `Attached extra document(s): ${files.map((x) => x.name).join(', ')}`,
+              visible_to_requester: true,
+              created_at: new Date().toISOString(),
+            },
+            ...(r.actions || []),
+          ],
+        };
+      })
+    );
+    return { success: true };
+  };
+
+  const removeExtraDocument = async (
+    requestId: string,
+    fileId: string
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (isBackendConnected) {
+      const { data: storagePath, error } = await supabase.rpc('remove_file', {
+        p_file_id: fileId,
+      });
+      if (error) return { success: false, error: errMsg(error) };
+      if (storagePath) {
+        await supabase.storage.from('request-files').remove([storagePath]);
+      }
+      await loadRequests(true);
+      return { success: true };
+    }
+
+    // Mock mode
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== requestId) return r;
+        const targetFile = (r.files || []).find((f) => f.id === fileId);
+        return {
+          ...r,
+          files: (r.files || []).filter((f) => f.id !== fileId),
+          actions: [
+            {
+              id: `act-${Date.now()}`,
+              request_id: r.id,
+              actor_id: user.id,
+              actor_name: user.full_name,
+              actor_role: user.role,
+              action: 'file_removed',
+              from_status: r.status,
+              to_status: r.status,
+              remarks: `Removed document: ${targetFile?.original_name || 'document'}`,
+              visible_to_requester: true,
+              created_at: new Date().toISOString(),
+            },
+            ...(r.actions || []),
+          ],
+        };
+      })
+    );
+    return { success: true };
+  };
+
   const loadConsultableHeads = async (): Promise<Profile[]> => {
     if (isBackendConnected) {
       const { data, error } = await supabase
@@ -2629,6 +2870,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         markTransferComplete,
         requestHeadConsultations,
         respondHeadConsultation,
+        cancelHeadConsultation,
+        updateHeadConsultationNote,
+        addExtraDocuments,
+        removeExtraDocument,
         loadConsultableHeads,
         requestDisbursementClarification,
         respondDisbursementClarification,
