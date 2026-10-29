@@ -18,6 +18,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   disabled = false,
 }) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [inlinePreviewIndex, setInlinePreviewIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -187,7 +188,12 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                     {!disabled && (
                       <button
                         type="button"
-                        onClick={() => onRemoveFile(file.id)}
+                        onClick={() => {
+                          onRemoveFile(file.id);
+                          if (inlinePreviewIndex >= files.length - 1) {
+                            setInlinePreviewIndex(Math.max(0, files.length - 2));
+                          }
+                        }}
                         className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
                         title="Remove file"
                       >
@@ -199,6 +205,99 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
               );
             })}
           </div>
+
+          {/* Small Area Preview Window: Directly opens on upload with dual scrollbars and Preview button */}
+          {(() => {
+            const currentInline = files[inlinePreviewIndex] || files[0];
+            if (!currentInline) return null;
+            const isPdf = currentInline.mime_type.includes('pdf');
+            const previewUrl = currentInline.public_url || currentInline.storage_path;
+            return (
+              <div className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-sm mt-3">
+                <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 text-white flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div
+                      className={`w-6 h-6 rounded flex items-center justify-center shrink-0 ${
+                        isPdf ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                      }`}
+                    >
+                      {isPdf ? <FileText className="w-3.5 h-3.5" /> : <ImageIcon className="w-3.5 h-3.5" />}
+                    </div>
+                    <span className="text-xs font-bold text-slate-200 truncate max-w-[220px]" title={currentInline.original_name}>
+                      {currentInline.original_name}
+                    </span>
+                    <span className="text-[10px] text-slate-400 hidden sm:inline">
+                      ({formatFileSize(currentInline.size_bytes)})
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setPreviewIndex(inlinePreviewIndex)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                    title="Open large preview modal"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Preview</span>
+                  </button>
+                </div>
+
+                {files.length > 1 && (
+                  <div className="bg-slate-950 border-b border-slate-800 px-2.5 py-1 flex items-center gap-1 overflow-x-auto scrollbar-none">
+                    {files.map((f, idx) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setInlinePreviewIndex(idx)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
+                          idx === inlinePreviewIndex
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        Doc #{idx + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="preview-scrollbars h-[320px] bg-slate-950 p-2 overflow-x-auto overflow-y-auto select-none flex flex-col items-center justify-start relative">
+                  {isPdf && previewUrl ? (
+                    <div style={{ minWidth: '700px', width: '100%', height: '100%' }}>
+                      <iframe
+                        src={`${previewUrl}#toolbar=1&navpanes=0`}
+                        title={currentInline.original_name}
+                        className="w-full h-full min-h-[300px] border-0 rounded-lg shadow bg-white"
+                      />
+                    </div>
+                  ) : previewUrl ? (
+                    <div style={{ minWidth: '500px', minHeight: '100%' }} className="flex items-center justify-center p-2">
+                      <img
+                        src={previewUrl}
+                        alt={currentInline.original_name}
+                        className="max-h-[290px] max-w-none rounded-lg shadow bg-white object-contain border border-slate-800"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                      Preview ready
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-slate-900 border-t border-slate-800 px-3 py-1 flex items-center justify-between text-[10px] text-slate-400">
+                  <span>Scroll right bar (vertical) &amp; bottom bar (horizontal)</span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewIndex(inlinePreviewIndex)}
+                    className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer"
+                  >
+                    Click to enlarge
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
