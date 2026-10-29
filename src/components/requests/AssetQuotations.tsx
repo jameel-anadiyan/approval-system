@@ -278,6 +278,7 @@ export const QuotationsEditor: React.FC<{
                     type="button"
                     onClick={() =>
                       setPreviewDoc({
+                        id: doc.id,
                         name: doc.original_name,
                         publicUrl: doc.public_url,
                         storagePath: doc.storage_path,
@@ -291,6 +292,18 @@ export const QuotationsEditor: React.FC<{
                     <Eye className="w-3.5 h-3.5" />
                     <span>Preview</span>
                   </button>
+                  {r.existing && (
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => remove(r)}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 hover:text-rose-800 cursor-pointer"
+                      title="Delete this quotation file"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  )}
                   {!r.existing && (
                     <button type="button" disabled={disabled} onClick={() => inputs.current[r.key]?.click()}
                       className="text-[11px] font-bold text-slate-500 hover:text-slate-800">Change</button>
@@ -328,6 +341,12 @@ export const QuotationsEditor: React.FC<{
         onClose={() => setPreviewDoc(null)}
         files={previewDoc ? [previewDoc] : []}
         title="Quotation Document Preview"
+        onDeleteFile={previewDoc?.id ? async (item) => {
+          const target = rows.find((r) => r.existing?.id === item.id || r.file?.id === item.id);
+          if (target) {
+            remove(target);
+          }
+        } : undefined}
       />
     </div>
   );

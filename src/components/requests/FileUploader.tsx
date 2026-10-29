@@ -365,6 +365,14 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         }))}
         initialIndex={previewIndex ?? 0}
         title="Uploaded Document Preview"
+        onDeleteFile={!disabled ? (item) => {
+          if (item.id) {
+            onRemoveFile(item.id);
+            if (inlinePreviewIndex >= files.length - 1) {
+              setInlinePreviewIndex(Math.max(0, files.length - 2));
+            }
+          }
+        } : undefined}
       />
     </div>
   );

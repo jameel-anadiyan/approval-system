@@ -16,6 +16,7 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
+  Trash2,
   X,
 } from 'lucide-react';
 import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
@@ -39,6 +40,8 @@ interface DocumentPreviewModalProps {
   initialIndex?: number;
   title?: string;
   approvalNo?: string | null;
+  onDeleteFile?: (file: DocumentPreviewItem) => Promise<boolean | void> | boolean | void;
+  canDelete?: boolean;
 }
 
 export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
@@ -48,12 +51,15 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   initialIndex = 0,
   title,
   approvalNo,
+  onDeleteFile,
+  canDelete = false,
 }) => {
   const { isBackendConnected } = useAuth();
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [multiplier, setMultiplier] = useState(1);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const {
     containerRef: canvasRef,
@@ -108,6 +114,24 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       a.remove();
     }
     setDownloading(false);
+  };
+
+  const handleDeleteDoc = async () => {
+    if (!current || !onDeleteFile) return;
+    if (!window.confirm(`Delete "${fileName}"? This will remove this attachment.`)) return;
+    setDeleting(true);
+    try {
+      const res = await onDeleteFile(current);
+      if (res !== false) {
+        if (files.length <= 1) {
+          onClose();
+        } else {
+          setActiveIndex((prev) => Math.max(0, Math.min(prev, files.length - 2)));
+        }
+      }
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handlePrevDoc = useCallback(() => {
@@ -296,6 +320,20 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               <span className="hidden sm:inline">Download</span>
             </button>
+
+            {/* Delete Attachment Button */}
+            {(onDeleteFile || canDelete) && (
+              <button
+                type="button"
+                onClick={handleDeleteDoc}
+                disabled={deleting}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                title="Delete this attachment"
+              >
+                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span className="hidden sm:inline">{deleting ? 'Deleting…' : 'Delete'}</span>
+              </button>
+            )}
 
             {/* Full Screen Toggle */}
             <button

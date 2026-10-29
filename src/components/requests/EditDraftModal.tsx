@@ -5,7 +5,8 @@ import { RequestFile, RequestRecord, RequestDetails } from '../../types/database
 import { useRequests } from '../../context/RequestContext';
 import { formatFileSize, formatINR, formatINRWhole, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
-import { FileText, Mic, Trash2, Save, Loader2 } from 'lucide-react';
+import { FileText, Mic, Trash2, Save, Loader2, Eye, Image as ImageIcon } from 'lucide-react';
+import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
 import {
   DiscountFields, ExhibitionFields, discountFromDetails, exhibitionFromDetails, discountCalc, exhibitionCalc,
   validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
@@ -73,6 +74,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const shopChoice = () => ({ shop_id: effectiveShopId || '', shop_name: effectiveShopName || null });
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [deletedFileIds, setDeletedFileIds] = useState<Set<string>>(new Set());
+  const [previewFiles, setPreviewFiles] = useState<DocumentPreviewItem[]>([]);
+  const [previewInitialIdx, setPreviewInitialIdx] = useState<number>(0);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saveLockRef = useRef(false);
 
@@ -98,15 +103,52 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
       : isAsset ? quoteSummary(quotes).amount || request.amount
       : generalTotal;
-  // Asset quotation documents are edited in the quotation editor; only voice notes are listed here.
-  const existing = (request.files || []).filter((f) => !isAsset || f.kind !== 'document');
 
-  const handleRemoveExisting = async (fileId: string) => {
+  // Asset quotation documents are edited in the quotation editor; only voice notes are listed here.
+  const existing = (request.files || []).filter(
+    (f) => !deletedFileIds.has(f.id) && (!isAsset || f.kind !== 'document')
+  );
+
+  const handleRemoveExisting = async (fileId: string, fileName?: string): Promise<boolean> => {
+    if (fileName && !window.confirm(`Delete "${fileName}"? This cannot be undone.`)) {
+      return false;
+    }
     setError(null);
     setRemovingId(fileId);
+    // Optimistically hide immediately from modal UI
+    setDeletedFileIds((prev) => new Set(prev).add(fileId));
+
     const res = await removeFile(request.id, fileId);
     setRemovingId(null);
-    if (!res.success) setError(res.error || 'Could not remove file');
+    if (!res.success) {
+      // Revert optimistic removal on error
+      setDeletedFileIds((prev) => {
+        const next = new Set(prev);
+        next.delete(fileId);
+        return next;
+      });
+      setError(res.error || 'Could not remove file');
+      return false;
+    }
+    return true;
+  };
+
+  const handlePreviewExisting = (fileId: string) => {
+    const previewable = existing.filter((f) => f.kind !== 'voice_note');
+    const items: DocumentPreviewItem[] = previewable.map((f) => ({
+      id: f.id,
+      name: f.original_name,
+      storagePath: f.storage_path,
+      publicUrl: f.public_url || null,
+      mimeType: f.mime_type,
+      sizeBytes: f.size_bytes,
+      pageCount: f.page_count,
+      badge: f.added_by_name ? `Added by: ${f.added_by_name}${f.added_by_role ? ` (${f.added_by_role})` : ''}` : undefined,
+    }));
+    const idx = previewable.findIndex((f) => f.id === fileId);
+    setPreviewFiles(items);
+    setPreviewInitialIdx(Math.max(0, idx));
+    setIsPreviewOpen(true);
   };
 
   const getDetails = (): RequestDetails | null => {
@@ -274,27 +316,105 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         </div>
 
         {existing.length > 0 && (
-          <div>
-            <span className="text-xs font-bold text-slate-700 block mb-1.5">Attached files</span>
-            <ul className="space-y-1.5">
-              {existing.map((f) => (
-                <li key={f.id} className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs">
-                  {f.kind === 'voice_note' ? <Mic className="w-4 h-4 text-violet-500" /> : <FileText className="w-4 h-4 text-indigo-500" />}
-                  <span className="flex-1 truncate font-medium text-slate-700">{f.original_name}</span>
-                  <span className="text-[10px] text-slate-400">{formatFileSize(f.size_bytes)}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveExisting(f.id)}
-                    disabled={removingId === f.id}
-                    className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 disabled:opacity-50 cursor-pointer transition-colors"
-                    aria-label={`Remove ${f.original_name}`}
-                    title="Delete attachment"
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span>Existing Attachments</span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold">
+                  {existing.length}
+                </span>
+              </label>
+              {existing.some((f) => f.kind !== 'voice_note') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstDoc = existing.find((f) => f.kind !== 'voice_note');
+                    if (firstDoc) handlePreviewExisting(firstDoc.id);
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Preview Attached</span>
+                </button>
+              )}
+            </div>
+
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+              {existing.map((f) => {
+                const isPdf = f.mime_type?.includes('pdf') || f.original_name.toLowerCase().endsWith('.pdf');
+                const isVoice = f.kind === 'voice_note';
+
+                return (
+                  <div
+                    key={f.id}
+                    className="p-3 flex items-center justify-between gap-3 hover:bg-slate-50/80 transition-colors"
                   >
-                    {removingId === f.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    <div className="flex items-center gap-3 overflow-hidden min-w-0">
+                      <div
+                        className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                          isVoice
+                            ? 'bg-violet-50 text-violet-600 border border-violet-200'
+                            : isPdf
+                            ? 'bg-rose-50 text-rose-600 border border-rose-200'
+                            : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                        }`}
+                      >
+                        {isVoice ? (
+                          <Mic className="w-4 h-4" />
+                        ) : isPdf ? (
+                          <FileText className="w-4 h-4" />
+                        ) : (
+                          <ImageIcon className="w-4 h-4" />
+                        )}
+                      </div>
+                      <div className="overflow-hidden min-w-0">
+                        <p className="text-xs font-bold text-slate-800 truncate" title={f.original_name}>
+                          {f.original_name}
+                        </p>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5 flex-wrap">
+                          <span>{formatFileSize(f.size_bytes)}</span>
+                          {f.added_by_name && (
+                            <span className="text-indigo-600 font-medium">
+                              • Added by {f.added_by_name} {f.added_by_role ? `(${f.added_by_role})` : ''}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!isVoice && (
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewExisting(f.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-800 text-xs font-bold transition-colors cursor-pointer"
+                          title={`Preview ${f.original_name}`}
+                        >
+                          <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                          <span className="hidden sm:inline">Preview</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveExisting(f.id, f.original_name)}
+                        disabled={removingId === f.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+                        aria-label={`Delete ${f.original_name}`}
+                        title="Delete attachment"
+                      >
+                        {removingId === f.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                        <span>{removingId === f.id ? 'Deleting…' : 'Delete'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -309,7 +429,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
               disabled={busy}
               minQuotes={type === 'asset_below_20k' ? 1 : 2}
               maxAmount={type === 'asset_below_20k' ? 20000 : undefined}
-              onRemoveExisting={(f) => handleRemoveExisting(f.id)}
+              onRemoveExisting={(f) => handleRemoveExisting(f.id, f.original_name)}
             />
           </div>
         ) : (
@@ -327,16 +447,31 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         {error && <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{error}</div>}
 
         <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50">
+          <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 cursor-pointer">
             Cancel
           </button>
           <button type="submit" disabled={busy}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-md shadow-indigo-200 disabled:opacity-50">
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-md shadow-indigo-200 disabled:opacity-50 cursor-pointer">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             <span>{busy ? 'Saving…' : 'Save changes'}</span>
           </button>
         </div>
       </form>
+
+      {/* Attachment Preview Modal with Delete button support */}
+      <DocumentPreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        files={previewFiles}
+        initialIndex={previewInitialIdx}
+        title={`Attachment Preview - ${request.request_no || request.title}`}
+        onDeleteFile={async (item) => {
+          if (item.id) {
+            const ok = await handleRemoveExisting(item.id, item.name);
+            return ok;
+          }
+        }}
+      />
     </Modal>
   );
 };

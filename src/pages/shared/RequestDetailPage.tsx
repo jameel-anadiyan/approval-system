@@ -371,7 +371,15 @@ export const RequestDetailPage: React.FC = () => {
   });
   // Disbursement only ever sees the stamped output, never the originals (storage policy agrees).
   const showOriginals = role !== 'disbursement';
-  const editable = isOwner && (request.status === 'draft' || request.status === 'returned');
+  const canEditReturned =
+    isOwner ||
+    role === 'admin' ||
+    (role === 'clerk' && request.department_id === user?.department_id) ||
+    ((role === 'head' || role === 'regional_head') &&
+      (request.department_id === user?.department_id || request.owner_head_id === user?.id));
+  const editable =
+    (request.status === 'draft' && isOwner) ||
+    (request.status === 'returned' && canEditReturned);
   const pay = paymentSummary(request);
   const payments = (request.payments || []).filter((p) => {
     if (!isPaymentOnly) return true;
@@ -740,7 +748,7 @@ export const RequestDetailPage: React.FC = () => {
               Returned by{' '}
               <strong>{latestReturnAction?.actor_name || 'Reviewer'}</strong>
               {latestReturnAction?.actor_role ? ` (${ROLE_LABELS[latestReturnAction.actor_role] || latestReturnAction.actor_role})` : ''}.
-              {isOwner
+              {canEditReturned
                 ? ' Please review the return remarks below, click Edit to update details or attachments, then click Resubmit.'
                 : ` Waiting for ${request.requester_name} to make corrections and resubmit.`}
             </p>
@@ -752,13 +760,13 @@ export const RequestDetailPage: React.FC = () => {
               </div>
             )}
 
-            {isOwner && (
+            {canEditReturned && (
               <div className="pt-1 flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   id="returned-edit-btn"
                   onClick={() => setModalState('edit')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-xs transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   <span>Edit Request</span>
