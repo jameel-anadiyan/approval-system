@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useSignedUrl, downloadStoredFile, Bucket } from '../../lib/files';
 import { formatFileSize } from '../../lib/formatters';
@@ -18,6 +18,7 @@ import {
   ChevronRight,
   X,
 } from 'lucide-react';
+import { PreviewJoystick } from './PreviewJoystick';
 
 export interface DocumentPreviewItem {
   id?: string;
@@ -53,6 +54,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [zoomLevel, setZoomLevel] = useState(100);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   // Sync activeIndex whenever modal opens or initialIndex changes
   useEffect(() => {
@@ -356,7 +358,10 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         {/* Scrollable Preview Canvas:
             Dually scrollable with vertical scrollbar on the right AND horizontal scrollbar at the bottom!
             Uses .preview-scrollbars with overflow-x: scroll and overflow-y: scroll */}
-        <div className="preview-scrollbars flex-1 w-full bg-slate-950 p-2 sm:p-4 select-none relative">
+        <div
+          ref={canvasRef}
+          className="preview-scrollbars flex-1 w-full bg-slate-950 p-2 sm:p-4 select-none relative overflow-x-auto overflow-y-auto"
+        >
           {signed.loading ? (
             <div className="h-full min-h-[400px] flex flex-col items-center justify-center gap-3 text-slate-400">
               <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
@@ -435,6 +440,17 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 Download Document Directly
               </button>
             </div>
+          )}
+
+          {/* Floating Transparent Joystick for Up/Down/Left/Right Axis & Zoom Controls */}
+          {resolvedUrl && (
+            <PreviewJoystick
+              containerRef={canvasRef}
+              zoomLevel={zoomLevel}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onZoomReset={handleZoomReset}
+            />
           )}
         </div>
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   FileText,
   Image as ImageIcon,
@@ -14,6 +14,7 @@ import { formatFileSize } from '../../lib/formatters';
 import { useAuth } from '../../context/AuthContext';
 import { downloadStoredFile, useSignedUrl } from '../../lib/files';
 import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
+import { PreviewJoystick } from './PreviewJoystick';
 
 interface DocumentViewerProps {
   files: RequestFile[];
@@ -31,6 +32,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [modalInitialIndex, setModalInitialIndex] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const documentFiles = files.filter((f) => f.kind === 'document');
 
@@ -218,7 +220,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
       {/* Small Area Preview Canvas:
           Equipped with .preview-scrollbars providing both vertical scrollbar on right & horizontal scrollbar at bottom! */}
-      <div className="preview-scrollbars h-[480px] sm:h-[500px] bg-slate-950 p-2 sm:p-3 select-none flex flex-col items-center justify-start overflow-x-auto overflow-y-auto relative">
+      <div
+        ref={canvasRef}
+        className="preview-scrollbars h-[480px] sm:h-[500px] bg-slate-950 p-2 sm:p-3 select-none flex flex-col items-center justify-start overflow-x-auto overflow-y-auto relative"
+      >
         {isBackendConnected && signed.loading ? (
           <div className="h-full min-h-[350px] flex flex-col items-center justify-center gap-2 text-slate-400 text-xs">
             <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
@@ -269,6 +274,17 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <FileText className="w-8 h-8 text-slate-600 mb-2" />
             <p>Document preview ready</p>
           </div>
+        )}
+
+        {/* Floating Transparent Round Joystick on the Small Preview Window */}
+        {previewUrl && (
+          <PreviewJoystick
+            containerRef={canvasRef}
+            zoomLevel={zoomLevel}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onZoomReset={() => setZoomLevel(100)}
+          />
         )}
       </div>
 

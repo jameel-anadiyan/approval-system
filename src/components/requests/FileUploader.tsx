@@ -3,6 +3,7 @@ import { UploadCloud, Camera, FileText, Image as ImageIcon, Trash2, Eye } from '
 import { RequestFile } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
 import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
+import { PreviewJoystick } from './PreviewJoystick';
 
 interface FileUploaderProps {
   files: RequestFile[];
@@ -19,8 +20,10 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
 }) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [inlinePreviewIndex, setInlinePreviewIndex] = useState(0);
+  const [inlineZoom, setInlineZoom] = useState(100);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const uploaderCanvasRef = useRef<HTMLDivElement | null>(null);
 
   const handleFiles = (incomingFiles: FileList | null) => {
     if (!incomingFiles || incomingFiles.length === 0) return;
@@ -261,9 +264,19 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                   </div>
                 )}
 
-                <div className="preview-scrollbars h-[320px] bg-slate-950 p-2 overflow-x-auto overflow-y-auto select-none flex flex-col items-center justify-start relative">
+                <div
+                  ref={uploaderCanvasRef}
+                  className="preview-scrollbars h-[320px] bg-slate-950 p-2 overflow-x-auto overflow-y-auto select-none flex flex-col items-center justify-start relative"
+                >
                   {isPdf && previewUrl ? (
-                    <div style={{ minWidth: '700px', width: '100%', height: '100%' }}>
+                    <div
+                      style={{
+                        minWidth: `${Math.max(680, Math.round((inlineZoom / 100) * 720))}px`,
+                        width: `${Math.max(100, inlineZoom)}%`,
+                        height: '100%',
+                      }}
+                      className="transition-all duration-150"
+                    >
                       <iframe
                         src={`${previewUrl}#toolbar=1&navpanes=0`}
                         title={currentInline.original_name}
@@ -271,17 +284,35 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                       />
                     </div>
                   ) : previewUrl ? (
-                    <div style={{ minWidth: '500px', minHeight: '100%' }} className="flex items-center justify-center p-2">
+                    <div
+                      style={{
+                        minWidth: `${Math.max(480, Math.round((inlineZoom / 100) * 550))}px`,
+                        minHeight: '100%',
+                      }}
+                      className="flex items-center justify-center p-2 transition-all duration-150"
+                    >
                       <img
                         src={previewUrl}
                         alt={currentInline.original_name}
-                        className="max-h-[290px] max-w-none rounded-lg shadow bg-white object-contain border border-slate-800"
+                        style={{ width: `${inlineZoom}%`, maxWidth: 'none' }}
+                        className="max-h-[290px] rounded-lg shadow bg-white object-contain border border-slate-800"
                       />
                     </div>
                   ) : (
                     <div className="h-full flex items-center justify-center text-xs text-slate-400">
                       Preview ready
                     </div>
+                  )}
+
+                  {/* Round Joystick on the Uploader Preview Window */}
+                  {previewUrl && (
+                    <PreviewJoystick
+                      containerRef={uploaderCanvasRef}
+                      zoomLevel={inlineZoom}
+                      onZoomIn={() => setInlineZoom((z) => Math.min(200, z + 25))}
+                      onZoomOut={() => setInlineZoom((z) => Math.max(50, z - 25))}
+                      onZoomReset={() => setInlineZoom(100)}
+                    />
                   )}
                 </div>
 
