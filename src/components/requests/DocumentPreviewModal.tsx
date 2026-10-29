@@ -18,7 +18,7 @@ import {
   ChevronRight,
   X,
 } from 'lucide-react';
-import { PreviewJoystick } from './PreviewJoystick';
+import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
 
 export interface DocumentPreviewItem {
   id?: string;
@@ -51,16 +51,22 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 }) => {
   const { isBackendConnected } = useAuth();
   const [activeIndex, setActiveIndex] = useState(initialIndex);
-  const [zoomLevel, setZoomLevel] = useState(100);
+  const [multiplier, setMultiplier] = useState(1);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  const {
+    containerRef: canvasRef,
+    mouseFollowEnabled,
+    setMouseFollowEnabled,
+    handleMouseMove,
+  } = useDocumentMouseFollow({ multiplier });
 
   // Sync activeIndex whenever modal opens or initialIndex changes
   useEffect(() => {
     if (isOpen) {
       setActiveIndex(Math.max(0, Math.min(initialIndex, files.length - 1)));
-      setZoomLevel(100);
+      setMultiplier(1);
     }
   }, [isOpen, initialIndex, files.length]);
 
@@ -104,23 +110,19 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     setDownloading(false);
   };
 
-  const handleZoomIn = () => setZoomLevel((z) => Math.min(250, z + 25));
-  const handleZoomOut = () => setZoomLevel((z) => Math.max(50, z - 25));
-  const handleZoomReset = () => setZoomLevel(100);
-
   const handlePrevDoc = useCallback(() => {
     if (files.length <= 1) return;
     setActiveIndex((prev) => (prev > 0 ? prev - 1 : files.length - 1));
-    setZoomLevel(100);
+    setMultiplier(1);
   }, [files.length]);
 
   const handleNextDoc = useCallback(() => {
     if (files.length <= 1) return;
     setActiveIndex((prev) => (prev < files.length - 1 ? prev + 1 : 0));
-    setZoomLevel(100);
+    setMultiplier(1);
   }, [files.length]);
 
-  // Keyboard navigation: Escape to close, Arrows to navigate documents
+  // Keyboard navigation: Escape to close, Arrows to navigate documents, 1-5 for zoom multipliers
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -130,10 +132,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         handlePrevDoc();
       } else if (e.key === 'ArrowRight' && files.length > 1) {
         handleNextDoc();
+      } else if (['1', '2', '3', '4', '5'].includes(e.key)) {
+        setMultiplier(parseInt(e.key, 10));
       } else if (e.key === '+' || e.key === '=') {
-        handleZoomIn();
+        setMultiplier((m) => Math.min(5, m + 1));
       } else if (e.key === '-') {
-        handleZoomOut();
+        setMultiplier((m) => Math.max(1, m - 1));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -213,38 +217,32 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
           {/* Action Toolbar */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Zoom Controls */}
-            <div className="hidden sm:flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80">
-              <button
-                type="button"
-                onClick={handleZoomOut}
-                className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors"
-                title="Zoom Out (-)"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={handleZoomReset}
-                className="text-[10px] font-mono font-bold px-1.5 text-slate-300 hover:text-white"
-                title="Reset Zoom to 100%"
-              >
-                {zoomLevel}%
-              </button>
-              <button
-                type="button"
-                onClick={handleZoomIn}
-                className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors"
-                title="Zoom In (+)"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-              {zoomLevel !== 100 && (
+            {/* Top Multiplier Zoom Buttons (1x, 2x, 3x, 4x, 5x) */}
+            <div className="hidden sm:flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5">
+              <span className="text-[10px] font-bold text-slate-400 px-1.5 hidden md:inline">
+                Zoom:
+              </span>
+              {[1, 2, 3, 4, 5].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMultiplier(m)}
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold font-mono transition-colors cursor-pointer ${
+                    multiplier === m
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                  title={`Zoom ${m}x`}
+                >
+                  {m}x
+                </button>
+              ))}
+              {multiplier > 1 && (
                 <button
                   type="button"
-                  onClick={handleZoomReset}
-                  className="p-1 hover:bg-slate-700 text-amber-400 rounded transition-colors"
-                  title="Reset to 100%"
+                  onClick={() => setMultiplier(1)}
+                  className="p-1 hover:bg-slate-700 text-amber-400 rounded transition-colors ml-0.5"
+                  title="Reset to 1x"
                 >
                   <RotateCcw className="w-3 h-3" />
                 </button>
@@ -336,7 +334,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   type="button"
                   onClick={() => {
                     setActiveIndex(idx);
-                    setZoomLevel(100);
+                    setMultiplier(1);
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer ${
                     active
@@ -357,9 +355,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
         {/* Scrollable Preview Canvas:
             Dually scrollable with vertical scrollbar on the right AND horizontal scrollbar at the bottom!
-            Uses .preview-scrollbars with overflow-x: scroll and overflow-y: scroll */}
+            Uses .preview-scrollbars with overflow-x: scroll and overflow-y: scroll.
+            When multiplier > 1, moving mouse glides document automatically according to cursor position. */}
         <div
           ref={canvasRef}
+          onMouseMove={handleMouseMove}
           className="preview-scrollbars flex-1 w-full bg-slate-950 p-2 sm:p-4 select-none relative overflow-x-auto overflow-y-auto"
         >
           {signed.loading ? (
@@ -379,34 +379,43 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             /* PDF Document Canvas with horizontal + vertical scroll container */
             <div
               style={{
-                minWidth: `${Math.max(820, Math.round((zoomLevel / 100) * 880))}px`,
-                width: `${Math.max(100, zoomLevel)}%`,
-                height: '100%',
-                minHeight: '740px',
+                minWidth: `${Math.max(820, multiplier * 880)}px`,
+                width: `${multiplier * 100}%`,
+                height: multiplier > 1 ? `${multiplier * 100}%` : '100%',
+                minHeight: `${Math.max(740, multiplier * 700)}px`,
               }}
-              className="mx-auto flex flex-col items-stretch transition-all duration-150"
+              className="relative mx-auto flex flex-col items-stretch transition-all duration-150"
             >
               <iframe
                 src={`${resolvedUrl}#toolbar=1&navpanes=0`}
                 title={fileName}
                 className="w-full h-full min-h-[740px] border-0 rounded-xl shadow-2xl bg-white"
               />
+              {/* Transparent overlay over iframe to capture smooth mouse panning when zoomed in */}
+              {multiplier > 1 && mouseFollowEnabled && (
+                <div
+                  className="absolute inset-0 z-10 cursor-move bg-transparent"
+                  onMouseMove={handleMouseMove}
+                  title="Mouse Follow is active: move your mouse to glide through the zoomed document"
+                />
+              )}
             </div>
           ) : resolvedUrl && isImage ? (
             /* Image Canvas with horizontal + vertical scroll container */
             <div
               style={{
-                minWidth: `${Math.max(600, Math.round((zoomLevel / 100) * 750))}px`,
-                width: `${Math.max(100, zoomLevel)}%`,
+                minWidth: `${Math.max(600, multiplier * 750)}px`,
+                width: `${multiplier * 100}%`,
                 minHeight: '100%',
               }}
-              className="mx-auto flex items-center justify-center p-2 transition-all duration-150"
+              className="relative mx-auto flex items-center justify-center p-2 transition-all duration-150"
+              onMouseMove={handleMouseMove}
             >
               <img
                 src={resolvedUrl}
                 alt={fileName}
                 style={{
-                  width: `${zoomLevel}%`,
+                  width: `${multiplier * 100}%`,
                   maxWidth: 'none',
                 }}
                 className="rounded-xl shadow-2xl bg-white object-contain border border-slate-800"
@@ -416,18 +425,24 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             /* General Document Fallback Canvas */
             <div
               style={{
-                minWidth: `${Math.max(760, Math.round((zoomLevel / 100) * 850))}px`,
-                width: `${Math.max(100, zoomLevel)}%`,
-                height: '100%',
-                minHeight: '680px',
+                minWidth: `${Math.max(760, multiplier * 850)}px`,
+                width: `${multiplier * 100}%`,
+                height: multiplier > 1 ? `${multiplier * 100}%` : '100%',
+                minHeight: `${Math.max(680, multiplier * 640)}px`,
               }}
-              className="mx-auto flex flex-col items-stretch"
+              className="relative mx-auto flex flex-col items-stretch"
             >
               <iframe
                 src={resolvedUrl}
                 title={fileName}
                 className="w-full h-full min-h-[680px] border-0 rounded-xl shadow-2xl bg-white"
               />
+              {multiplier > 1 && mouseFollowEnabled && (
+                <div
+                  className="absolute inset-0 z-10 cursor-move bg-transparent"
+                  onMouseMove={handleMouseMove}
+                />
+              )}
             </div>
           ) : (
             <div className="h-full min-h-[400px] flex flex-col items-center justify-center p-6 text-center space-y-3">
@@ -442,14 +457,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             </div>
           )}
 
-          {/* Floating Transparent Joystick for Up/Down/Left/Right Axis & Zoom Controls */}
+          {/* Floating Transparent Zoom Multiplier Controls & Mouse Follow Toggle */}
           {resolvedUrl && (
-            <PreviewJoystick
-              containerRef={canvasRef}
-              zoomLevel={zoomLevel}
-              onZoomIn={handleZoomIn}
-              onZoomOut={handleZoomOut}
-              onZoomReset={handleZoomReset}
+            <ZoomMultiplierControls
+              multiplier={multiplier}
+              onSelectMultiplier={setMultiplier}
+              mouseFollowEnabled={mouseFollowEnabled}
+              onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
             />
           )}
         </div>
@@ -457,9 +471,18 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         {/* Bottom Helper Bar */}
         <div className="bg-slate-900 border-t border-slate-800 px-4 py-2 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
           <div className="flex items-center gap-3">
-            <span>Scroll horizontally (bottom bar) &amp; vertically (right bar) to view margins</span>
-            {zoomLevel !== 100 && (
-              <span className="text-indigo-400 font-mono font-bold">Zoom: {zoomLevel}%</span>
+            <span>Scroll bars available (horizontal &amp; vertical).</span>
+            {multiplier > 1 ? (
+              <span className="text-indigo-400 font-bold flex items-center gap-1.5">
+                <span>Zoom {multiplier}x</span>
+                {mouseFollowEnabled && (
+                  <span className="text-emerald-400 font-normal">
+                    • Mouse follow active (cursor pans document)
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span className="text-slate-500">Select 2x, 3x, 4x to zoom with mouse-follow</span>
             )}
           </div>
           <div className="hidden sm:flex items-center gap-2">

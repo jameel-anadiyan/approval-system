@@ -3,7 +3,7 @@ import { UploadCloud, Camera, FileText, Image as ImageIcon, Trash2, Eye } from '
 import { RequestFile } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
 import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
-import { PreviewJoystick } from './PreviewJoystick';
+import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
 
 interface FileUploaderProps {
   files: RequestFile[];
@@ -20,10 +20,16 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
 }) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [inlinePreviewIndex, setInlinePreviewIndex] = useState(0);
-  const [inlineZoom, setInlineZoom] = useState(100);
+  const [inlineMultiplier, setInlineMultiplier] = useState(1);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
-  const uploaderCanvasRef = useRef<HTMLDivElement | null>(null);
+
+  const {
+    containerRef: uploaderCanvasRef,
+    mouseFollowEnabled,
+    setMouseFollowEnabled,
+    handleMouseMove,
+  } = useDocumentMouseFollow({ multiplier: inlineMultiplier });
 
   const handleFiles = (incomingFiles: FileList | null) => {
     if (!incomingFiles || incomingFiles.length === 0) return;
@@ -251,7 +257,10 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                       <button
                         key={f.id}
                         type="button"
-                        onClick={() => setInlinePreviewIndex(idx)}
+                        onClick={() => {
+                          setInlinePreviewIndex(idx);
+                          setInlineMultiplier(1);
+                        }}
                         className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
                           idx === inlinePreviewIndex
                             ? 'bg-indigo-600 text-white'
@@ -266,35 +275,45 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
 
                 <div
                   ref={uploaderCanvasRef}
+                  onMouseMove={handleMouseMove}
                   className="preview-scrollbars h-[320px] bg-slate-950 p-2 overflow-x-auto overflow-y-auto select-none flex flex-col items-center justify-start relative"
                 >
                   {isPdf && previewUrl ? (
                     <div
                       style={{
-                        minWidth: `${Math.max(680, Math.round((inlineZoom / 100) * 720))}px`,
-                        width: `${Math.max(100, inlineZoom)}%`,
-                        height: '100%',
+                        minWidth: `${Math.max(680, inlineMultiplier * 720)}px`,
+                        width: `${inlineMultiplier * 100}%`,
+                        height: inlineMultiplier > 1 ? `${inlineMultiplier * 100}%` : '100%',
                       }}
-                      className="transition-all duration-150"
+                      className="relative transition-all duration-150"
                     >
                       <iframe
                         src={`${previewUrl}#toolbar=1&navpanes=0`}
                         title={currentInline.original_name}
                         className="w-full h-full min-h-[300px] border-0 rounded-lg shadow bg-white"
                       />
+                      {inlineMultiplier > 1 && mouseFollowEnabled && (
+                        <div
+                          className="absolute inset-0 z-10 cursor-move bg-transparent"
+                          onMouseMove={handleMouseMove}
+                          title="Mouse Follow is active: move your mouse to glide through the zoomed document"
+                        />
+                      )}
                     </div>
                   ) : previewUrl ? (
                     <div
                       style={{
-                        minWidth: `${Math.max(480, Math.round((inlineZoom / 100) * 550))}px`,
+                        minWidth: `${Math.max(480, inlineMultiplier * 550)}px`,
+                        width: `${inlineMultiplier * 100}%`,
                         minHeight: '100%',
                       }}
-                      className="flex items-center justify-center p-2 transition-all duration-150"
+                      className="relative flex items-center justify-center p-2 transition-all duration-150"
+                      onMouseMove={handleMouseMove}
                     >
                       <img
                         src={previewUrl}
                         alt={currentInline.original_name}
-                        style={{ width: `${inlineZoom}%`, maxWidth: 'none' }}
+                        style={{ width: `${inlineMultiplier * 100}%`, maxWidth: 'none' }}
                         className="max-h-[290px] rounded-lg shadow bg-white object-contain border border-slate-800"
                       />
                     </div>
@@ -304,14 +323,13 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                     </div>
                   )}
 
-                  {/* Round Joystick on the Uploader Preview Window */}
+                  {/* Floating Zoom Multiplier Controls with Mouse Follow */}
                   {previewUrl && (
-                    <PreviewJoystick
-                      containerRef={uploaderCanvasRef}
-                      zoomLevel={inlineZoom}
-                      onZoomIn={() => setInlineZoom((z) => Math.min(200, z + 25))}
-                      onZoomOut={() => setInlineZoom((z) => Math.max(50, z - 25))}
-                      onZoomReset={() => setInlineZoom(100)}
+                    <ZoomMultiplierControls
+                      multiplier={inlineMultiplier}
+                      onSelectMultiplier={setInlineMultiplier}
+                      mouseFollowEnabled={mouseFollowEnabled}
+                      onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
                     />
                   )}
                 </div>

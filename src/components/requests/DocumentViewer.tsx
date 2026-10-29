@@ -14,7 +14,7 @@ import { formatFileSize } from '../../lib/formatters';
 import { useAuth } from '../../context/AuthContext';
 import { downloadStoredFile, useSignedUrl } from '../../lib/files';
 import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
-import { PreviewJoystick } from './PreviewJoystick';
+import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
 
 interface DocumentViewerProps {
   files: RequestFile[];
@@ -27,12 +27,18 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 }) => {
   const { isBackendConnected } = useAuth();
   const [activeFileIndex, setActiveFileIndex] = useState(0);
-  const [zoomLevel, setZoomLevel] = useState(100);
+  const [multiplier, setMultiplier] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialIndex, setModalInitialIndex] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  const {
+    containerRef: canvasRef,
+    mouseFollowEnabled,
+    setMouseFollowEnabled,
+    handleMouseMove,
+  } = useDocumentMouseFollow({ multiplier });
 
   const documentFiles = files.filter((f) => f.kind === 'document');
 
@@ -53,9 +59,6 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const isImage =
     activeFile.mime_type.includes('image') ||
     activeFile.original_name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/i);
-
-  const handleZoomIn = () => setZoomLevel((z) => Math.min(200, z + 25));
-  const handleZoomOut = () => setZoomLevel((z) => Math.max(50, z - 25));
 
   const handleDownload = async (file: RequestFile) => {
     setDownloadError(null);
@@ -118,27 +121,23 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
         {/* Toolbar Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Zoom controls for small window */}
-          <div className="hidden sm:flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700">
-            <button
-              type="button"
-              onClick={handleZoomOut}
-              className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Zoom out"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="text-[10px] font-mono font-bold px-1.5 text-slate-300">
-              {zoomLevel}%
-            </span>
-            <button
-              type="button"
-              onClick={handleZoomIn}
-              className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Zoom in"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
+          {/* Zoom Multipliers (1x, 2x, 3x, 4x) */}
+          <div className="hidden sm:flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700 gap-0.5">
+            {[1, 2, 3, 4].map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMultiplier(m)}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer ${
+                  multiplier === m
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+                title={`Zoom ${m}x`}
+              >
+                {m}x
+              </button>
+            ))}
           </div>
 
           {/* Download Original */}
@@ -192,7 +191,6 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         </div>
       )}
 
-      {/* Multiple Files Tab Bar */}
       {documentFiles.length > 1 && (
         <div className="bg-slate-100 border-b border-slate-200 px-3 py-1.5 flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
           {documentFiles.map((file, idx) => (
@@ -201,7 +199,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               type="button"
               onClick={() => {
                 setActiveFileIndex(idx);
-                setZoomLevel(100);
+                setMultiplier(1);
               }}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
                 idx === activeFileIndex
@@ -222,6 +220,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           Equipped with .preview-scrollbars providing both vertical scrollbar on right & horizontal scrollbar at bottom! */}
       <div
         ref={canvasRef}
+        onMouseMove={handleMouseMove}
         className="preview-scrollbars h-[480px] sm:h-[500px] bg-slate-950 p-2 sm:p-3 select-none flex flex-col items-center justify-start overflow-x-auto overflow-y-auto relative"
       >
         {isBackendConnected && signed.loading ? (
@@ -237,33 +236,41 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         ) : previewUrl && isPdf ? (
           <div
             style={{
-              minWidth: `${Math.max(760, Math.round((zoomLevel / 100) * 820))}px`,
-              width: `${Math.max(100, zoomLevel)}%`,
-              height: '100%',
+              minWidth: `${Math.max(760, multiplier * 820)}px`,
+              width: `${multiplier * 100}%`,
+              height: multiplier > 1 ? `${multiplier * 100}%` : '100%',
               minHeight: '440px',
             }}
-            className="mx-auto flex flex-col items-stretch transition-all duration-150"
+            className="relative mx-auto flex flex-col items-stretch transition-all duration-150"
           >
             <iframe
               src={`${previewUrl}#toolbar=1&navpanes=0`}
               title={activeFile.original_name}
               className="w-full h-full min-h-[440px] border-0 rounded-lg shadow-lg bg-white"
             />
+            {multiplier > 1 && mouseFollowEnabled && (
+              <div
+                className="absolute inset-0 z-10 cursor-move bg-transparent"
+                onMouseMove={handleMouseMove}
+                title="Mouse Follow is active: move your mouse to glide through the zoomed document"
+              />
+            )}
           </div>
         ) : previewUrl && isImage ? (
           <div
             style={{
-              minWidth: `${Math.max(520, Math.round((zoomLevel / 100) * 650))}px`,
-              width: `${Math.max(100, zoomLevel)}%`,
+              minWidth: `${Math.max(520, multiplier * 650)}px`,
+              width: `${multiplier * 100}%`,
               minHeight: '100%',
             }}
-            className="mx-auto flex items-center justify-center p-2 transition-all duration-150"
+            className="relative mx-auto flex items-center justify-center p-2 transition-all duration-150"
+            onMouseMove={handleMouseMove}
           >
             <img
               src={previewUrl}
               alt={activeFile.original_name}
               style={{
-                width: `${zoomLevel}%`,
+                width: `${multiplier * 100}%`,
                 maxWidth: 'none',
               }}
               className="rounded-lg shadow-lg bg-white object-contain border border-slate-800"
@@ -276,14 +283,13 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           </div>
         )}
 
-        {/* Floating Transparent Round Joystick on the Small Preview Window */}
+        {/* Floating Transparent Zoom Multiplier Controls with Mouse Follow */}
         {previewUrl && (
-          <PreviewJoystick
-            containerRef={canvasRef}
-            zoomLevel={zoomLevel}
-            onZoomIn={handleZoomIn}
-            onZoomOut={handleZoomOut}
-            onZoomReset={() => setZoomLevel(100)}
+          <ZoomMultiplierControls
+            multiplier={multiplier}
+            onSelectMultiplier={setMultiplier}
+            mouseFollowEnabled={mouseFollowEnabled}
+            onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
           />
         )}
       </div>
