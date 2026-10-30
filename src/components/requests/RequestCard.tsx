@@ -1,11 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RequestRecord } from '../../types/database';
+import { RequestRecord, isDisbursementAssociated } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
 import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote } from 'lucide-react';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -95,6 +95,29 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
               <Tag className="w-3 h-3" />
               {request.category_name}
+            </span>
+          )}
+          {isDisbursementAssociated(rType) && (
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                request.disbursement_mode === 'bank'
+                  ? request.bank_account_no
+                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                    : 'bg-amber-50 text-amber-800 border border-amber-200'
+                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+              }`}
+            >
+              {request.disbursement_mode === 'bank' ? (
+                <>
+                  <Landmark className="w-3 h-3 text-indigo-600" />
+                  <span>{request.bank_account_no ? (request.bank_name ? `Bank: ${request.bank_name}` : 'Bank Transfer') : 'Bank (Details Later)'}</span>
+                </>
+              ) : (
+                <>
+                  <Banknote className="w-3 h-3 text-emerald-600" />
+                  <span>Cash</span>
+                </>
+              )}
             </span>
           )}
           {rType === 'stock_transfer' && request.status === 'approved' && (

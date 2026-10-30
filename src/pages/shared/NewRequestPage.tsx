@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests, errMsg } from '../../context/RequestContext';
-import { RequestFile, RequestType, RequestDetails, Profile } from '../../types/database';
+import { RequestFile, RequestType, RequestDetails, Profile, DisbursementMode } from '../../types/database';
 import { FileUploader } from '../../components/requests/FileUploader';
 import { VoiceRecorder } from '../../components/requests/VoiceRecorder';
 import {
@@ -27,6 +27,7 @@ import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useDirectory, fetchActiveEntryOfficers } from '../../lib/directory';
 import { RequestShopField, useRequestShops, needsShopPick } from '../../components/requests/RequestShopField';
+import { DisbursementModeSelector } from '../../components/requests/DisbursementModeSelector';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
@@ -99,6 +100,16 @@ export const NewRequestPage: React.FC = () => {
   const [shopName, setShopName] = useState('');
   const pickShop = needsShopPick(type);
   const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
+  const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>('cash');
+  const [enterBankDetailsLater, setEnterBankDetailsLater] = useState<boolean>(false);
+  const [bankAccountNo, setBankAccountNo] = useState<string>('');
+  const [bankIfsc, setBankIfsc] = useState<string>('');
+  const [bankName, setBankName] = useState<string>('');
+  const [bankBranch, setBankBranch] = useState<string>('');
+  const [bankAccountHolderName, setBankAccountHolderName] = useState<string>('');
+  const [bankVerified, setBankVerified] = useState<boolean>(false);
+  const [bankVerificationMessage, setBankVerificationMessage] = useState<string | null>(null);
+
   // Head and Clerk raise requests that go straight up for approval, so they pick the Entry Account up front.
   const needsEntryAccount = user?.role === 'head' || user?.role === 'clerk';
   const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>('');
@@ -194,33 +205,56 @@ export const NewRequestPage: React.FC = () => {
         : '');
 
   const details = (): RequestDetails | null => {
-    if (type === 'non_cash') return toNonCashDetails(nonCash, shopChoice());
-    if (type === 'discount') return toDiscountDetails(discount);
-    if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
-    if (type === 'exhibition') {
+    let d: RequestDetails | null = null;
+    if (type === 'non_cash') d = toNonCashDetails(nonCash, shopChoice());
+    else if (type === 'discount') d = toDiscountDetails(discount);
+    else if (type === 'stock_transfer') d = toStockTransferDetails(stockTransfer);
+    else if (type === 'exhibition') {
       const exh = toExhibitionDetails(exhibition);
       if (exhibitionQuota?.mustUseWaitlist) {
         exh.is_waitlist = true;
       }
       (exh as any).region_id = effectiveRegionId;
       (exh as any).region_name = effectiveRegionName;
-      return exh;
+      d = exh;
+    } else if (isAsset) {
+      d = toAssetDetails(asset);
+    } else {
+      d = {
+        base_amount: baseAmount,
+        has_gst: hasGst,
+        gst_rate: hasGst ? gstRate : 0,
+        gst_amount: gstAmount,
+        total_amount: generalTotal,
+        ...shopChoice(),
+      };
     }
-    if (isAsset) return toAssetDetails(asset);
-    return {
-      base_amount: baseAmount,
-      has_gst: hasGst,
-      gst_rate: hasGst ? gstRate : 0,
-      gst_amount: gstAmount,
-      total_amount: generalTotal,
-      ...shopChoice(),
-    };
+
+    if (isPaymentNeeded) {
+      d = {
+        ...d,
+        disbursement_mode: disbursementMode,
+        enter_bank_details_later: disbursementMode === 'bank' ? enterBankDetailsLater : false,
+        bank_account_no: disbursementMode === 'bank' && !enterBankDetailsLater ? bankAccountNo.trim() : null,
+        bank_ifsc: disbursementMode === 'bank' && !enterBankDetailsLater ? bankIfsc.trim().toUpperCase() : null,
+        bank_name: disbursementMode === 'bank' && !enterBankDetailsLater ? bankName.trim() || null : null,
+        bank_branch: disbursementMode === 'bank' && !enterBankDetailsLater ? bankBranch.trim() || null : null,
+        bank_account_holder_name: disbursementMode === 'bank' && !enterBankDetailsLater ? bankAccountHolderName.trim() || null : null,
+        bank_verified: disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerified : false,
+        bank_verification_message: disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerificationMessage : null,
+      };
+    }
+    return d;
   };
 
   const validate = (forDraft: boolean): string | null => {
     if (!forDraft && user?.role !== 'head' && user?.role !== 'clerk' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
     if (!forDraft && needsEntryAccount && isPaymentNeeded && !assignedEntryUserId) {
       return 'Please select a Disbursement Entry Account before submitting.';
+    }
+    if (!forDraft && isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater) {
+      if (!bankAccountNo.trim()) return 'Please enter bank account number, or select "Enter bank details later".';
+      if (!bankIfsc.trim()) return 'Please enter bank IFSC code, or select "Enter bank details later".';
     }
     if (!forDraft && pickShop && shopState.mustPick && !shopId) return 'Select the shop for this request.';
     if (isAsset) {
@@ -273,6 +307,15 @@ export const NewRequestPage: React.FC = () => {
         category_id: user?.role !== 'head' && categoryOptions.required ? categoryId || null : null,
         target_head_id: type === 'exhibition' ? null : (targetHeadId || null),
         assigned_entry_user_id: needsEntryAccount && isPaymentNeeded ? assignedEntryUserId || null : null,
+        disbursement_mode: isPaymentNeeded ? disbursementMode : null,
+        enter_bank_details_later: isPaymentNeeded && disbursementMode === 'bank' ? enterBankDetailsLater : false,
+        bank_account_no: isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater ? bankAccountNo.trim() : null,
+        bank_ifsc: isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater ? bankIfsc.trim().toUpperCase() : null,
+        bank_name: isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater ? bankName.trim() || null : null,
+        bank_branch: isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater ? bankBranch.trim() || null : null,
+        bank_account_holder_name: isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater ? bankAccountHolderName.trim() || null : null,
+        bank_verified: isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerified : false,
+        bank_verification_message: isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerificationMessage : null,
       });
       if (!draftRes.success || !draftRes.id) {
         if (draftRes.id) {
@@ -483,6 +526,31 @@ export const NewRequestPage: React.FC = () => {
                 setShopId(id);
                 setShopName(name);
               }}
+              disabled={isSubmitting || isSavingDraft}
+            />
+          )}
+
+          {/* Disbursement Mode: Cash vs Bank with Penny-Less Auto-fill Verification */}
+          {isPaymentNeeded && (
+            <DisbursementModeSelector
+              mode={disbursementMode}
+              onModeChange={setDisbursementMode}
+              enterLater={enterBankDetailsLater}
+              onEnterLaterChange={setEnterBankDetailsLater}
+              accountNumber={bankAccountNo}
+              onAccountNumberChange={setBankAccountNo}
+              ifsc={bankIfsc}
+              onIfscChange={setBankIfsc}
+              bankName={bankName}
+              onBankNameChange={setBankName}
+              branch={bankBranch}
+              onBranchChange={setBankBranch}
+              accountHolderName={bankAccountHolderName}
+              onAccountHolderNameChange={setBankAccountHolderName}
+              isVerified={bankVerified}
+              onVerifiedChange={setBankVerified}
+              verificationMessage={bankVerificationMessage}
+              onVerificationMessageChange={setBankVerificationMessage}
               disabled={isSubmitting || isSavingDraft}
             />
           )}

@@ -3,7 +3,7 @@ import { Modal } from '../common/Modal';
 import { DisbursementEntry, RequestRecord, entriesTotal, entryAvailable } from '../../types/database';
 import { formatINR } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
-import { PlusCircle, ShieldAlert, Check, FileText, Percent, AlertCircle, RotateCcw, Banknote, Landmark, CheckCircle2 } from 'lucide-react';
+import { PlusCircle, ShieldAlert, Check, FileText, Percent, AlertCircle, AlertTriangle, RotateCcw, Banknote, Landmark, CheckCircle2 } from 'lucide-react';
 import { PasskeyField, isValidPasskey } from '../common/PasskeyField';
 
 interface AddDisbursementEntryModalProps {
@@ -38,7 +38,9 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
   // Balance available for new entries = approved - paid/adjusted - unpaid entries
   const remainingUnentered = entryAvailable(request);
 
-  const [entryType, setEntryType] = useState<'cash' | 'bank'>('bank');
+  const [entryType, setEntryType] = useState<'cash' | 'bank'>(
+    request.disbursement_mode === 'cash' ? 'cash' : 'bank'
+  );
   const [amountStr, setAmountStr] = useState<string>(
     remainingUnentered > 0 ? remainingUnentered.toFixed(2) : ''
   );
@@ -236,6 +238,49 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
             This entry will route to the associated {entryType === 'cash' ? 'Cash' : 'Bank'} payment desk once approved by the Entry Approver.
           </span>
         </div>
+
+        {/* If Bank Entry, display the request's bank details */}
+        {entryType === 'bank' && (
+          <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                <Landmark className="w-3.5 h-3.5 text-indigo-600" />
+                Request Beneficiary Bank Account
+              </span>
+              {request.bank_verified && (
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                  ✓ Verified (Penny-Less)
+                </span>
+              )}
+            </div>
+
+            {request.bank_account_no ? (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-500 block">Beneficiary Name</span>
+                  <span className="font-bold text-slate-900 block truncate">{request.bank_account_holder_name || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-500 block">Bank / Branch</span>
+                  <span className="font-semibold text-slate-800 block truncate">{request.bank_name || '—'} {request.bank_branch ? `(${request.bank_branch})` : ''}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-500 block">Account Number</span>
+                  <span className="font-mono font-bold text-slate-900 block">{request.bank_account_no}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-500 block">IFSC Code</span>
+                  <span className="font-mono font-bold text-slate-900 block">{request.bank_ifsc}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                <span>Bank account details have not been entered yet for this request. Only requests with bank account details entered will be automatically transferred.</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Old balance / old advance adjustment (separate from the entry amount) */}
         <div className="p-3.5 rounded-xl border border-violet-200 bg-violet-50/50 space-y-2.5">

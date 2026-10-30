@@ -11,6 +11,7 @@ import { ForcePasswordChangePage } from './pages/auth/ForcePasswordChangePage';
 import type { AppRole } from './types/database';
 import { canViewDiscountReport } from './lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from './lib/stockTransferReport';
+import { isEntryCheckingUser } from './lib/formatters';
 
 import { NewRequestPage } from './pages/shared/NewRequestPage';
 import { RequestDetailPage } from './pages/shared/RequestDetailPage';
@@ -91,7 +92,7 @@ const RequireStockMonitor: React.FC = () => {
 /** Admin or an Entry Approver disbursement account. */
 const RequireEntryApprover: React.FC = () => {
   const { user, role } = useAuth();
-  if (role === 'admin' || (role === 'disbursement' && user?.disbursement_type === 'entry_approver')) {
+  if (role === 'admin' || (role === 'disbursement' && (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)))) {
     return <Outlet />;
   }
   return <RoleRedirect />;
@@ -102,7 +103,7 @@ const RequirePaymentDisbursement: React.FC = () => {
   const { user, role } = useAuth();
   if (role !== 'disbursement') return <RoleRedirect />;
   if (isStockMonitor(user)) return <Navigate to="/stock-transfers" replace />;
-  if (user?.disbursement_type === 'entry_approver') return <Navigate to="/entry-approvals" replace />;
+  if (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)) return <Navigate to="/entry-approvals" replace />;
   return <Outlet />;
 };
 
@@ -172,7 +173,7 @@ const RoleRedirect: React.FC = () => {
       return <Navigate to="/clerk" replace />;
     case 'disbursement':
       if (isStockMonitor(user)) return <Navigate to="/stock-transfers" replace />;
-      if (user?.disbursement_type === 'entry_approver') return <Navigate to="/entry-approvals" replace />;
+      if (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)) return <Navigate to="/entry-approvals" replace />;
       return <Navigate to="/disbursement" replace />;
     case 'regional_head':
       return <Navigate to="/regional" replace />;

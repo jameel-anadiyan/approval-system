@@ -249,6 +249,25 @@ export const DISBURSEMENT_TYPE_LABELS: Record<'entry_only' | 'payment_only' | 's
   entry_approver: 'Entry Approver',
 };
 
+/** Returns true if a profile or user fields represent an Entry Checking / Approver user */
+export function isEntryCheckingUser(u?: {
+  disbursement_type?: string | null;
+  full_name?: string | null;
+  username?: string | null;
+  designation?: string | null;
+} | null): boolean {
+  if (!u) return false;
+  if (u.disbursement_type === 'entry_approver') return true;
+  const text = `${u.full_name || ''} ${u.username || ''} ${u.designation || ''}`.toLowerCase();
+  return (
+    text.includes('approv') ||
+    text.includes('check') ||
+    text.includes('verif') ||
+    text.includes('review') ||
+    text.includes('audit')
+  );
+}
+
 export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'];
 
 export const TYPE_LABELS: Record<RequestType, string> = {

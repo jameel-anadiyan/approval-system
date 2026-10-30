@@ -6,6 +6,7 @@ import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
 import { DocumentViewer } from '../../components/requests/DocumentViewer';
 import { SignedDocuments, VoiceNoteItem } from '../../components/requests/SignedDocuments';
 import { EditDraftModal } from '../../components/requests/EditDraftModal';
+import { EditBankDetailsModal } from '../../components/requests/EditBankDetailsModal';
 import { RequestTimeline } from '../../components/requests/RequestTimeline';
 import { RequestDetailsPanel } from '../../components/requests/RequestDetailsPanel';
 import { QuotationsPanel } from '../../components/requests/AssetQuotations';
@@ -318,6 +319,25 @@ export const RequestDetailPage: React.FC = () => {
     isEntryOnly && request?.status === 'approved' && isPaymentNeeded
   );
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
+  const [isEditBankModalOpen, setIsEditBankModalOpen] = useState<boolean>(false);
+
+  const isFirstPaymentReleased = Boolean(
+    Number(request.paid_amount || 0) > 0 ||
+    (request.payments && request.payments.length > 0) ||
+    request.status === 'paid' ||
+    (request.disbursement_entries || []).some((e) => Number(e.paid_amount || 0) > 0)
+  );
+
+  const isAuthorizedForBankDetails = Boolean(
+    role === 'admin' ||
+    role === 'head' ||
+    role === 'clerk' ||
+    role === 'regional_head' ||
+    isEntryOnly ||
+    (isOwner && (request.status === 'draft' || request.status === 'returned'))
+  );
+
+  const canEditBankDetails = isPaymentNeeded && !isFirstPaymentReleased && isAuthorizedForBankDetails;
   const signedPacket = (request.signed_files || []).find((s) => s.is_packet) || (request.signed_files || [])[0];
 
   const isEntryReadyForPayment = (ent: DisbursementEntry) => {
@@ -938,6 +958,145 @@ export const RequestDetailPage: React.FC = () => {
           </div>
 
           <RequestDetailsPanel request={request} />
+
+          {/* Disbursement & Bank Details Card (for all disbursement-associated requests) */}
+          {isPaymentNeeded && (
+            <div className="bg-white rounded-2xl border border-indigo-100 p-5 sm:p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200/60 flex items-center justify-center shrink-0">
+                    {request.disbursement_mode === 'bank' ? (
+                      <Building2 className="w-5 h-5 text-indigo-600" />
+                    ) : (
+                      <Banknote className="w-5 h-5 text-emerald-600" />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 font-display flex items-center gap-2">
+                      <span>Disbursement Details</span>
+                      <span
+                        className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
+                          request.disbursement_mode === 'bank'
+                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}
+                      >
+                        {request.disbursement_mode === 'bank' ? 'Bank Transfer' : 'Cash Payout'}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      {request.disbursement_mode === 'bank'
+                        ? 'Electronic bank transfer to verified account'
+                        : 'Cash disbursement against payment voucher'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  {canEditBankDetails && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditBankModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>
+                        {request.disbursement_mode === 'bank' && !request.bank_account_no
+                          ? 'Add / Verify Bank Details'
+                          : 'Edit Bank Details'}
+                      </span>
+                    </button>
+                  )}
+                  {isFirstPaymentReleased && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                      <Lock className="w-3 h-3 text-slate-400" />
+                      <span>Locked (Payment Released)</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {request.disbursement_mode === 'bank' ? (
+                <div className="space-y-3">
+                  {request.enter_bank_details_later && !request.bank_account_no ? (
+                    <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 space-y-2">
+                      <div className="flex items-start gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold">
+                            Notification: Only requests with bank account details entered will be automatically transferred.
+                          </p>
+                          <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                            Bank details were marked to be entered later. An authorized regional head, clerk, head, admin, or entry officer can enter and verify the account number & IFSC code at any time before releasing the first payment.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Account Holder</span>
+                          <span className="font-bold text-slate-900 text-sm mt-0.5 block break-words">
+                            {request.bank_account_holder_name || '—'}
+                          </span>
+                          {request.bank_verified && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded mt-1.5 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>Verified (Penny-Less)</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Bank Name</span>
+                          <span className="font-bold text-slate-800 text-xs mt-0.5 block break-words">
+                            {request.bank_name || '—'}
+                          </span>
+                          {request.bank_branch && (
+                            <span className="text-[11px] text-slate-500 block mt-0.5 truncate">
+                              Branch: {request.bank_branch}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Account Number</span>
+                          <span className="font-mono font-bold text-slate-900 text-xs mt-0.5 block select-all">
+                            {request.bank_account_no || '—'}
+                          </span>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">IFSC Code</span>
+                          <span className="font-mono font-bold text-slate-900 text-xs mt-0.5 block select-all">
+                            {request.bank_ifsc || '—'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-indigo-50/60 border border-indigo-100 text-indigo-900 text-xs">
+                        <AlertTriangle className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        <span>Notification: Only requests with bank account details entered will be automatically transferred.</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Designated for cash payout at disbursement desk.</span>
+                  </div>
+                  {canEditBankDetails && (
+                    <span className="text-[11px] text-indigo-600 font-medium">
+                      (Can be changed to Bank Transfer anytime before payment)
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {isAsset && showOriginals && (
             <QuotationsPanel
@@ -2179,6 +2338,14 @@ export const RequestDetailPage: React.FC = () => {
 
       {modalState === 'edit' && (
         <EditDraftModal isOpen={true} onClose={() => setModalState(null)} request={request} />
+      )}
+
+      {isEditBankModalOpen && (
+        <EditBankDetailsModal
+          isOpen={true}
+          onClose={() => setIsEditBankModalOpen(false)}
+          request={request}
+        />
       )}
 
       {modalState === 'route' && (

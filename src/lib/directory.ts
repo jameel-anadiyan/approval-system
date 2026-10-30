@@ -7,6 +7,7 @@ import { errMsg } from './errorUtils';
 import { useAuth } from '../context/AuthContext';
 import { MOCK_DEPARTMENTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_SETTINGS, MOCK_REGIONS, MOCK_REQUESTS, MOCK_PRODUCT_CATEGORIES } from './mockData';
 import type { AppRole, AuditLogEntry, ConnectedEntryAccount, Department, DisbursementAccountType, ProductCategory, Profile, Region, RequestType, Shop, WorkCategory } from '../types/database';
+import { isEntryCheckingUser } from './formatters';
 
 type Result = { success: boolean; error?: string };
 
@@ -1248,24 +1249,7 @@ export async function saveThreshold(live: boolean, value: number): Promise<Resul
   return error ? { success: false, error: errMsg(error) } : { success: true };
 }
 
-/** Returns true if a profile represents an Entry Checking / Approver user */
-export function isEntryCheckingUser(u?: {
-  disbursement_type?: string | null;
-  full_name?: string | null;
-  username?: string | null;
-  designation?: string | null;
-} | null): boolean {
-  if (!u) return false;
-  if (u.disbursement_type === 'entry_approver') return true;
-  const text = `${u.full_name || ''} ${u.username || ''} ${u.designation || ''}`.toLowerCase();
-  return (
-    text.includes('approv') ||
-    text.includes('check') ||
-    text.includes('verif') ||
-    text.includes('review') ||
-    text.includes('audit')
-  );
-}
+export { isEntryCheckingUser } from './formatters';
 
 /** Reliably loads active Entry Only disbursement officers, using the dedicated RPC with fallbacks */
 export async function fetchActiveEntryOfficers(live: boolean): Promise<Profile[]> {

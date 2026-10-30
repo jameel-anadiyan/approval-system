@@ -15,6 +15,7 @@ export interface FilterState {
   from: string; // yyyy-mm-dd
   to: string;
   sort: SortKey;
+  entryOfficer?: string; // entry user id / name or 'all'
 }
 
 export const EMPTY_FILTERS: FilterState = {
@@ -27,6 +28,7 @@ export const EMPTY_FILTERS: FilterState = {
   from: '',
   to: '',
   sort: 'newest',
+  entryOfficer: 'all',
 };
 
 const when = (r: RequestRecord) => new Date(r.submitted_at || r.created_at).getTime();
@@ -51,6 +53,14 @@ export function applyFilters(list: RequestRecord[], f: FilterState): RequestReco
     if (f.type !== 'all' && typeOf(r) !== f.type) return false;
     if (f.status !== 'all' && r.status !== f.status) return false;
     if (f.dept !== 'all' && r.department_id !== f.dept) return false;
+    if (f.entryOfficer && f.entryOfficer !== 'all') {
+      const matchAssignedId = r.assigned_entry_user_id === f.entryOfficer;
+      const matchAssignedName = r.assigned_entry_user_name === f.entryOfficer;
+      const matchEntryCreator = (r.disbursement_entries || []).some(
+        (e) => e.created_by === f.entryOfficer || e.created_by_name === f.entryOfficer
+      );
+      if (!matchAssignedId && !matchAssignedName && !matchEntryCreator) return false;
+    }
     const t = when(r);
     if (fromTs !== null && t < fromTs) return false;
     if (toTs !== null && t > toTs) return false;
@@ -118,7 +128,25 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
     (value.status !== 'all' ? 1 : 0) +
     (value.dept !== 'all' ? 1 : 0) +
     (value.from ? 1 : 0) +
-    (value.to ? 1 : 0);
+    (value.to ? 1 : 0) +
+    (value.entryOfficer && value.entryOfficer !== 'all' ? 1 : 0);
+
+  const entryOfficers = useMemo(() => {
+    const map = new Map<string, string>();
+    source.forEach((r) => {
+      if (r.assigned_entry_user_id && r.assigned_entry_user_name) {
+        map.set(r.assigned_entry_user_id, r.assigned_entry_user_name);
+      }
+      (r.disbursement_entries || []).forEach((e) => {
+        if (e.created_by && e.created_by_name) {
+          map.set(e.created_by, e.created_by_name);
+        }
+      });
+    });
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [source]);
 
   const listId = `employees-${useId().replace(/:/g, '')}`;
 
@@ -258,6 +286,24 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
             To date
             <input id="filter-to" type="date" value={value.to} onChange={(e) => set('to', e.target.value)} className={`${inputCls} mt-1`} />
           </label>
+          {entryOfficers.length > 0 && (
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Entry Officer
+              <select
+                id="filter-entry-officer"
+                value={value.entryOfficer || 'all'}
+                onChange={(e) => set('entryOfficer', e.target.value)}
+                className={`${inputCls} mt-1`}
+              >
+                <option value="all">All entry officers</option>
+                {entryOfficers.map((eo) => (
+                  <option key={eo.id} value={eo.id}>
+                    {eo.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       )}
 

@@ -40,6 +40,7 @@ import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTrans
 import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
 import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
 import { entryPayable, entryOutstanding } from '../../types/database';
+import { isEntryCheckingUser } from '../../lib/formatters';
 
 interface NavItem {
   label: string;
@@ -248,7 +249,7 @@ export const Navigation: React.FC = () => {
         ];
         break;
       }
-      if (user?.disbursement_type === 'entry_approver') {
+      if (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)) {
         mainNavItems = [
           { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
           { label: 'Search', path: '/disbursement', icon: Search },
@@ -269,6 +270,7 @@ export const Navigation: React.FC = () => {
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
       ];
       moreNavItems = [
+        { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
         { label: 'Paid History', path: '/disbursement/paid', icon: CheckCircle },
         { label: 'Verify Scan', path: '/disbursement/verify', icon: ShieldCheck },
         ...stockReportItem,

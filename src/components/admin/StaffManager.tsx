@@ -491,6 +491,11 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         ? <Truck className="w-4 h-4 text-indigo-600 shrink-0" />
                         : <Wallet className="w-4 h-4 text-sky-600 shrink-0" />}
                       <span>Account Type: <strong className={DISB_TYPE_STYLES[disbType(u)].text}>{DISBURSEMENT_TYPE_LABELS[disbType(u)]}</strong></span>
+                      {u.role === 'disbursement' && u.disbursement_type !== disbType(u) && (
+                        <span className="text-[10px] font-semibold text-amber-800 bg-amber-100/90 border border-amber-300 px-2 py-0.5 rounded-full">
+                          DB has: {u.disbursement_type || 'unassigned'} (Click below to save)
+                        </span>
+                      )}
                     </span>
                     <p className="text-[11px] text-sky-800/80 mt-0.5">{DISB_TYPE_STYLES[disbType(u)].help}</p>
                   </div>
@@ -500,11 +505,11 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         key={t}
                         type="button"
                         id={`disb-type-${t}-${u.id}`}
-                        disabled={busyId === u.id || disbType(u) === t}
+                        disabled={busyId === u.id || u.disbursement_type === t}
                         onClick={() => changeDisbType(u, t)}
-                        className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all leading-tight ${disbType(u) === t
+                        className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all leading-tight ${u.disbursement_type === t || (!u.disbursement_type && disbType(u) === t)
                             ? DISB_TYPE_STYLES[t].active
-                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 cursor-pointer'
                           }`}
                       >
                         {t === 'stock_transfer_monitor' ? 'Stock Transfer' : DISBURSEMENT_TYPE_LABELS[t]}

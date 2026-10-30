@@ -14,6 +14,8 @@ import {
   entryPayable,
   entryOutstanding,
   entryAvailable,
+  DisbursementMode,
+  BankAccountDetails,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -29,6 +31,8 @@ export interface ActionVoice {
   duration: number;
 }
 
+export type BankDetailsInput = BankAccountDetails;
+
 export interface DraftInput {
   type?: RequestType;
   title: string;
@@ -42,6 +46,16 @@ export interface DraftInput {
   target_head_id?: string | null;
   /** Disbursement Entry Officer chosen when Department Head raises a payment-needed request */
   assigned_entry_user_id?: string | null;
+  /** Disbursement mode and bank account details */
+  disbursement_mode?: DisbursementMode | null;
+  enter_bank_details_later?: boolean;
+  bank_account_no?: string | null;
+  bank_ifsc?: string | null;
+  bank_name?: string | null;
+  bank_branch?: string | null;
+  bank_account_holder_name?: string | null;
+  bank_verified?: boolean;
+  bank_verification_message?: string | null;
 }
 
 /** Work categories the current user can pick for a new request. */
@@ -90,6 +104,10 @@ interface RequestContextType {
       category_id?: string | null;
       target_head_id?: string | null;
     }
+  ) => Promise<Result>;
+  updateRequestBankDetails: (
+    id: string,
+    bankData: BankAccountDetails
   ) => Promise<Result>;
   addFiles: (id: string, files: RequestFile[]) => Promise<Result>;
   removeFile: (requestId: string, fileId: string) => Promise<Result>;
@@ -277,6 +295,17 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
       approverName = null;
     }
 
+    const d = (r.details || {}) as any;
+    const disbursementMode = r.disbursement_mode || d.disbursement_mode || 'cash';
+    const enterBankDetailsLater = Boolean(r.enter_bank_details_later ?? d.enter_bank_details_later ?? false);
+    const bankAccountNo = r.bank_account_no || d.bank_account_no || null;
+    const bankIfsc = r.bank_ifsc || d.bank_ifsc || null;
+    const bankName = r.bank_name || d.bank_name || null;
+    const bankBranch = r.bank_branch || d.bank_branch || null;
+    const bankAccountHolderName = r.bank_account_holder_name || d.bank_account_holder_name || null;
+    const bankVerified = Boolean(r.bank_verified ?? d.bank_verified ?? false);
+    const bankVerificationMessage = r.bank_verification_message || d.bank_verification_message || null;
+
     return {
       ...r,
       status: currentStatus,
@@ -289,6 +318,15 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
       region_name: regionName,
       amount: Number(r.amount),
       paid_amount: Number(r.paid_amount ?? 0),
+      disbursement_mode: disbursementMode,
+      enter_bank_details_later: enterBankDetailsLater,
+      bank_account_no: bankAccountNo,
+      bank_ifsc: bankIfsc,
+      bank_name: bankName,
+      bank_branch: bankBranch,
+      bank_account_holder_name: bankAccountHolderName,
+      bank_verified: bankVerified,
+      bank_verification_message: bankVerificationMessage,
       requester_photo_path: r.requester?.photo_path || r.requester_photo_path || null,
       owner_head_id: r.owner_head_id || deptHead?.id || (r.requester_role === 'head' ? r.requester_id : null),
       owner_head_name: ownerHeadName,
@@ -367,6 +405,17 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!coreRes.error && coreRes.data) {
           data = coreRes.data;
           error = null;
+        } else {
+          console.warn('Secondary requests load error:', coreRes.error?.message);
+          // Safe basic fallback with essential relations
+          const basicRes = await supabase
+            .from('requests')
+            .select('*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path)')
+            .order('created_at', { ascending: false });
+          if (!basicRes.error && basicRes.data) {
+            data = basicRes.data;
+            error = null;
+          }
         }
       }
 
@@ -398,6 +447,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             .from('disbursement_entries')
             .select('*')
             .order('entry_no', { ascending: true });
+          if (entryErr) {
+            console.error('disbursement_entries load error:', entryErr.message);
+          }
           const entryMap = new Map<string, any[]>();
           if (!entryErr && entries && entries.length > 0) {
             entries.forEach((e: any) => {
@@ -409,7 +461,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           data.forEach((r: any) => {
             r.disbursement_entries = entryMap.get(r.id) || [];
           });
-        } catch {
+        } catch (err: any) {
+          console.error('disbursement_entries load exception:', err);
           data.forEach((r: any) => {
             if (!r.disbursement_entries) r.disbursement_entries = [];
           });
@@ -595,6 +648,25 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         }
 
+        if (requestId) {
+          const bankPayload: Record<string, any> = {
+            disbursement_mode: data.disbursement_mode || (data.details?.disbursement_mode as any) || 'cash',
+            enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
+            bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
+            bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
+            bank_name: data.bank_name ?? data.details?.bank_name ?? null,
+            bank_branch: data.bank_branch ?? data.details?.bank_branch ?? null,
+            bank_account_holder_name: data.bank_account_holder_name ?? data.details?.bank_account_holder_name ?? null,
+            bank_verified: Boolean(data.bank_verified ?? data.details?.bank_verified ?? false),
+            bank_verification_message: data.bank_verification_message ?? data.details?.bank_verification_message ?? null,
+          };
+          try {
+            await supabase.from('requests').update(bankPayload).eq('id', requestId);
+          } catch (bErr) {
+            console.warn('Bank fields update notice:', bErr);
+          }
+        }
+
         await uploadFiles(requestId, data.files || []);
         try {
           await loadRequests();
@@ -654,6 +726,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       request_type: type,
       details: data.details ?? null,
       shop_name: (data.details as { shop_name?: string | null } | null)?.shop_name ?? user.shop?.name ?? null,
+      disbursement_mode: data.disbursement_mode || (data.details?.disbursement_mode as any) || 'cash',
+      enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
+      bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
+      bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
+      bank_name: data.bank_name ?? data.details?.bank_name ?? null,
+      bank_branch: data.bank_branch ?? data.details?.bank_branch ?? null,
+      bank_account_holder_name: data.bank_account_holder_name ?? data.details?.bank_account_holder_name ?? null,
+      bank_verified: Boolean(data.bank_verified ?? data.details?.bank_verified ?? false),
+      bank_verification_message: data.bank_verification_message ?? data.details?.bank_verification_message ?? null,
       status: 'draft',
       route: null,
       routed_by: null,
@@ -730,7 +811,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           return { success: false, error: catErr.message };
         }
       }
-      if (data.details && ('is_waitlist' in data.details || 'region_id' in data.details || 'region_name' in data.details)) {
+      if (data.details) {
         const updatePayload: Record<string, any> = {};
         if ('is_waitlist' in data.details) updatePayload.is_waitlist = Boolean(data.details.is_waitlist);
         if ('region_id' in data.details && (data.details as any).region_id) {
@@ -739,8 +820,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if ('region_name' in data.details && (data.details as any).region_name) {
           updatePayload.region_name = (data.details as any).region_name;
         }
+        if ('disbursement_mode' in data.details) updatePayload.disbursement_mode = (data.details as any).disbursement_mode;
+        if ('enter_bank_details_later' in data.details) updatePayload.enter_bank_details_later = (data.details as any).enter_bank_details_later;
+        if ('bank_account_no' in data.details) updatePayload.bank_account_no = (data.details as any).bank_account_no;
+        if ('bank_ifsc' in data.details) updatePayload.bank_ifsc = (data.details as any).bank_ifsc;
+        if ('bank_name' in data.details) updatePayload.bank_name = (data.details as any).bank_name;
+        if ('bank_branch' in data.details) updatePayload.bank_branch = (data.details as any).bank_branch;
+        if ('bank_account_holder_name' in data.details) updatePayload.bank_account_holder_name = (data.details as any).bank_account_holder_name;
+        if ('bank_verified' in data.details) updatePayload.bank_verified = (data.details as any).bank_verified;
+        if ('bank_verification_message' in data.details) updatePayload.bank_verification_message = (data.details as any).bank_verification_message;
+
         if (Object.keys(updatePayload).length > 0) {
-          await supabase.from('requests').update(updatePayload).eq('id', id);
+          try {
+            await supabase.from('requests').update(updatePayload).eq('id', id);
+          } catch {}
         }
       }
       await loadRequests();
@@ -752,6 +845,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const isWaitlist = data.details && 'is_waitlist' in data.details ? Boolean(data.details.is_waitlist) : r.is_waitlist;
         const regId = data.details && 'region_id' in data.details ? (data.details as any).region_id : r.region_id;
         const regName = data.details && 'region_name' in data.details ? (data.details as any).region_name : r.region_name;
+        const bd = (data.details || {}) as any;
         return {
           ...r,
           title: data.title,
@@ -761,7 +855,119 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           region_id: regId,
           region_name: regName,
           is_waitlist: isWaitlist,
+          disbursement_mode: bd.disbursement_mode !== undefined ? bd.disbursement_mode : r.disbursement_mode,
+          enter_bank_details_later: bd.enter_bank_details_later !== undefined ? bd.enter_bank_details_later : r.enter_bank_details_later,
+          bank_account_no: bd.bank_account_no !== undefined ? bd.bank_account_no : r.bank_account_no,
+          bank_ifsc: bd.bank_ifsc !== undefined ? bd.bank_ifsc : r.bank_ifsc,
+          bank_name: bd.bank_name !== undefined ? bd.bank_name : r.bank_name,
+          bank_branch: bd.bank_branch !== undefined ? bd.bank_branch : r.bank_branch,
+          bank_account_holder_name: bd.bank_account_holder_name !== undefined ? bd.bank_account_holder_name : r.bank_account_holder_name,
+          bank_verified: bd.bank_verified !== undefined ? bd.bank_verified : r.bank_verified,
+          bank_verification_message: bd.bank_verification_message !== undefined ? bd.bank_verification_message : r.bank_verification_message,
           updated_at: new Date().toISOString(),
+        };
+      })
+    );
+    return { success: true };
+  };
+
+  const updateRequestBankDetails = async (
+    id: string,
+    bankData: BankAccountDetails
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const current = requests.find((r) => r.id === id);
+    if (!current) return { success: false, error: 'Request not found' };
+
+    // Check if first payment has already been released
+    const isFirstPaymentReleased =
+      Number(current.paid_amount || 0) > 0 ||
+      (current.payments && current.payments.length > 0) ||
+      current.status === 'paid' ||
+      (current.disbursement_entries || []).some((e) => Number(e.paid_amount || 0) > 0);
+
+    if (isFirstPaymentReleased) {
+      return { success: false, error: 'Bank details cannot be modified after the first payment has been released.' };
+    }
+
+    const payload = {
+      disbursement_mode: bankData.disbursement_mode || 'cash',
+      enter_bank_details_later: Boolean(bankData.enter_bank_details_later),
+      bank_account_no: bankData.bank_account_no || null,
+      bank_ifsc: bankData.bank_ifsc ? bankData.bank_ifsc.trim().toUpperCase() : null,
+      bank_name: bankData.bank_name || null,
+      bank_branch: bankData.bank_branch || null,
+      bank_account_holder_name: bankData.bank_account_holder_name || null,
+      bank_verified: Boolean(bankData.bank_verified),
+      bank_verification_message: bankData.bank_verification_message || null,
+    };
+
+    if (isBackendConnected) {
+      try {
+        let rpcWorked = false;
+        try {
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc('update_request_bank_details', {
+            p_request_id: id,
+            p_disbursement_mode: payload.disbursement_mode,
+            p_enter_bank_details_later: payload.enter_bank_details_later,
+            p_bank_account_no: payload.bank_account_no,
+            p_bank_ifsc: payload.bank_ifsc,
+            p_bank_name: payload.bank_name,
+            p_bank_branch: payload.bank_branch,
+            p_bank_account_holder_name: payload.bank_account_holder_name,
+            p_bank_verified: payload.bank_verified,
+            p_bank_verification_message: payload.bank_verification_message,
+          });
+          if (!rpcErr && (rpcRes as any)?.success !== false) {
+            rpcWorked = true;
+          }
+        } catch {
+          // Fallback to direct update if RPC is not present
+        }
+
+        if (!rpcWorked) {
+          const updatedDetails = {
+            ...(current.details || {}),
+            ...payload,
+          };
+          const { error: directErr } = await supabase
+            .from('requests')
+            .update({
+              ...payload,
+              details: updatedDetails,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', id);
+
+          if (directErr) {
+            const { error: fallbackErr } = await supabase
+              .from('requests')
+              .update({
+                details: updatedDetails,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', id);
+            if (fallbackErr) throw fallbackErr;
+          }
+        }
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock mode
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        return {
+          ...r,
+          ...payload,
+          details: {
+            ...(r.details || {}),
+            ...payload,
+          },
         };
       })
     );
@@ -2912,6 +3118,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         getRequestById,
         createDraft,
         updateDraft,
+        updateRequestBankDetails,
         addFiles,
         removeFile,
         deleteDraft,

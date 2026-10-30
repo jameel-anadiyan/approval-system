@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { Profile, AppRole } from '../types/database';
 import { supabase, LOGIN_DOMAIN, checkSupabaseConnection } from '../lib/supabase';
 import { MOCK_USERS } from '../lib/mockData';
+import { isEntryCheckingUser } from '../lib/formatters';
 
 interface AuthContextType {
   user: Profile | null;
@@ -31,17 +32,21 @@ async function loadProfile(userId: string): Promise<Profile | null> {
   if (error || !data) return null;
 
   let connectedEntries: { entry_user_id: string }[] = [];
-  if (data.role === 'disbursement' && data.disbursement_type === 'payment_only') {
-    try {
-      const { data: mappings } = await supabase
-        .from('payment_entry_account_mappings')
-        .select('entry_user_id')
-        .eq('payment_user_id', userId);
-      if (mappings && mappings.length > 0) {
-        connectedEntries = mappings as { entry_user_id: string }[];
+  if (data.role === 'disbursement') {
+    if (isEntryCheckingUser(data)) {
+      data.disbursement_type = 'entry_approver';
+    } else if (data.disbursement_type === 'payment_only') {
+      try {
+        const { data: mappings } = await supabase
+          .from('payment_entry_account_mappings')
+          .select('entry_user_id')
+          .eq('payment_user_id', userId);
+        if (mappings && mappings.length > 0) {
+          connectedEntries = mappings as { entry_user_id: string }[];
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
   }
 

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { FileUploader } from './FileUploader';
-import { RequestFile, RequestRecord, RequestDetails } from '../../types/database';
+import { RequestFile, RequestRecord, RequestDetails, DisbursementMode } from '../../types/database';
 import { useRequests } from '../../context/RequestContext';
 import { formatFileSize, formatINR, formatINRWhole, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
@@ -26,6 +26,7 @@ import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { RequestShopField, useRequestShops, needsShopPick } from './RequestShopField';
+import { DisbursementModeSelector } from './DisbursementModeSelector';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -39,6 +40,34 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const { updateDraft, addFiles, removeFile, setQuote, threshold, requests } = useRequests();
   const type = typeOf(request);
   const isAsset = type === 'asset' || type === 'asset_below_20k';
+  const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
+  const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>(
+    request.disbursement_mode || (request.details?.disbursement_mode as DisbursementMode) || 'cash'
+  );
+  const [enterBankDetailsLater, setEnterBankDetailsLater] = useState<boolean>(
+    Boolean(request.enter_bank_details_later ?? request.details?.enter_bank_details_later ?? false)
+  );
+  const [bankAccountNo, setBankAccountNo] = useState<string>(
+    request.bank_account_no || request.details?.bank_account_no || ''
+  );
+  const [bankIfsc, setBankIfsc] = useState<string>(
+    request.bank_ifsc || request.details?.bank_ifsc || ''
+  );
+  const [bankName, setBankName] = useState<string>(
+    request.bank_name || request.details?.bank_name || ''
+  );
+  const [branch, setBranch] = useState<string>(
+    request.bank_branch || request.details?.bank_branch || ''
+  );
+  const [accountHolderName, setAccountHolderName] = useState<string>(
+    request.bank_account_holder_name || request.details?.bank_account_holder_name || ''
+  );
+  const [bankVerified, setBankVerified] = useState<boolean>(
+    Boolean(request.bank_verified ?? request.details?.bank_verified ?? false)
+  );
+  const [bankVerificationMessage, setBankVerificationMessage] = useState<string | null>(
+    request.bank_verification_message || request.details?.bank_verification_message || null
+  );
   const [title, setTitle] = useState(request.title);
   const [amountStr, setAmountStr] = useState(() => {
     const gBase = request.details?.base_amount;
@@ -152,27 +181,46 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   };
 
   const getDetails = (): RequestDetails | null => {
-    if (type === 'non_cash') return toNonCashDetails(nonCash, shopState.loading ? undefined : shopChoice());
-    if (type === 'discount') return toDiscountDetails(discount);
-    if (type === 'stock_transfer') return toStockTransferDetails(stockTransfer);
-    if (type === 'exhibition') {
+    let d: RequestDetails | null = null;
+    if (type === 'non_cash') d = toNonCashDetails(nonCash, shopState.loading ? undefined : shopChoice());
+    else if (type === 'discount') d = toDiscountDetails(discount);
+    else if (type === 'stock_transfer') d = toStockTransferDetails(stockTransfer);
+    else if (type === 'exhibition') {
       const exh = toExhibitionDetails(exhibition);
       if (exhibitionQuota?.mustUseWaitlist) {
         exh.is_waitlist = true;
       }
       (exh as any).region_id = request.region_id || user?.region_id || null;
       (exh as any).region_name = request.region_name || user?.region?.name || null;
-      return exh;
+      d = exh;
+    } else if (isAsset) {
+      d = toAssetDetails(asset);
+    } else {
+      d = {
+        base_amount: baseAmount,
+        has_gst: hasGst,
+        gst_rate: hasGst ? gstRate : 0,
+        gst_amount: gstAmount,
+        total_amount: generalTotal,
+        ...(shopState.loading ? {} : shopChoice()),
+      };
     }
-    if (isAsset) return toAssetDetails(asset);
-    return {
-      base_amount: baseAmount,
-      has_gst: hasGst,
-      gst_rate: hasGst ? gstRate : 0,
-      gst_amount: gstAmount,
-      total_amount: generalTotal,
-      ...(shopState.loading ? {} : shopChoice()),
-    };
+
+    if (isPaymentNeeded) {
+      d = {
+        ...d,
+        disbursement_mode: disbursementMode,
+        enter_bank_details_later: disbursementMode === 'bank' ? enterBankDetailsLater : false,
+        bank_account_no: disbursementMode === 'bank' && !enterBankDetailsLater ? bankAccountNo.trim() : null,
+        bank_ifsc: disbursementMode === 'bank' && !enterBankDetailsLater ? bankIfsc.trim().toUpperCase() : null,
+        bank_name: disbursementMode === 'bank' && !enterBankDetailsLater ? bankName.trim() || null : null,
+        bank_branch: disbursementMode === 'bank' && !enterBankDetailsLater ? branch.trim() || null : null,
+        bank_account_holder_name: disbursementMode === 'bank' && !enterBankDetailsLater ? accountHolderName.trim() || null : null,
+        bank_verified: disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerified : false,
+        bank_verification_message: disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerificationMessage : null,
+      };
+    }
+    return d;
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -181,6 +229,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     setError(null);
     if (!title.trim()) return setError('Please enter a title.');
     if (baseAmount <= 0 && type === 'general') return setError('Amount must be more than zero.');
+    if (isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater) {
+      if (!bankAccountNo.trim()) return setError('Please enter bank account number, or select "Enter bank details later".');
+      if (!bankIfsc.trim()) return setError('Please enter bank IFSC code, or select "Enter bank details later".');
+    }
     const v =
       type === 'discount' ? validateDiscount(discount)
       : type === 'exhibition' ? validateExhibition(exhibition)
@@ -266,6 +318,29 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
               setShopId(id);
               setShopName(name);
             }}
+            disabled={busy}
+          />
+        )}
+        {isPaymentNeeded && (
+          <DisbursementModeSelector
+            mode={disbursementMode}
+            onModeChange={setDisbursementMode}
+            enterLater={enterBankDetailsLater}
+            onEnterLaterChange={setEnterBankDetailsLater}
+            accountNumber={bankAccountNo}
+            onAccountNumberChange={setBankAccountNo}
+            ifsc={bankIfsc}
+            onIfscChange={setBankIfsc}
+            bankName={bankName}
+            onBankNameChange={setBankName}
+            branch={branch}
+            onBranchChange={setBranch}
+            accountHolderName={accountHolderName}
+            onAccountHolderNameChange={setAccountHolderName}
+            isVerified={bankVerified}
+            onVerifiedChange={setBankVerified}
+            verificationMessage={bankVerificationMessage}
+            onVerificationMessageChange={setBankVerificationMessage}
             disabled={busy}
           />
         )}

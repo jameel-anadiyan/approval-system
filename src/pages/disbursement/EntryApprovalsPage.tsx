@@ -1,10 +1,18 @@
-import React, { useMemo, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
+import { useDirectory, fetchActiveEntryOfficers, isEntryCheckingUser } from '../../lib/directory';
+import { supabase } from '../../lib/supabase';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Modal } from '../../components/common/Modal';
-import { DisbursementEntry, RequestRecord, entryOutstanding, entryHasBalanceAwaitingApproval } from '../../types/database';
+import {
+  DisbursementEntry,
+  RequestRecord,
+  Profile,
+  entryOutstanding,
+  entryHasBalanceAwaitingApproval,
+} from '../../types/database';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
 import {
@@ -17,7 +25,6 @@ import {
   ShieldCheck,
   Clock,
   AlertCircle,
-  FileText,
   Building2,
   Store,
   ChevronRight,
@@ -37,11 +44,47 @@ interface EntryWithRequest {
   request: RequestRecord;
 }
 
-export const EntryApprovalsPage: React.FC = () => {
-  const { user } = useAuth();
-  const { requests, approveDisbursementEntry, approveMultipleDisbursementEntries, rejectDisbursementEntry } = useRequests();
-  const navigate = useNavigate();
+export interface EntryAccountOption {
+  id: string;
+  name: string;
+  pendingCount: number;
+  totalCount: number;
+}
 
+/** Robust matching of an entry/request against an Entry Only account */
+function matchesEntryAccount(
+  item: EntryWithRequest,
+  targetId: string,
+  options: { id: string; name: string }[]
+): boolean {
+  if (targetId === 'all') return true;
+  if (targetId === '__unassigned__') {
+    return !item.entry.created_by && !item.request.assigned_entry_user_id;
+  }
+  if (item.entry.created_by && item.entry.created_by === targetId) return true;
+  if (item.request.assigned_entry_user_id && item.request.assigned_entry_user_id === targetId) return true;
+
+  // Name match fallback (for mock accounts or when IDs differ)
+  const opt = options.find((o) => o.id === targetId);
+  if (opt) {
+    const targetName = opt.name.trim().toLowerCase();
+    const cName = (item.entry.created_by_name || '').trim().toLowerCase();
+    const aName = (item.request.assigned_entry_user_name || '').trim().toLowerCase();
+    if (cName && cName === targetName) return true;
+    if (aName && aName === targetName) return true;
+  }
+  return false;
+}
+
+export const EntryApprovalsPage: React.FC = () => {
+  const { isBackendConnected } = useAuth();
+  const { requests, refreshRequests, approveDisbursementEntry, approveMultipleDisbursementEntries, rejectDisbursementEntry } = useRequests();
+  const { users } = useDirectory();
+
+  const [extraOfficers, setExtraOfficers] = useState<Profile[]>([]);
+  const [directEntries, setDirectEntries] = useState<DisbursementEntry[]>([]);
+  const [directRequests, setDirectRequests] = useState<Map<string, RequestRecord>>(new Map());
+  const [isDirectLoading, setIsDirectLoading] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rejectTarget, setRejectTarget] = useState<EntryWithRequest | null>(null);
@@ -53,26 +96,104 @@ export const EntryApprovalsPage: React.FC = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [modeFilter, setModeFilter] = useState<'all' | 'cash' | 'bank'>('all');
+  const [entryAccountFilter, setEntryAccountFilter] = useState<string>('all');
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{
     path: string;
     name: string;
     approvalNo?: string | null;
   } | null>(null);
 
-  // Collect all entries across payable approved requests
+  // Directly fetch disbursement entries and their joined requests from Supabase
+  // (Ensures live entries always show even if context requests had RLS or loading delay)
+  const loadDirectEntries = useCallback(async () => {
+    if (!isBackendConnected) return;
+    setIsDirectLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('disbursement_entries')
+        .select('*, request:requests(*, requester:profiles!requester_id(id, full_name, designation, photo_path), department:departments(*), signed_files(*))')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn('Direct disbursement entries fetch notice:', error.message);
+      } else if (data && data.length > 0) {
+        const dEntries: DisbursementEntry[] = [];
+        const dReqMap = new Map<string, RequestRecord>();
+        data.forEach((row: any) => {
+          const { request: reqRow, ...entryFields } = row;
+          const ne: DisbursementEntry = {
+            ...entryFields,
+            amount: Number(entryFields.amount),
+            adjustment_amount: Number(entryFields.adjustment_amount ?? 0),
+            tds_amount: Number(entryFields.tds_amount ?? 0),
+            paid_amount: Number(entryFields.paid_amount ?? 0),
+            approved_amount:
+              entryFields.approved_amount === null || entryFields.approved_amount === undefined
+                ? null
+                : Number(entryFields.approved_amount),
+          };
+          dEntries.push(ne);
+          if (reqRow && !dReqMap.has(reqRow.id)) {
+            dReqMap.set(reqRow.id, reqRow as RequestRecord);
+          }
+        });
+        setDirectEntries(dEntries);
+        setDirectRequests(dReqMap);
+      }
+    } catch (err: any) {
+      console.warn('loadDirectEntries exception:', err);
+    } finally {
+      setIsDirectLoading(false);
+    }
+  }, [isBackendConnected]);
+
+  useEffect(() => {
+    loadDirectEntries();
+  }, [loadDirectEntries]);
+
+  // Load active entry officers directly to ensure all active entry accounts are discovered
+  useEffect(() => {
+    let isMounted = true;
+    fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
+      if (isMounted && officers && officers.length > 0) {
+        setExtraOfficers(officers);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isBackendConnected]);
+
+  // Collect all entries across payable approved requests (combines context requests and direct entries)
   const allEntriesWithRequests: EntryWithRequest[] = useMemo(() => {
     const list: EntryWithRequest[] = [];
+    const seenEntryIds = new Set<string>();
+
+    // 1. Primary source: requests from RequestContext
     requests.forEach((r) => {
       if (typeOf(r) === 'discount' || typeOf(r) === 'stock_transfer' || typeOf(r) === 'non_cash') return;
       (r.disbursement_entries || []).forEach((e) => {
-        if (e.status !== 'cancelled') {
+        if (e.status !== 'cancelled' && !seenEntryIds.has(e.id)) {
+          seenEntryIds.add(e.id);
           list.push({ entry: e, request: r });
         }
       });
     });
+
+    // 2. Supplemental source: direct entries from Supabase (ensures zero entries are missed)
+    directEntries.forEach((e) => {
+      if (e.status === 'cancelled' || seenEntryIds.has(e.id)) return;
+      const r = requests.find((req) => req.id === e.request_id) || directRequests.get(e.request_id);
+      if (r) {
+        if (typeOf(r) === 'discount' || typeOf(r) === 'stock_transfer' || typeOf(r) === 'non_cash') return;
+        seenEntryIds.add(e.id);
+        list.push({ entry: e, request: r });
+      }
+    });
+
     // Sort: pending first by creation time, approved / rejected by updated/approved time
     return list.sort((a, b) => new Date(b.entry.created_at).getTime() - new Date(a.entry.created_at).getTime());
-  }, [requests]);
+  }, [requests, directEntries, directRequests]);
 
   // An entry is partially approved and in progress with the cashier when:
   // - status === 'approved'
@@ -89,26 +210,103 @@ export const EntryApprovalsPage: React.FC = () => {
     );
   };
 
-  // Tab queues: partial approvals in progress stay visible in the pending tab so they don't disappear!
+  // Build the list of known Entry Only accounts (from active users + existing entries)
+  const entryAccountOptions = useMemo<EntryAccountOption[]>(() => {
+    const map = new Map<string, { id: string; name: string }>();
+
+    // 1. Directory active entry officers (disbursement role + entry_only type, not entry checking)
+    const directoryList = [...users, ...extraOfficers];
+    for (const u of directoryList) {
+      if (
+        u.role === 'disbursement' &&
+        (u.disbursement_type === 'entry_only' || !u.disbursement_type) &&
+        !isEntryCheckingUser(u)
+      ) {
+        map.set(u.id, { id: u.id, name: u.full_name || u.username });
+      }
+    }
+
+    // 2. Discover accounts from all entries across requests (creators & assigned officers)
+    allEntriesWithRequests.forEach(({ entry, request }) => {
+      const creatorId = entry.created_by;
+      const creatorName = entry.created_by_name;
+      if (creatorId && !map.has(creatorId)) {
+        map.set(creatorId, { id: creatorId, name: creatorName || 'Entry Officer' });
+      }
+      const assignedId = request.assigned_entry_user_id;
+      const assignedName = request.assigned_entry_user_name;
+      if (assignedId && !map.has(assignedId)) {
+        map.set(assignedId, { id: assignedId, name: assignedName || 'Assigned Entry Officer' });
+      }
+    });
+
+    const list: EntryAccountOption[] = Array.from(map.values()).map((acc) => {
+      const accEntries = allEntriesWithRequests.filter((item) =>
+        matchesEntryAccount(item, acc.id, [acc])
+      );
+      const pendingCount = accEntries.filter(
+        (item) =>
+          item.entry.status === 'pending_approval' ||
+          item.entry.status === 'pending' ||
+          isPartialInProgress(item.entry)
+      ).length;
+      return {
+        ...acc,
+        pendingCount,
+        totalCount: accEntries.length,
+      };
+    });
+
+    // Check if any entries are direct / unassigned
+    const unassignedEntries = allEntriesWithRequests.filter(
+      (item) => !item.entry.created_by && !item.request.assigned_entry_user_id
+    );
+    if (unassignedEntries.length > 0) {
+      const pendingCount = unassignedEntries.filter(
+        (item) =>
+          item.entry.status === 'pending_approval' ||
+          item.entry.status === 'pending' ||
+          isPartialInProgress(item.entry)
+      ).length;
+      list.push({
+        id: '__unassigned__',
+        name: 'Direct / Unassigned',
+        pendingCount,
+        totalCount: unassignedEntries.length,
+      });
+    }
+
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [users, extraOfficers, allEntriesWithRequests]);
+
+  // Filter entries by selected entry account
+  const accountEntries = useMemo(() => {
+    if (entryAccountFilter === 'all') return allEntriesWithRequests;
+    return allEntriesWithRequests.filter((item) =>
+      matchesEntryAccount(item, entryAccountFilter, entryAccountOptions)
+    );
+  }, [allEntriesWithRequests, entryAccountFilter, entryAccountOptions]);
+
+  // Tab queues scoped to the selected entry account
   const pendingQueue = useMemo(
     () =>
-      allEntriesWithRequests.filter(
+      accountEntries.filter(
         (item) =>
           item.entry.status === 'pending_approval' ||
           item.entry.status === 'pending' ||
           isPartialInProgress(item.entry)
       ),
-    [allEntriesWithRequests]
+    [accountEntries]
   );
 
   const approvedQueue = useMemo(
-    () => allEntriesWithRequests.filter((item) => item.entry.status === 'approved' || item.entry.status === 'paid'),
-    [allEntriesWithRequests]
+    () => accountEntries.filter((item) => item.entry.status === 'approved' || item.entry.status === 'paid'),
+    [accountEntries]
   );
 
   const rejectedQueue = useMemo(
-    () => allEntriesWithRequests.filter((item) => item.entry.status === 'rejected'),
-    [allEntriesWithRequests]
+    () => accountEntries.filter((item) => item.entry.status === 'rejected'),
+    [accountEntries]
   );
 
   const currentQueue =
@@ -129,6 +327,8 @@ export const EntryApprovalsPage: React.FC = () => {
           item.request.shop_name,
           item.entry.notes,
           item.entry.created_by_name,
+          item.entry.created_by_person_name,
+          item.request.assigned_entry_user_name,
         ]
           .filter(Boolean)
           .join(' ')
@@ -165,6 +365,7 @@ export const EntryApprovalsPage: React.FC = () => {
     try {
       const res = await approveDisbursementEntry(item.entry.id);
       if (!res.success) throw new Error(res.error || 'Approval failed');
+      loadDirectEntries();
       setNotice({
         type: 'success',
         message: `Entry #${item.entry.entry_no} (${formatINR(entryOutstanding(item.entry))} · ${item.entry.entry_type.toUpperCase()}) fully approved and routed to payment accounts.`,
@@ -206,6 +407,7 @@ export const EntryApprovalsPage: React.FC = () => {
     try {
       const res = await approveDisbursementEntry(partialTarget.entry.id, undefined, amt);
       if (!res.success) throw new Error(res.error || 'Partial approval failed');
+      loadDirectEntries();
       setNotice({
         type: 'success',
         message: `Entry #${partialTarget.entry.entry_no}: ${formatINR(amt)} approved for payment. The balance ${formatINR(outstanding - amt)} stays here for your verification after this part is paid.`,
@@ -233,6 +435,7 @@ export const EntryApprovalsPage: React.FC = () => {
       const idsArray = Array.from(selectedIds);
       const res = await approveMultipleDisbursementEntries(idsArray);
       if (!res.success) throw new Error(res.error || 'Bulk approval failed');
+      loadDirectEntries();
       setNotice({
         type: 'success',
         message: `Successfully approved ${res.approved_count ?? idsArray.length} disbursement entries.`,
@@ -254,6 +457,7 @@ export const EntryApprovalsPage: React.FC = () => {
     try {
       const res = await rejectDisbursementEntry(rejectTarget.entry.id, rejectReason.trim());
       if (!res.success) throw new Error(res.error || 'Rejection failed');
+      loadDirectEntries();
       setNotice({
         type: 'success',
         message: `Entry #${rejectTarget.entry.entry_no} returned for correction. Entry officer has been notified.`,
@@ -274,23 +478,66 @@ export const EntryApprovalsPage: React.FC = () => {
   const pendingCashCount = pendingQueue.filter((item) => item.entry.entry_type === 'cash').length;
   const pendingBankCount = pendingQueue.filter((item) => item.entry.entry_type === 'bank').length;
 
+  const selectedAccountName = useMemo(() => {
+    if (entryAccountFilter === 'all') return 'All Entry Accounts';
+    if (entryAccountFilter === '__unassigned__') return 'Direct / Unassigned';
+    return (
+      entryAccountOptions.find((o) => o.id === entryAccountFilter)?.name ||
+      'Selected Entry Account'
+    );
+  }, [entryAccountFilter, entryAccountOptions]);
+
+  const totalPendingAcrossAll = useMemo(
+    () =>
+      allEntriesWithRequests.filter(
+        (item) =>
+          item.entry.status === 'pending_approval' ||
+          item.entry.status === 'pending' ||
+          isPartialInProgress(item.entry)
+      ).length,
+    [allEntriesWithRequests]
+  );
+
   return (
     <div className="max-w-5xl mx-auto px-2 sm:px-4 py-4 sm:py-8 space-y-6 pb-28">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 inline-block mb-1">
-            Treasury Gatekeeper
-          </span>
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 inline-block">
+              Treasury Gatekeeper
+            </span>
+            {entryAccountFilter !== 'all' && (
+              <span className="text-xs font-extrabold text-sky-800 bg-sky-50 px-2.5 py-1 rounded-full border border-sky-300 inline-flex items-center gap-1.5 shadow-2xs">
+                <UserCheck className="w-3.5 h-3.5 text-sky-600" />
+                <span>Account: {selectedAccountName}</span>
+              </span>
+            )}
+          </div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display">
             Disbursement Entry Approvals
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Review and sign off on payment entries before they reach Cash &amp; Bank payment desks.
+            {entryAccountFilter !== 'all'
+              ? `Reviewing entries specifically recorded by or assigned to ${selectedAccountName}.`
+              : 'Review and sign off on payment entries before they reach Cash & Bank payment desks.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            type="button"
+            id="btn-refresh-entry-approvals"
+            disabled={isDirectLoading}
+            onClick={async () => {
+              await Promise.all([refreshRequests(), loadDirectEntries()]);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+            title="Refresh entries and requests from live database"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 text-slate-600 ${isDirectLoading ? 'animate-spin' : ''}`} />
+            <span>{isDirectLoading ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
           <span className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold font-mono">
             {pendingQueue.length} Waiting Sign-off
           </span>
@@ -431,51 +678,164 @@ export const EntryApprovalsPage: React.FC = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200">
-        <div className="flex-1 min-w-0">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search request #, title, beneficiary, department, officer…"
-            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden bg-slate-50"
-          />
-        </div>
+      <div className="space-y-2.5">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+          {/* Search Input */}
+          <div className="flex-1 min-w-0">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search request #, title, beneficiary, department, officer…"
+              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden bg-slate-50"
+            />
+          </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[11px] font-bold text-slate-500">Mode:</span>
-          <div className="inline-flex rounded-xl p-0.5 bg-slate-100 border border-slate-200 text-xs">
-            <button
-              type="button"
-              onClick={() => setModeFilter('all')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
-                modeFilter === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              All
-            </button>
-            <button
-              type="button"
-              onClick={() => setModeFilter('cash')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 ${
-                modeFilter === 'cash' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-emerald-700 hover:text-emerald-900'
-              }`}
-            >
-              <Banknote className="w-3 h-3" />
-              <span>Cash</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setModeFilter('bank')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 ${
-                modeFilter === 'bank' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-indigo-700 hover:text-indigo-900'
-              }`}
-            >
-              <Landmark className="w-3 h-3" />
-              <span>Bank</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            {/* Entry Only Account Filter Dropdown */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+              <UserCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+              <label htmlFor="filter-entry-account" className="text-[11px] font-bold text-slate-600 whitespace-nowrap">
+                Entry Account:
+              </label>
+              <select
+                id="filter-entry-account"
+                value={entryAccountFilter}
+                onChange={(e) => {
+                  setEntryAccountFilter(e.target.value);
+                  setSelectedIds(new Set());
+                }}
+                className="text-xs font-semibold text-slate-800 bg-transparent outline-none cursor-pointer pr-1 py-0.5 focus:text-indigo-600 max-w-[190px] truncate"
+              >
+                <option value="all">
+                  All Entry Accounts ({totalPendingAcrossAll} pending)
+                </option>
+                {entryAccountOptions.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.name} ({opt.pendingCount} pending{opt.totalCount !== opt.pendingCount ? ` · ${opt.totalCount} total` : ''})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Mode: All / Cash / Bank */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500">Mode:</span>
+              <div className="inline-flex rounded-xl p-0.5 bg-slate-100 border border-slate-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setModeFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
+                    modeFilter === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModeFilter('cash')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                    modeFilter === 'cash' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-emerald-700 hover:text-emerald-900'
+                  }`}
+                >
+                  <Banknote className="w-3 h-3" />
+                  <span>Cash</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModeFilter('bank')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                    modeFilter === 'bank' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-indigo-700 hover:text-indigo-900'
+                  }`}
+                >
+                  <Landmark className="w-3 h-3" />
+                  <span>Bank</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* Quick filter chips if there are active entry accounts */}
+        {entryAccountOptions.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <span className="text-[11px] font-bold text-slate-400 shrink-0 uppercase tracking-wider flex items-center gap-1">
+              <Filter className="w-3 h-3 text-slate-400" />
+              Quick:
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setEntryAccountFilter('all');
+                setSelectedIds(new Set());
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                entryAccountFilter === 'all'
+                  ? 'bg-slate-900 text-white shadow-2xs'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              All Accounts ({totalPendingAcrossAll} pending)
+            </button>
+            {entryAccountOptions.map((opt) => {
+              const isSelected = entryAccountFilter === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setEntryAccountFilter(isSelected ? 'all' : opt.id);
+                    setSelectedIds(new Set());
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                    isSelected
+                      ? 'bg-sky-600 text-white shadow-2xs ring-1 ring-sky-500'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-sky-50 hover:text-sky-800'
+                  }`}
+                >
+                  <UserCheck className={`w-3 h-3 ${isSelected ? 'text-white' : 'text-sky-600'}`} />
+                  <span>{opt.name}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {opt.pendingCount}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Active Filter Notification Banner */}
+        {entryAccountFilter !== 'all' && (
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-sky-50/90 border border-sky-200 rounded-xl text-xs text-sky-900 animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+              <span>
+                Filtering entries created by Entry Account:{' '}
+                <strong className="font-extrabold text-sky-950">
+                  {selectedAccountName}
+                </strong>
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-200 text-sky-900">
+                {currentQueue.length} {activeTab === 'pending' ? 'pending' : activeTab === 'approved' ? 'approved' : 'returned'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setEntryAccountFilter('all');
+                setSelectedIds(new Set());
+              }}
+              className="text-sky-700 hover:text-sky-950 font-bold inline-flex items-center gap-1 text-[11px] hover:underline cursor-pointer"
+            >
+              <X className="w-3 h-3" />
+              <span>Clear Filter</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Select All & Bulk Action Bar for Pending Tab */}
@@ -517,21 +877,42 @@ export const EntryApprovalsPage: React.FC = () => {
 
       {/* Empty State */}
       {filteredList.length === 0 ? (
-        <EmptyState
-          icon={activeTab === 'pending' ? CheckCircle2 : activeTab === 'approved' ? ShieldCheck : XCircle}
-          title={
-            activeTab === 'pending'
-              ? 'No Entries Awaiting Approval'
-              : activeTab === 'approved'
-              ? 'No Approved Entries Found'
-              : 'No Returned Entries'
-          }
-          description={
-            activeTab === 'pending'
-              ? 'All disbursement entries created by entry officers have been reviewed.'
-              : 'Entries that have been approved or paid will be listed in this audit record.'
-          }
-        />
+        <div className="space-y-3">
+          <EmptyState
+            icon={activeTab === 'pending' ? CheckCircle2 : activeTab === 'approved' ? ShieldCheck : XCircle}
+            title={
+              entryAccountFilter !== 'all'
+                ? `No ${activeTab === 'pending' ? 'Pending' : activeTab === 'approved' ? 'Approved' : 'Returned'} Entries for ${selectedAccountName}`
+                : activeTab === 'pending'
+                ? 'No Entries Awaiting Approval'
+                : activeTab === 'approved'
+                ? 'No Approved Entries Found'
+                : 'No Returned Entries'
+            }
+            description={
+              entryAccountFilter !== 'all'
+                ? `There are no ${activeTab === 'pending' ? 'pending' : activeTab === 'approved' ? 'approved' : 'returned'} disbursement entries for ${selectedAccountName}${modeFilter !== 'all' ? ` in ${modeFilter} mode` : ''}.`
+                : activeTab === 'pending'
+                ? 'All disbursement entries created by entry officers have been reviewed.'
+                : 'Entries that have been approved or paid will be listed in this audit record.'
+            }
+          />
+          {entryAccountFilter !== 'all' && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setEntryAccountFilter('all');
+                  setSelectedIds(new Set());
+                }}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Show Entries Across All Accounts</span>
+              </button>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="space-y-4">
           {filteredList.map(({ entry, request }) => {
@@ -617,6 +998,40 @@ export const EntryApprovalsPage: React.FC = () => {
                               : 'TDS Cut'
                             : 'TDS Not Cut'}
                         </span>
+
+                        {/* Entry Account Badge */}
+                        {(() => {
+                          const accName = entry.created_by_name || request.assigned_entry_user_name;
+                          const accId = entry.created_by || request.assigned_entry_user_id;
+                          if (!accName && !accId) return null;
+                          const isCurrentActive =
+                            entryAccountFilter !== 'all' &&
+                            (entryAccountFilter === accId || entryAccountFilter === accName);
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (accId) {
+                                  setEntryAccountFilter(isCurrentActive ? 'all' : accId);
+                                  setSelectedIds(new Set());
+                                }
+                              }}
+                              className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+                                isCurrentActive
+                                  ? 'bg-sky-600 text-white border-sky-700 shadow-2xs'
+                                  : 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100 hover:border-sky-300'
+                              }`}
+                              title={
+                                isCurrentActive
+                                  ? 'Click to show all accounts'
+                                  : `Click to filter by ${accName || 'this entry account'}`
+                              }
+                            >
+                              <UserCheck className={`w-3 h-3 ${isCurrentActive ? 'text-white' : 'text-sky-600'}`} />
+                              <span>Entry Acc: {accName || 'Entry Desk'}</span>
+                            </button>
+                          );
+                        })()}
 
                         {/* Status */}
                         {isPartialActive ? (

@@ -9,7 +9,7 @@ import { EditDisbursementEntryModal } from '../../components/portals/EditDisburs
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
 import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, entriesTotal, entryAvailable } from '../../types/database';
-import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
+import { formatINR, formatISTDate, typeOf, isEntryCheckingUser } from '../../lib/formatters';
 import {
   Banknote,
   Clock,
@@ -17,18 +17,23 @@ import {
   ShieldCheck,
   Download,
   HelpCircle,
-  PlusCircle,
   Wallet,
   FileText,
   AlertCircle,
   RotateCcw,
   ExternalLink,
   Eye,
+  ChevronRight,
+  Landmark,
+  AlertTriangle,
+  Pencil,
+  Lock,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { downloadSignedPacket } from '../../lib/files';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
+import { EditBankDetailsModal } from '../../components/requests/EditBankDetailsModal';
 import { useDirectory } from '../../lib/directory';
 import {
   isPaymentUserAllowedForEntry,
@@ -46,8 +51,9 @@ export const DisbursementPage: React.FC = () => {
 
   const isDisbursement = user?.role === 'disbursement';
   const isAdmin = user?.role === 'admin';
-  const isEntryOnly = isDisbursement && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
-  const isPaymentOnly = isDisbursement && user?.disbursement_type === 'payment_only';
+  const isEntryApprover = isAdmin || (isDisbursement && (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)));
+  const isEntryOnly = isDisbursement && !isEntryApprover && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
+  const isPaymentOnly = isDisbursement && !isEntryApprover && user?.disbursement_type === 'payment_only';
 
   const canAddEntry = isEntryOnly || isAdmin;
   const canPay = isPaymentOnly || isAdmin;
@@ -66,6 +72,27 @@ export const DisbursementPage: React.FC = () => {
     name: string;
     approvalNo?: string | null;
   } | null>(null);
+  const [bankEditRequest, setBankEditRequest] = useState<RequestRecord | null>(null);
+
+  const isRequestFirstPaymentReleased = (r: RequestRecord): boolean => {
+    return Boolean(
+      Number(r.paid_amount || 0) > 0 ||
+      (r.payments && r.payments.length > 0) ||
+      r.status === 'paid' ||
+      (r.disbursement_entries || []).some((e) => Number(e.paid_amount || 0) > 0)
+    );
+  };
+
+  const canEditBank = (r: RequestRecord): boolean => {
+    if (isRequestFirstPaymentReleased(r)) return false;
+    return Boolean(
+      user?.role === 'admin' ||
+      user?.role === 'head' ||
+      user?.role === 'clerk' ||
+      user?.role === 'regional_head' ||
+      isEntryOnly
+    );
+  };
 
   useEffect(() => {
     setActiveTab(location.pathname.endsWith('/paid') ? 'paid' : 'awaiting');
@@ -135,6 +162,21 @@ export const DisbursementPage: React.FC = () => {
     return s + paymentSummary(r).balance;
   }, 0);
 
+  // Total entries waiting for Entry Approver review across payable requests
+  const pendingApproverEntriesCount = requests.reduce((cnt, r) => {
+    if (typeOf(r) === 'discount' || typeOf(r) === 'stock_transfer' || typeOf(r) === 'non_cash') return cnt;
+    const pendingInReq = (r.disbursement_entries || []).filter(
+      (e) =>
+        e.status === 'pending_approval' ||
+        e.status === 'pending' ||
+        (e.status === 'approved' &&
+          Number(e.approved_amount || 0) > 0 &&
+          entryOutstanding(e) > Number(e.approved_amount || 0) &&
+          Number(e.paid_amount || 0) < Number(e.amount || 0))
+    ).length;
+    return cnt + pendingInReq;
+  }, 0);
+
   return (
     <div className="max-w-5xl mx-auto px-1 sm:px-4 py-4 sm:py-8 space-y-6 pb-24">
       {/* Top Banner */}
@@ -164,9 +206,11 @@ export const DisbursementPage: React.FC = () => {
       {/* Account Type Indicator Badge */}
       {(isDisbursement || isAdmin) && (
         <div
-          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+          className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
             isAdmin
               ? 'bg-purple-50/80 border-purple-200 text-purple-950'
+              : isEntryApprover
+              ? 'bg-amber-50/80 border-amber-200 text-amber-950'
               : isPaymentOnly
               ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
               : 'bg-sky-50/80 border-sky-200 text-sky-950'
@@ -177,18 +221,22 @@ export const DisbursementPage: React.FC = () => {
               className={`p-2 rounded-xl shrink-0 ${
                 isAdmin
                   ? 'bg-purple-600 text-white'
+                  : isEntryApprover
+                  ? 'bg-amber-600 text-white'
                   : isPaymentOnly
                   ? 'bg-emerald-600 text-white'
                   : 'bg-sky-600 text-white'
               }`}
             >
-              <Wallet className="w-5 h-5" />
+              {isEntryApprover ? <ShieldCheck className="w-5 h-5" /> : <Wallet className="w-5 h-5" />}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-xs sm:text-sm">
                   {isAdmin
                     ? 'Administrator Access'
+                    : isEntryApprover
+                    ? 'Entry Approver (Treasury Gatekeeper)'
                     : isPaymentOnly
                     ? 'Payment Only Account'
                     : 'Entry Only Account'}
@@ -197,6 +245,8 @@ export const DisbursementPage: React.FC = () => {
                   className={`text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full border ${
                     isAdmin
                       ? 'bg-purple-100 border-purple-300 text-purple-800'
+                      : isEntryApprover
+                      ? 'bg-amber-100 border-amber-300 text-amber-800'
                       : isPaymentOnly
                       ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
                       : 'bg-sky-100 border-sky-300 text-sky-800'
@@ -208,12 +258,32 @@ export const DisbursementPage: React.FC = () => {
               <p className="text-[11px] sm:text-xs text-slate-600 mt-0.5">
                 {isAdmin
                   ? 'You have full administrative privileges to create payment entries (+ Add Entry) and record payments.'
+                  : isEntryApprover
+                  ? 'You review, verify and sign off on payment entries before they reach Payment Only accounts. Click Entry Approvals to take action.'
                   : isPaymentOnly
                   ? 'Authorized to pay amounts against approved entries (max amount strictly capped per entry). Entries will be marked as Paid.'
                   : 'Authorized to create sequential payment entries (Entry #1, #2...) with TDS cut/not cut indication. Disbursing is handled by Payment Only accounts.'}
               </p>
             </div>
           </div>
+
+          {(isEntryApprover || pendingApproverEntriesCount > 0) && (
+            <button
+              type="button"
+              id="btn-goto-entry-approvals"
+              onClick={() => navigate('/entry-approvals')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors shrink-0 self-start sm:self-auto cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Go to Entry Approvals</span>
+              {pendingApproverEntriesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-white text-amber-900 ml-1">
+                  {pendingApproverEntriesCount}
+                </span>
+              )}
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       )}
 
@@ -237,6 +307,25 @@ export const DisbursementPage: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto scrollbar-none">
+        <button
+          type="button"
+          id="tab-entry-approvals"
+          onClick={() => navigate('/entry-approvals')}
+          className="px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs shrink-0"
+          title="Open Disbursement Entry Approvals"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
+          <span>Entry Approvals</span>
+          {pendingApproverEntriesCount > 0 ? (
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-amber-200 text-amber-950">
+              {pendingApproverEntriesCount}
+            </span>
+          ) : (
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-slate-200 text-slate-600">
+              0
+            </span>
+          )}
+        </button>
         <button
           type="button"
           onClick={() => setActiveTab('awaiting')}
@@ -518,9 +607,76 @@ export const DisbursementPage: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <h3 className="font-bold text-slate-900 text-sm sm:text-base hover:text-teal-600 transition-colors break-words">
+                        <h3
+                          onClick={() => navigate(`/requests/${req.id}`)}
+                          className="font-bold text-slate-900 text-sm sm:text-base hover:text-indigo-600 transition-colors break-words cursor-pointer"
+                        >
                           {req.title}
                         </h3>
+
+                        {/* Disbursement Mode & Bank Account Details */}
+                        {typeOf(req) !== 'discount' && typeOf(req) !== 'non_cash' && typeOf(req) !== 'stock_transfer' && (
+                          <div className="mt-2 flex items-center gap-2 flex-wrap">
+                            <div
+                              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border ${
+                                req.disbursement_mode === 'bank'
+                                  ? req.bank_account_no
+                                    ? 'bg-indigo-50/80 text-indigo-900 border-indigo-200'
+                                    : 'bg-amber-50 text-amber-900 border-amber-200'
+                                  : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                              }`}
+                            >
+                              {req.disbursement_mode === 'bank' ? (
+                                <>
+                                  <Landmark className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                  {req.bank_account_no ? (
+                                    <span>
+                                      Bank: <strong>{req.bank_name || 'Bank Transfer'}</strong>
+                                      {req.bank_branch ? ` (${req.bank_branch})` : ''} • Acc: <strong className="font-mono">{req.bank_account_no}</strong> ({req.bank_ifsc})
+                                      {req.bank_account_holder_name && (
+                                        <span className="text-slate-600 font-normal"> • {req.bank_account_holder_name}</span>
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-1 text-amber-800 font-medium">
+                                      <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                      <span>Bank details pending (will not auto-transfer until entered)</span>
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <Banknote className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span className="font-medium">Cash Payout</span>
+                                </>
+                              )}
+
+                              {canEditBank(req) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBankEditRequest(req);
+                                  }}
+                                  className="ml-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline cursor-pointer"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  <span>{req.bank_account_no ? 'Edit Bank' : 'Add Bank Details'}</span>
+                                </button>
+                              )}
+                              {isRequestFirstPaymentReleased(req) && (
+                                <span
+                                  className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] text-slate-400 font-medium"
+                                  title="Bank details locked because payment has already been released"
+                                >
+                                  <Lock className="w-2.5 h-2.5" />
+                                  <span>Locked</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="text-xs text-slate-500 mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap">
                           <span>Beneficiary: <strong>{req.requester_name}</strong></span>
                           <span>Approved: {formatISTDate(req.decided_at, false)}</span>
@@ -783,9 +939,20 @@ export const DisbursementPage: React.FC = () => {
                                       </span>
                                     )
                                   ) : isEntryPendingApproval ? (
-                                    <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">
-                                      Awaiting Entry Approver
-                                    </span>
+                                    isEntryApprover ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => navigate('/entry-approvals')}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-all active:scale-95"
+                                      >
+                                        <ShieldCheck className="w-3.5 h-3.5" />
+                                        <span>Review Entry #{ent.entry_no}</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">
+                                        Awaiting Entry Approver
+                                      </span>
+                                    )
                                   ) : isEntryRejected ? (
                                     (canAddEntry || ent.created_by === user?.id) && (
                                       <button
@@ -916,6 +1083,15 @@ export const DisbursementPage: React.FC = () => {
         fileName={previewSignedDoc?.name || 'signed_approval.pdf'}
         approvalNo={previewSignedDoc?.approvalNo}
       />
+
+      {/* Edit Bank Details Modal */}
+      {bankEditRequest && (
+        <EditBankDetailsModal
+          isOpen={true}
+          onClose={() => setBankEditRequest(null)}
+          request={bankEditRequest}
+        />
+      )}
     </div>
   );
 };

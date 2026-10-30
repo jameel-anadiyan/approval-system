@@ -151,8 +151,26 @@ export interface RequestShopChoice {
   shop_name?: string | null;
 }
 
+export type DisbursementMode = 'cash' | 'bank';
+
+export interface BankAccountDetails {
+  disbursement_mode?: DisbursementMode | null;
+  enter_bank_details_later?: boolean;
+  bank_account_no?: string | null;
+  bank_ifsc?: string | null;
+  bank_name?: string | null;
+  bank_branch?: string | null;
+  bank_account_holder_name?: string | null;
+  bank_verified?: boolean;
+  bank_verification_message?: string | null;
+}
+
+export const isDisbursementAssociated = (type?: RequestType | string | null): boolean =>
+  Boolean(type && type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer');
+
 export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>
-  & Partial<AssetDetails> & Partial<StockTransferDetails> & Partial<NonCashDetails> & RequestShopChoice;
+  & Partial<AssetDetails> & Partial<StockTransferDetails> & Partial<NonCashDetails> & RequestShopChoice
+  & Partial<BankAccountDetails>;
 
 export interface Department {
   id: string;
@@ -347,6 +365,16 @@ export interface RequestRecord {
   transfer_completed_by?: string | null;
   transfer_completed_by_name?: string | null;
   transfer_completed_remarks?: string | null;
+  /** Disbursement mode: cash or bank */
+  disbursement_mode?: DisbursementMode | null;
+  enter_bank_details_later?: boolean;
+  bank_account_no?: string | null;
+  bank_ifsc?: string | null;
+  bank_name?: string | null;
+  bank_branch?: string | null;
+  bank_account_holder_name?: string | null;
+  bank_verified?: boolean;
+  bank_verification_message?: string | null;
 }
 
 export type DisbursementEntryStatus = 'pending' | 'pending_approval' | 'approved' | 'rejected' | 'paid' | 'cancelled';
