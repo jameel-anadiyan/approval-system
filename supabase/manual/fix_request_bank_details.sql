@@ -127,3 +127,11 @@ $$;
 
 grant execute on function public.update_request_bank_details to authenticated, anon;
 notify pgrst, 'reload schema';
+
+-- Optional: Reset existing requests that were defaulted to 'cash' without explicit selection
+-- update public.requests
+-- set disbursement_mode = null
+-- where disbursement_mode = 'cash'
+--   and (bank_account_no is null or bank_account_no = '')
+--   and (paid_amount is null or paid_amount = 0)
+--   and not exists (select 1 from public.request_payments where request_id = requests.id);
