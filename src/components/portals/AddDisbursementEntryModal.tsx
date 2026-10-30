@@ -282,6 +282,18 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </div>
         )}
 
+        {!request.disbursement_mode && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">Disbursement mode has not been decided yet.</span>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Payout method was not specified at creation. You can select Cash Entry or Bank Entry above for this voucher.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Old balance / old advance adjustment (separate from the entry amount) */}
         <div className="p-3.5 rounded-xl border border-violet-200 bg-violet-50/50 space-y-2.5">
           <label htmlFor="entry-adjustment" className="text-xs font-bold text-violet-950 flex items-center gap-1.5">

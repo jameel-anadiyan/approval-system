@@ -104,7 +104,9 @@ export const RequestCard: React.FC<RequestCardProps> = ({
                   ? request.bank_account_no
                     ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
                     : 'bg-amber-50 text-amber-800 border border-amber-200'
-                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : request.disbursement_mode === 'cash'
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-slate-100 text-slate-600 border border-slate-200'
               }`}
             >
               {request.disbursement_mode === 'bank' ? (
@@ -112,10 +114,15 @@ export const RequestCard: React.FC<RequestCardProps> = ({
                   <Landmark className="w-3 h-3 text-indigo-600" />
                   <span>{request.bank_account_no ? (request.bank_name ? `Bank: ${request.bank_name}` : 'Bank Transfer') : 'Bank (Details Later)'}</span>
                 </>
-              ) : (
+              ) : request.disbursement_mode === 'cash' ? (
                 <>
                   <Banknote className="w-3 h-3 text-emerald-600" />
                   <span>Cash</span>
+                </>
+              ) : (
+                <>
+                  <HelpCircle className="w-3 h-3 text-slate-400" />
+                  <span>Not Decided Yet</span>
                 </>
               )}
             </span>

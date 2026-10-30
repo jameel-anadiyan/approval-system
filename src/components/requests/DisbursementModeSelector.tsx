@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Banknote, Building2, CheckCircle2, AlertTriangle, Loader2, Sparkles, RefreshCw, Info } from 'lucide-react';
+import { Banknote, Building2, CheckCircle2, AlertTriangle, Loader2, Sparkles, RefreshCw, Info, HelpCircle } from 'lucide-react';
 import { verifyBankAccount, isValidIfsc, isValidAccountNumber, BankVerificationResult } from '../../lib/bankVerification';
+import { DisbursementMode } from '../../types/database';
 
 export interface DisbursementModeSelectorProps {
-  mode: 'cash' | 'bank';
-  onModeChange: (mode: 'cash' | 'bank') => void;
+  mode: DisbursementMode;
+  onModeChange: (mode: DisbursementMode) => void;
   enterLater: boolean;
   onEnterLaterChange: (later: boolean) => void;
   accountNumber: string;
@@ -125,19 +126,38 @@ export const DisbursementModeSelector: React.FC<DisbursementModeSelectorProps> =
 
   return (
     <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-xs transition-all">
-      <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-2">
           <div className="p-2 rounded-xl bg-indigo-50 text-indigo-700">
-            {mode === 'bank' ? <Building2 className="w-5 h-5" /> : <Banknote className="w-5 h-5" />}
+            {mode === 'bank' ? (
+              <Building2 className="w-5 h-5 text-indigo-600" />
+            ) : mode === 'cash' ? (
+              <Banknote className="w-5 h-5 text-emerald-600" />
+            ) : (
+              <HelpCircle className="w-5 h-5 text-amber-600" />
+            )}
           </div>
           <div>
             <h3 className="text-sm font-bold text-slate-900 font-display">Disbursement Mode</h3>
-            <p className="text-xs text-slate-500">Choose payout method for this request</p>
+            <p className="text-xs text-slate-500">Choose payout method or leave as Not Decided Yet</p>
           </div>
         </div>
 
         {/* Mode Selector Checkbox / Pill buttons */}
         <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onModeChange(null)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+              !mode
+                ? 'bg-white text-amber-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
+            <span>Not Decided Yet</span>
+          </button>
           <button
             type="button"
             disabled={disabled}
@@ -166,6 +186,25 @@ export const DisbursementModeSelector: React.FC<DisbursementModeSelectorProps> =
           </button>
         </div>
       </div>
+
+      {!mode && (
+        <div className="flex items-start gap-3 p-3.5 rounded-xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900 animate-fadeIn">
+          <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold">Disbursement Mode: Not Decided Yet</p>
+            <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+              Disbursement mode has not been selected. Authorized reviewers, regional heads, clerks, admins, or disbursement entry officers can assign Cash or Bank Transfer anytime before releasing payment.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {mode === 'cash' && (
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 text-xs text-emerald-900 animate-fadeIn">
+          <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>Designated for physical cash payout at disbursement desk against payment voucher.</span>
+        </div>
+      )}
 
       {mode === 'bank' && (
         <div className="space-y-4 animate-fadeIn">

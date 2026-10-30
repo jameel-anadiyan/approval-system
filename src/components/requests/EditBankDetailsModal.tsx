@@ -20,7 +20,7 @@ export const EditBankDetailsModal: React.FC<EditBankDetailsModalProps> = ({
   const { updateRequestBankDetails } = useRequests();
 
   const [mode, setMode] = useState<DisbursementMode>(
-    request.disbursement_mode || (request.details?.disbursement_mode as DisbursementMode) || 'cash'
+    request.disbursement_mode ?? (request.details?.disbursement_mode as DisbursementMode) ?? null
   );
   const [enterLater, setEnterLater] = useState<boolean>(
     Boolean(request.enter_bank_details_later ?? request.details?.enter_bank_details_later ?? false)

@@ -151,7 +151,7 @@ export interface RequestShopChoice {
   shop_name?: string | null;
 }
 
-export type DisbursementMode = 'cash' | 'bank';
+export type DisbursementMode = 'cash' | 'bank' | null;
 
 export interface BankAccountDetails {
   disbursement_mode?: DisbursementMode | null;

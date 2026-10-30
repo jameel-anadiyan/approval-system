@@ -967,8 +967,10 @@ export const RequestDetailPage: React.FC = () => {
                   <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200/60 flex items-center justify-center shrink-0">
                     {request.disbursement_mode === 'bank' ? (
                       <Building2 className="w-5 h-5 text-indigo-600" />
-                    ) : (
+                    ) : request.disbursement_mode === 'cash' ? (
                       <Banknote className="w-5 h-5 text-emerald-600" />
+                    ) : (
+                      <HelpCircle className="w-5 h-5 text-amber-600" />
                     )}
                   </div>
                   <div>
@@ -978,16 +980,24 @@ export const RequestDetailPage: React.FC = () => {
                         className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
                           request.disbursement_mode === 'bank'
                             ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : request.disbursement_mode === 'cash'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
                         }`}
                       >
-                        {request.disbursement_mode === 'bank' ? 'Bank Transfer' : 'Cash Payout'}
+                        {request.disbursement_mode === 'bank'
+                          ? 'Bank Transfer'
+                          : request.disbursement_mode === 'cash'
+                          ? 'Cash Payout'
+                          : 'Not Decided Yet'}
                       </span>
                     </h3>
                     <p className="text-xs text-slate-500">
                       {request.disbursement_mode === 'bank'
                         ? 'Electronic bank transfer to verified account'
-                        : 'Cash disbursement against payment voucher'}
+                        : request.disbursement_mode === 'cash'
+                        ? 'Cash disbursement against payment voucher'
+                        : 'Disbursement method has not been selected yet'}
                     </p>
                   </div>
                 </div>
@@ -1001,9 +1011,11 @@ export const RequestDetailPage: React.FC = () => {
                     >
                       <Pencil className="w-3.5 h-3.5" />
                       <span>
-                        {request.disbursement_mode === 'bank' && !request.bank_account_no
+                        {!request.disbursement_mode
+                          ? 'Decide / Assign Mode'
+                          : request.disbursement_mode === 'bank' && !request.bank_account_no
                           ? 'Add / Verify Bank Details'
-                          : 'Edit Bank Details'}
+                          : 'Edit Disbursement Details'}
                       </span>
                     </button>
                   )}
@@ -1082,7 +1094,7 @@ export const RequestDetailPage: React.FC = () => {
                     </>
                   )}
                 </div>
-              ) : (
+              ) : request.disbursement_mode === 'cash' ? (
                 <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -1092,6 +1104,27 @@ export const RequestDetailPage: React.FC = () => {
                     <span className="text-[11px] text-indigo-600 font-medium">
                       (Can be changed to Bank Transfer anytime before payment)
                     </span>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900 flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Disbursement Mode: Not Decided Yet</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                        Payout method has not been selected yet. Authorized staff (Regional Head, Clerk, Head, Admin, or Entry Officer) can assign Cash or Bank Transfer anytime before releasing the payment.
+                      </p>
+                    </div>
+                  </div>
+                  {canEditBankDetails && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditBankModalOpen(true)}
+                      className="px-3 py-1.5 text-xs font-bold text-amber-900 bg-white hover:bg-amber-100/60 border border-amber-300 rounded-lg shrink-0 transition-colors cursor-pointer"
+                    >
+                      Assign Mode
+                    </button>
                   )}
                 </div>
               )}

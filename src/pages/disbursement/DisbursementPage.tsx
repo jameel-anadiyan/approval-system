@@ -623,7 +623,9 @@ export const DisbursementPage: React.FC = () => {
                                   ? req.bank_account_no
                                     ? 'bg-indigo-50/80 text-indigo-900 border-indigo-200'
                                     : 'bg-amber-50 text-amber-900 border-amber-200'
-                                  : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                                  : req.disbursement_mode === 'cash'
+                                  ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                                  : 'bg-slate-100 text-slate-700 border-slate-200'
                               }`}
                             >
                               {req.disbursement_mode === 'bank' ? (
@@ -644,10 +646,15 @@ export const DisbursementPage: React.FC = () => {
                                     </span>
                                   )}
                                 </>
-                              ) : (
+                              ) : req.disbursement_mode === 'cash' ? (
                                 <>
                                   <Banknote className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                   <span className="font-medium">Cash Payout</span>
+                                </>
+                              ) : (
+                                <>
+                                  <HelpCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                  <span className="font-medium text-slate-600">Disbursement Mode: Not Decided Yet</span>
                                 </>
                               )}
 
@@ -661,7 +668,13 @@ export const DisbursementPage: React.FC = () => {
                                   className="ml-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline cursor-pointer"
                                 >
                                   <Pencil className="w-3 h-3" />
-                                  <span>{req.bank_account_no ? 'Edit Bank' : 'Add Bank Details'}</span>
+                                  <span>
+                                    {!req.disbursement_mode
+                                      ? 'Assign Cash / Bank'
+                                      : req.disbursement_mode === 'bank' && !req.bank_account_no
+                                      ? 'Add Bank Details'
+                                      : 'Edit'}
+                                  </span>
                                 </button>
                               )}
                               {isRequestFirstPaymentReleased(req) && (

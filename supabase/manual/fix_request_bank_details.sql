@@ -2,7 +2,7 @@
 -- Safe to re-run multiple times.
 
 alter table public.requests
-  add column if not exists disbursement_mode text default 'cash',
+  add column if not exists disbursement_mode text default null,
   add column if not exists enter_bank_details_later boolean default false,
   add column if not exists bank_account_no text,
   add column if not exists bank_ifsc text,
@@ -11,6 +11,10 @@ alter table public.requests
   add column if not exists bank_account_holder_name text,
   add column if not exists bank_verified boolean default false,
   add column if not exists bank_verification_message text;
+
+-- Ensure default is null so existing / unselected requests stay "Not Decided Yet"
+alter table public.requests alter column disbursement_mode drop default;
+alter table public.requests alter column disbursement_mode set default null;
 
 do $$
 begin
@@ -94,7 +98,7 @@ begin
   -- Update columns and sync into details jsonb
   update public.requests
   set
-    disbursement_mode = coalesce(p_disbursement_mode, 'cash'),
+    disbursement_mode = p_disbursement_mode,
     enter_bank_details_later = coalesce(p_enter_bank_details_later, false),
     bank_account_no = p_bank_account_no,
     bank_ifsc = p_bank_ifsc,
@@ -104,7 +108,7 @@ begin
     bank_verified = coalesce(p_bank_verified, false),
     bank_verification_message = p_bank_verification_message,
     details = coalesce(details, '{}'::jsonb) || jsonb_build_object(
-      'disbursement_mode', coalesce(p_disbursement_mode, 'cash'),
+      'disbursement_mode', p_disbursement_mode,
       'enter_bank_details_later', coalesce(p_enter_bank_details_later, false),
       'bank_account_no', p_bank_account_no,
       'bank_ifsc', p_bank_ifsc,

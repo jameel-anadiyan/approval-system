@@ -296,7 +296,8 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
     }
 
     const d = (r.details || {}) as any;
-    const disbursementMode = r.disbursement_mode || d.disbursement_mode || 'cash';
+    const rawMode = r.disbursement_mode ?? d.disbursement_mode ?? null;
+    const disbursementMode: DisbursementMode = rawMode === 'cash' || rawMode === 'bank' ? rawMode : null;
     const enterBankDetailsLater = Boolean(r.enter_bank_details_later ?? d.enter_bank_details_later ?? false);
     const bankAccountNo = r.bank_account_no || d.bank_account_no || null;
     const bankIfsc = r.bank_ifsc || d.bank_ifsc || null;
@@ -650,7 +651,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         if (requestId) {
           const bankPayload: Record<string, any> = {
-            disbursement_mode: data.disbursement_mode || (data.details?.disbursement_mode as any) || 'cash',
+            disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? null) as DisbursementMode,
             enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
             bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
             bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
@@ -726,7 +727,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       request_type: type,
       details: data.details ?? null,
       shop_name: (data.details as { shop_name?: string | null } | null)?.shop_name ?? user.shop?.name ?? null,
-      disbursement_mode: data.disbursement_mode || (data.details?.disbursement_mode as any) || 'cash',
+      disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? null) as DisbursementMode,
       enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
       bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
       bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
@@ -891,7 +892,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     const payload = {
-      disbursement_mode: bankData.disbursement_mode || 'cash',
+      disbursement_mode: (bankData.disbursement_mode ?? null) as DisbursementMode,
       enter_bank_details_later: Boolean(bankData.enter_bank_details_later),
       bank_account_no: bankData.bank_account_no || null,
       bank_ifsc: bankData.bank_ifsc ? bankData.bank_ifsc.trim().toUpperCase() : null,

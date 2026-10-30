@@ -42,7 +42,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const isAsset = type === 'asset' || type === 'asset_below_20k';
   const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
   const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>(
-    request.disbursement_mode || (request.details?.disbursement_mode as DisbursementMode) || 'cash'
+    request.disbursement_mode ?? (request.details?.disbursement_mode as DisbursementMode) ?? null
   );
   const [enterBankDetailsLater, setEnterBankDetailsLater] = useState<boolean>(
     Boolean(request.enter_bank_details_later ?? request.details?.enter_bank_details_later ?? false)
