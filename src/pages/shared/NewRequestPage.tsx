@@ -100,7 +100,7 @@ export const NewRequestPage: React.FC = () => {
   const [shopName, setShopName] = useState('');
   const pickShop = needsShopPick(type);
   const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
-  const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>(null);
+  const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>('bank');
   const [enterBankDetailsLater, setEnterBankDetailsLater] = useState<boolean>(false);
   const [bankAccountNo, setBankAccountNo] = useState<string>('');
   const [bankIfsc, setBankIfsc] = useState<string>('');
