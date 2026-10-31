@@ -37,10 +37,11 @@ import { useRequests } from '../../context/RequestContext';
 import { useDirectory } from '../../lib/directory';
 import { canViewDiscountReport } from '../../lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTransferReport';
-import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest } from '../../lib/workflow';
+import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest, canUserViewBillMissingRequest } from '../../lib/workflow';
 import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
 import { entryPayable, entryOutstanding } from '../../types/database';
 import { isEntryCheckingUser } from '../../lib/formatters';
+import { FileWarning } from 'lucide-react';
 
 interface NavItem {
   label: string;
@@ -50,6 +51,7 @@ interface NavItem {
   badgeVariant?: 'rose' | 'amber';
   highlight?: boolean;
   isWaitlistTab?: boolean;
+  isBillMissingTab?: boolean;
 }
 
 export const Navigation: React.FC = () => {
@@ -136,10 +138,23 @@ export const Navigation: React.FC = () => {
       ? [{ label: 'Stock Transfer Report', path: '/reports/stock-transfers', icon: Truck }]
       : [];
 
+  // Live count of bill missing requests strictly in user's scope
+  const billMissingCount = requests.filter((r) => canUserViewBillMissingRequest(r, user)).length;
+
+  const billMissingNavItem: NavItem = {
+    label: 'Bill Missing',
+    path: '/bill-missing',
+    icon: FileWarning,
+    badge: billMissingCount,
+    badgeVariant: 'rose',
+    isBillMissingTab: true,
+  };
+
   switch (role) {
     case 'employee':
       mainNavItems = [
         { label: 'My Requests', path: '/my', icon: FileText },
+        billMissingNavItem,
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
         ...(hasExhibitionAccess ? [{ label: 'Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
@@ -154,6 +169,7 @@ export const Navigation: React.FC = () => {
     case 'regional_head':
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
+        billMissingNavItem,
         { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
         ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
@@ -170,6 +186,7 @@ export const Navigation: React.FC = () => {
     case 'clerk':
       mainNavItems = [
         { label: 'To Route', path: '/clerk', icon: Inbox, badge: clerkToRouteCount },
+        billMissingNavItem,
         { label: 'Department', path: '/clerk/department', icon: Building2 },
         ...(hasExhibitionAccess ? [{ label: 'Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
@@ -186,6 +203,7 @@ export const Navigation: React.FC = () => {
     case 'head':
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
+        billMissingNavItem,
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
         ...(user?.can_view_exhibition_waitlist
           ? [{ label: 'Waitlist Exhibitions', path: '/head/exhibition-waitlist', icon: AlertTriangle, badge: headWaitlistCount, badgeVariant: 'rose' as const, isWaitlistTab: true }]
@@ -211,6 +229,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
+        billMissingNavItem,
         { label: 'Regions', path: '/admin/regions', icon: MapPin },
         { label: 'Regional Heads', path: '/admin/regional-heads', icon: Globe },
         { label: 'Waitlist Exhibitions', path: '/head/exhibition-waitlist', icon: AlertTriangle, badge: headWaitlistCount, badgeVariant: 'rose' as const, isWaitlistTab: true },
@@ -241,6 +260,7 @@ export const Navigation: React.FC = () => {
       if (isStockMonitor(user)) {
         mainNavItems = [
           { label: 'Not Completed', path: '/stock-transfers', icon: PackageSearch, badge: transferPendingCount, badgeVariant: 'amber' },
+          billMissingNavItem,
           { label: 'Transfer Completed', path: '/stock-transfers/completed', icon: PackageCheck },
           { label: 'Transfer Report', path: '/reports/stock-transfers', icon: FileSpreadsheet },
         ];
@@ -252,6 +272,7 @@ export const Navigation: React.FC = () => {
       if (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)) {
         mainNavItems = [
           { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
+          billMissingNavItem,
           { label: 'Search', path: '/disbursement', icon: Search },
           { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
           { label: 'Approved', path: '/approved', icon: CheckCircle2 },
@@ -265,6 +286,7 @@ export const Navigation: React.FC = () => {
       }
       mainNavItems = [
         { label: 'Search', path: '/disbursement', icon: Search },
+        billMissingNavItem,
         { label: 'Awaiting Pay', path: '/disbursement/awaiting', icon: Clock, badge: disbAwaitingCount },
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
@@ -299,19 +321,26 @@ export const Navigation: React.FC = () => {
                 item.path === '/my' ||
                 item.path === '/regional' ||
                 item.path === '/approved' ||
-                item.path === '/returned'
+                item.path === '/returned' ||
+                item.path === '/bill-missing'
               }
               className={({ isActive }) =>
-                `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  isActive
+                `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-all ${
+                  item.isBillMissingTab
+                    ? isActive
+                      ? 'bg-linear-to-r from-rose-600 via-red-600 to-rose-700 text-white shadow-xl shadow-rose-600/40 ring-2 ring-rose-400 ring-offset-2 font-black animate-pulse'
+                      : (item.badge && item.badge > 0)
+                      ? 'bg-linear-to-r from-rose-50 to-red-50 text-rose-800 border-2 border-rose-300 font-extrabold hover:bg-rose-100 hover:border-rose-400 shadow-md shadow-rose-500/20 ring-1 ring-rose-300/60'
+                      : 'bg-rose-50/70 text-rose-700 border border-rose-200/90 font-bold hover:bg-rose-100/80'
+                    : isActive
                     ? item.isWaitlistTab
                       ? 'bg-rose-600 text-white shadow-xs font-semibold'
                       : 'bg-indigo-600 text-white shadow-xs font-semibold'
                     : item.isWaitlistTab
                     ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold border border-rose-200/80'
                     : item.highlight
-                    ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100/80'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                    ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100/80 font-medium'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 font-medium'
                 }`
               }
             >
@@ -319,9 +348,11 @@ export const Navigation: React.FC = () => {
                 <>
                   <div className="flex items-center gap-3">
                     <item.icon
-                      className={`w-4 h-4 ${
+                      className={`w-4 h-4 shrink-0 ${
                         isActive
                           ? 'text-white'
+                          : item.isBillMissingTab
+                          ? 'text-rose-600 animate-pulse'
                           : item.isWaitlistTab
                           ? 'text-rose-600'
                           : item.highlight
@@ -335,7 +366,11 @@ export const Navigation: React.FC = () => {
                     <span
                       className={`px-2 py-0.5 text-xs font-bold rounded-full transition-all ${
                         isActive
-                          ? 'bg-white/20 text-white'
+                          ? item.isBillMissingTab
+                            ? 'bg-white text-rose-700 font-black shadow-xs'
+                            : 'bg-white/20 text-white'
+                          : item.isBillMissingTab
+                          ? 'bg-rose-600 text-white shadow-md shadow-rose-600/40 font-black animate-bounce'
                           : item.badgeVariant === 'amber'
                           ? 'bg-amber-500 text-white shadow-xs'
                           : 'bg-rose-500 text-white shadow-xs'
@@ -367,11 +402,16 @@ export const Navigation: React.FC = () => {
                 item.path === '/my' ||
                 item.path === '/regional' ||
                 item.path === '/approved' ||
-                item.path === '/returned'
+                item.path === '/returned' ||
+                item.path === '/bill-missing'
               }
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center shrink-0 min-w-[54px] sm:min-w-[64px] px-1 h-full relative transition-colors ${
-                  isActive
+                  item.isBillMissingTab
+                    ? isActive
+                      ? 'text-rose-700 font-black bg-rose-100/90 rounded-xl my-1 border border-rose-400 shadow-sm shadow-rose-500/30'
+                      : 'text-rose-700 font-bold bg-rose-50/90 rounded-xl my-1 border border-rose-200/90 shadow-xs'
+                    : isActive
                     ? item.isWaitlistTab ? 'text-rose-600 font-bold' : 'text-indigo-600 font-semibold'
                     : item.isWaitlistTab
                     ? 'text-rose-600 font-bold bg-rose-50/60 rounded-xl my-1'
@@ -382,18 +422,36 @@ export const Navigation: React.FC = () => {
               }
             >
               <div className="relative">
-                <item.icon className={`w-5 h-5 ${item.isWaitlistTab ? 'text-rose-600' : ''}`} />
+                <item.icon
+                  className={`w-5 h-5 ${
+                    item.isBillMissingTab
+                      ? 'text-rose-600 animate-pulse'
+                      : item.isWaitlistTab
+                      ? 'text-rose-600'
+                      : ''
+                  }`}
+                />
                 {item.badge !== undefined && item.badge > 0 && (
                   <span
                     className={`absolute -top-1.5 -right-2 min-w-4 h-4 px-1 rounded-full ${
-                      item.badgeVariant === 'amber' ? 'bg-amber-500' : 'bg-rose-500'
+                      item.isBillMissingTab
+                        ? 'bg-rose-600 animate-bounce'
+                        : item.badgeVariant === 'amber'
+                        ? 'bg-amber-500'
+                        : 'bg-rose-500'
                     } text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-xs`}
                   >
                     {item.badge > 9 ? '9+' : item.badge}
                   </span>
                 )}
               </div>
-              <span className={`text-[10px] mt-1 tracking-tight truncate max-w-[62px] ${item.isWaitlistTab ? 'text-rose-700 font-bold' : ''}`}>
+              <span className={`text-[10px] mt-1 tracking-tight truncate max-w-[62px] ${
+                item.isBillMissingTab
+                  ? 'text-rose-700 font-bold'
+                  : item.isWaitlistTab
+                  ? 'text-rose-700 font-bold'
+                  : ''
+              }`}>
                 {item.label}
               </span>
             </NavLink>
@@ -441,7 +499,11 @@ export const Navigation: React.FC = () => {
                   onClick={() => setShowMoreMenu(false)}
                   className={({ isActive }) =>
                     `flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition-all ${
-                      isActive
+                      item.isBillMissingTab
+                        ? isActive
+                          ? 'bg-rose-600 text-white border-rose-500 shadow-md font-bold'
+                          : 'border-2 border-rose-300 bg-rose-50 text-rose-800 font-bold shadow-xs hover:bg-rose-100'
+                        : isActive
                         ? item.isWaitlistTab
                           ? 'bg-rose-50 border-rose-200 text-rose-700 font-bold'
                           : 'bg-indigo-50 border-indigo-200 text-indigo-700'
@@ -452,13 +514,23 @@ export const Navigation: React.FC = () => {
                   }
                 >
                   <div className="flex items-center gap-3 truncate">
-                    <item.icon className={`w-4 h-4 shrink-0 ${item.isWaitlistTab ? 'text-rose-600' : 'text-slate-400'}`} />
+                    <item.icon className={`w-4 h-4 shrink-0 ${
+                      item.isBillMissingTab
+                        ? 'text-rose-600'
+                        : item.isWaitlistTab
+                        ? 'text-rose-600'
+                        : 'text-slate-400'
+                    }`} />
                     <span className="truncate">{item.label}</span>
                   </div>
                   {item.badge !== undefined && item.badge > 0 && (
                     <span
                       className={`px-1.5 py-0.2 text-[10px] font-bold rounded-full ${
-                        item.badgeVariant === 'amber' ? 'bg-amber-500 text-white' : 'bg-rose-500 text-white'
+                        item.isBillMissingTab
+                          ? 'bg-rose-600 text-white shadow-xs font-black'
+                          : item.badgeVariant === 'amber'
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-rose-500 text-white'
                       }`}
                     >
                       {item.badge}

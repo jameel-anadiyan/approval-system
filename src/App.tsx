@@ -29,6 +29,7 @@ import { AdminCredentialsPage } from './pages/admin/AdminCredentialsPage';
 import { DisbursementPage } from './pages/disbursement/DisbursementPage';
 import { ApprovedRequestsPage } from './pages/shared/ApprovedRequestsPage';
 import { ReturnedRequestsPage } from './pages/shared/ReturnedRequestsPage';
+import { BillMissingPage } from './pages/shared/BillMissingPage';
 
 // Secondary pages are code-split
 const page = <K extends string>(loader: () => Promise<Record<K, React.ComponentType>>, name: K) =>
@@ -211,6 +212,7 @@ export const App: React.FC = () => {
                 <Route path="profile" element={<ProfilePage />} />
                 <Route path="approved" element={<ApprovedRequestsPage />} />
                 <Route path="returned" element={<ReturnedRequestsPage />} />
+                <Route path="bill-missing" element={<BillMissingPage />} />
 
                 {/* Discount report (Admin + Heads with access) */}
                 <Route element={<RequireDiscountReport />}>
