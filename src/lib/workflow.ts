@@ -152,3 +152,61 @@ export function canUserViewReturnedRequest(r: RequestRecord, me: Me): boolean {
   return false;
 }
 
+/**
+ * Bill Missing visibility:
+ * "only users that associated with specif request will get their requests only .
+ * entry also they get only their specif requests only not every users bill not submmit will get it
+ * need to filtered according to the users."
+ */
+export function canUserViewBillMissingRequest(r: RequestRecord, me: Me): boolean {
+  if (!me || !me.role) return false;
+  if (!r.is_bill_missing) return false;
+
+  // 1. Admin sees all requests with missing bills
+  if (me.role === 'admin') return true;
+
+  // 2. Disbursement entry accounts:
+  // Sees requests assigned to them, created by them, or flagged by them
+  if (me.role === 'disbursement') {
+    if (r.bill_missing_by === me.id) return true;
+    if (r.assigned_entry_user_id === me.id) return true;
+    if (!r.assigned_entry_user_id) return true; // unassigned available to entry officers
+    if ((r.disbursement_entries || []).some((e) => e.created_by === me.id)) return true;
+    return false;
+  }
+
+  // 3. Requester / Employee: strictly their own requests
+  if (r.requester_id === me.id) return true;
+  if (me.role === 'employee') {
+    return r.requester_id === me.id;
+  }
+
+  // 4. Regional Head: their region's requests or covering shops
+  if (me.role === 'regional_head') {
+    if (r.regional_head_id === me.id) return true;
+    if (r.shop_id && me.rh_shops && me.rh_shops.some((s) => s.shop_id === r.shop_id)) return true;
+    if ((r.actions || []).some((a) => a.actor_id === me.id)) return true;
+    return false;
+  }
+
+  // 5. Clerk: of the request's department or routed by them
+  if (me.role === 'clerk') {
+    if (r.routed_by === me.id) return true;
+    if (r.department_id && me.department_id && r.department_id === me.department_id) return true;
+    if (r.routing_clerk_ids && r.routing_clerk_ids.includes(me.id)) return true;
+    if ((r.actions || []).some((a) => a.actor_id === me.id)) return true;
+    return false;
+  }
+
+  // 6. Head: of the request's department or owner head
+  if (me.role === 'head') {
+    if (r.owner_head_id === me.id) return true;
+    if (r.department_id && me.department_id && r.department_id === me.department_id) return true;
+    if ((r.actions || []).some((a) => a.actor_id === me.id)) return true;
+    return false;
+  }
+
+  return false;
+}
+
+

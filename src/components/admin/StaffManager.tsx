@@ -129,14 +129,23 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   };
 
   const [disbTypeFilter, setDisbTypeFilter] = useState<'all' | DisbursementAccountType>('all');
+  const [photoFilter, setPhotoFilter] = useState<'all' | 'missing' | 'has_photo'>('all');
 
   const listed = dir.users.filter(
     (u) => roles.includes(u.role) && (me?.role !== 'head' || u.department_id === me.department_id)
   );
 
+  const missingPhotoCount = listed.filter((u) => !u.photo_path || !u.photo_path.trim()).length;
+  const hasPhotoCount = listed.filter((u) => u.photo_path && u.photo_path.trim()).length;
+
   const visibleUsers = listed.filter((u) => {
     if (u.role === 'disbursement' && disbTypeFilter !== 'all') {
-      return disbType(u) === disbTypeFilter;
+      if (disbType(u) !== disbTypeFilter) return false;
+    }
+    if (photoFilter === 'missing') {
+      if (u.photo_path && u.photo_path.trim()) return false;
+    } else if (photoFilter === 'has_photo') {
+      if (!u.photo_path || !u.photo_path.trim()) return false;
     }
     return true;
   });
@@ -309,11 +318,56 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
         </div>
       )}
 
+      {/* Profile Photo Filter Toolbar */}
+      {!dir.loading && listed.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs font-semibold flex-wrap">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider px-2">Profile Photo:</span>
+            <button
+              type="button"
+              onClick={() => setPhotoFilter('all')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                photoFilter === 'all'
+                  ? 'bg-slate-900 text-white shadow-xs font-bold'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All Staff ({listed.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setPhotoFilter('missing')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                photoFilter === 'missing'
+                  ? 'bg-rose-600 text-white shadow-xs font-bold ring-2 ring-rose-300'
+                  : 'bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 font-bold'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5 text-rose-600" />
+              <span>Missing Photo ({missingPhotoCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPhotoFilter('has_photo')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                photoFilter === 'has_photo'
+                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:text-emerald-700'
+              }`}
+            >
+              Has Photo ({hasPhotoCount})
+            </button>
+          </div>
+        </div>
+      )}
+
       {dir.loading ? (
         <LoadingSpinner label="Loading users…" />
       ) : visibleUsers.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-          {disbTypeFilter !== 'all'
+          {photoFilter === 'missing'
+            ? 'All staff members have updated their profile photo! 🎉'
+            : disbTypeFilter !== 'all'
             ? `No ${DISBURSEMENT_TYPE_LABELS[disbTypeFilter]} accounts found.`
             : `No users yet. Use “${addLabel}” to create the first one.`}
         </div>
@@ -350,6 +404,17 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${DISB_TYPE_STYLES[disbType(u)].badge}`}>
                           {DISBURSEMENT_TYPE_LABELS[disbType(u)]}
                         </span>
+                      )}
+                      {(!u.photo_path || !u.photo_path.trim()) && (
+                        <button
+                          type="button"
+                          onClick={() => setPhotoTarget(u)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors shrink-0"
+                          title="Profile photo not updated. Click to upload."
+                        >
+                          <Camera className="w-3 h-3 text-amber-600" />
+                          <span>No Photo</span>
+                        </button>
                       )}
                     </div>
                     <span className="text-xs text-slate-500 font-mono block truncate">

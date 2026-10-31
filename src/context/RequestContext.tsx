@@ -228,6 +228,10 @@ interface RequestContextType {
   deleteAllRequests: () => Promise<{ success: boolean; error?: string }>;
   /** Permanently delete a specific request and all associated records (Admin / owner draft) */
   deleteSpecificRequest: (id: string) => Promise<Result>;
+  /** Bill Missing workflow */
+  markBillMissing: (requestId: string, note: string) => Promise<Result>;
+  submitMissingBill: (requestId: string, file: File, note?: string) => Promise<Result>;
+  markBillReceived: (requestId: string, note?: string) => Promise<Result>;
 }
 
 const RequestContext = createContext<RequestContextType | undefined>(undefined);
@@ -2778,6 +2782,260 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const markBillMissing = async (
+    requestId: string,
+    note: string
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const cleanNote = note.trim();
+    if (!cleanNote) return { success: false, error: 'Please enter a note explaining why the original bill is missing' };
+
+    if (isBackendConnected) {
+      try {
+        const { error: rpcErr } = await supabase.rpc('mark_bill_missing', {
+          p_request_id: requestId,
+          p_note: cleanNote,
+        });
+        if (rpcErr) {
+          const { error: directErr } = await supabase
+            .from('requests')
+            .update({
+              is_bill_missing: true,
+              bill_missing_note: cleanNote,
+              bill_missing_at: new Date().toISOString(),
+              bill_missing_by: user.id,
+              bill_missing_by_name: user.full_name,
+              bill_missing_status: 'missing',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', requestId);
+          if (directErr) throw rpcErr;
+        }
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    const now = new Date().toISOString();
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== requestId) return r;
+        return {
+          ...r,
+          is_bill_missing: true,
+          bill_missing_note: cleanNote,
+          bill_missing_at: now,
+          bill_missing_by: user.id,
+          bill_missing_by_name: user.full_name,
+          bill_missing_status: 'missing',
+          actions: [
+            {
+              id: `act-bill-miss-${Date.now()}`,
+              request_id: r.id,
+              actor_id: user.id,
+              actor_name: user.full_name,
+              actor_role: user.role,
+              action: 'bill_missing_flagged',
+              from_status: r.status,
+              to_status: r.status,
+              remarks: `Original bill flagged missing by ${user.full_name} (Entry Officer): ${cleanNote}`,
+              visible_to_requester: true,
+              created_at: now,
+            },
+            ...(r.actions || []),
+          ],
+        };
+      })
+    );
+    return { success: true };
+  };
+
+  const submitMissingBill = async (
+    requestId: string,
+    file: File,
+    note?: string
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (!file) return { success: false, error: 'Please choose a bill document to attach' };
+
+    const cleanNote = note?.trim() || null;
+
+    if (isBackendConnected) {
+      try {
+        const contentType = file.type || 'application/pdf';
+        const safe = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
+        const path = `${requestId}/bill_missing-${Date.now()}-${safe}`;
+        const { error: upErr } = await supabase.storage
+          .from('request-files')
+          .upload(path, file, { contentType, upsert: false });
+        if (upErr) return { success: false, error: `Upload failed: ${upErr.message}` };
+
+        const { error: rpcErr } = await supabase.rpc('submit_missing_bill', {
+          p_request_id: requestId,
+          p_file_path: path,
+          p_file_name: file.name,
+          p_note: cleanNote,
+        });
+
+        if (rpcErr) {
+          await supabase.rpc('register_file', {
+            p_request_id: requestId,
+            p_kind: 'document',
+            p_storage_path: path,
+            p_original_name: file.name,
+            p_mime_type: contentType,
+            p_size_bytes: file.size,
+            p_page_count: null,
+            p_duration_sec: null,
+          });
+          const { error: directErr } = await supabase
+            .from('requests')
+            .update({
+              bill_missing_status: 'submitted',
+              bill_submitted_at: new Date().toISOString(),
+              bill_submitted_by: user.id,
+              bill_submitted_by_name: user.full_name,
+              bill_submitted_note: cleanNote,
+              bill_submitted_file_path: path,
+              bill_submitted_file_name: file.name,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', requestId);
+          if (directErr) throw rpcErr;
+        }
+
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    const now = new Date().toISOString();
+    const mockFile: RequestFile = {
+      id: `file-bill-sub-${Date.now()}`,
+      request_id: requestId,
+      kind: 'document',
+      storage_path: `mock/${requestId}/${file.name}`,
+      original_name: file.name,
+      mime_type: file.type || 'application/pdf',
+      size_bytes: file.size,
+      page_count: 1,
+      duration_sec: null,
+      sha256: null,
+      created_at: now,
+      public_url: URL.createObjectURL(file),
+      added_by: user.id,
+      added_by_name: user.full_name,
+      added_by_role: user.role,
+    };
+
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== requestId) return r;
+        return {
+          ...r,
+          bill_missing_status: 'submitted',
+          bill_submitted_at: now,
+          bill_submitted_by: user.id,
+          bill_submitted_by_name: user.full_name,
+          bill_submitted_note: cleanNote,
+          bill_submitted_file_path: mockFile.storage_path,
+          bill_submitted_file_name: file.name,
+          files: [mockFile, ...(r.files || [])],
+          actions: [
+            {
+              id: `act-bill-sub-${Date.now()}`,
+              request_id: r.id,
+              actor_id: user.id,
+              actor_name: user.full_name,
+              actor_role: user.role,
+              action: 'bill_submitted',
+              from_status: r.status,
+              to_status: r.status,
+              remarks: `Missing bill document (${file.name}) submitted by ${user.full_name}${cleanNote ? ': ' + cleanNote : ''}`,
+              visible_to_requester: true,
+              created_at: now,
+            },
+            ...(r.actions || []),
+          ],
+        };
+      })
+    );
+    return { success: true };
+  };
+
+  const markBillReceived = async (
+    requestId: string,
+    note?: string
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const cleanNote = note?.trim() || null;
+
+    if (isBackendConnected) {
+      try {
+        const { error: rpcErr } = await supabase.rpc('mark_bill_received', {
+          p_request_id: requestId,
+          p_note: cleanNote,
+        });
+
+        if (rpcErr) {
+          const { error: directErr } = await supabase
+            .from('requests')
+            .update({
+              is_bill_missing: false,
+              bill_missing_status: 'received',
+              bill_received_at: new Date().toISOString(),
+              bill_received_by: user.id,
+              bill_received_by_name: user.full_name,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', requestId);
+          if (directErr) throw rpcErr;
+        }
+
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    const now = new Date().toISOString();
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== requestId) return r;
+        return {
+          ...r,
+          is_bill_missing: false,
+          bill_missing_status: 'received',
+          bill_received_at: now,
+          bill_received_by: user.id,
+          bill_received_by_name: user.full_name,
+          actions: [
+            {
+              id: `act-bill-rec-${Date.now()}`,
+              request_id: r.id,
+              actor_id: user.id,
+              actor_name: user.full_name,
+              actor_role: user.role,
+              action: 'bill_marked_received',
+              from_status: r.status,
+              to_status: r.status,
+              remarks: `Original bill verified and marked as received by ${user.full_name} (Entry Officer)${cleanNote ? ': ' + cleanNote : ''}`,
+              visible_to_requester: true,
+              created_at: now,
+            },
+            ...(r.actions || []),
+          ],
+        };
+      })
+    );
+    return { success: true };
+  };
+
   const loadConsultableHeads = async (): Promise<Profile[]> => {
     if (isBackendConnected) {
       const { data, error } = await supabase
@@ -3312,6 +3570,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         decideExhibitionWaitlist,
         deleteAllRequests,
         deleteSpecificRequest,
+        markBillMissing,
+        submitMissingBill,
+        markBillReceived,
       }}
     >
       {children}

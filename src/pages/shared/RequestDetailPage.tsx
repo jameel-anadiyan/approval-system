@@ -45,6 +45,8 @@ import { useDirectory } from '../../lib/directory';
 import { useEntryLock } from '../../lib/entryLock';
 import { isPaymentUserAllowedForEntry, isEntryAssociatedWithPaymentUser } from '../../lib/disbursementRouting';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
+import { BillMissingBanner } from '../../components/requests/BillMissingBanner';
+import { MarkBillMissingModal } from '../../components/portals/MarkBillMissingModal';
 import { downloadStoredFile } from '../../lib/files';
 import {
   ArrowLeft,
@@ -80,6 +82,7 @@ import {
   Lock,
   ExternalLink,
   Paperclip,
+  FileWarning,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -142,6 +145,7 @@ export const RequestDetailPage: React.FC = () => {
       ? { ok: false, text: (location.state as { notice: string }).notice }
       : null
   );
+  const [showBillMissingModal, setShowBillMissingModal] = useState(false);
 
   const request = id ? getRequestById(id) : undefined;
 
@@ -574,9 +578,28 @@ export const RequestDetailPage: React.FC = () => {
               <span>Delete Request</span>
             </button>
           )}
+          {(isEntryOnly || role === 'admin') && !request.is_bill_missing && (
+            <button
+              type="button"
+              id="entry-mark-bill-missing-btn"
+              onClick={() => setShowBillMissingModal(true)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-700 font-bold text-xs shadow-xs transition-all shrink-0 cursor-pointer disabled:opacity-50"
+              title="Flag that the original bill is not attached"
+            >
+              <FileWarning className="w-4 h-4 text-rose-600" />
+              <span>Bill Not Attached</span>
+            </button>
+          )}
           <StatusBadge status={request.status} requestType={rType} size="lg" showDescription />
         </div>
       </div>
+
+      {request.is_bill_missing && (
+        <div className="mb-4">
+          <BillMissingBanner request={request} />
+        </div>
+      )}
 
       {banner && (
         <div
@@ -2547,6 +2570,15 @@ export const RequestDetailPage: React.FC = () => {
         fileName={previewSignedDoc?.name || 'signed_approval.pdf'}
         approvalNo={previewSignedDoc?.approvalNo || request?.approval_no}
       />
+
+      {/* Mark Bill Missing Modal (Entry Account / Admin) */}
+      {request && (
+        <MarkBillMissingModal
+          isOpen={showBillMissingModal}
+          onClose={() => setShowBillMissingModal(false)}
+          request={request}
+        />
+      )}
     </div>
   );
 };

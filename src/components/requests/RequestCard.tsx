@@ -5,7 +5,8 @@ import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/form
 import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote, AlertTriangle } from 'lucide-react';
+import { BillMissingBanner } from './BillMissingBanner';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -97,6 +98,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               {request.category_name}
             </span>
           )}
+          {request.is_bill_missing && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-100 text-rose-900 border border-rose-300 animate-pulse">
+              <AlertTriangle className="w-3 h-3 text-rose-600" />
+              {request.bill_missing_status === 'submitted' ? 'Bill Submitted' : 'Bill Missing'}
+            </span>
+          )}
           {isDisbursementAssociated(rType) && (
             <span
               className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
@@ -168,6 +175,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
           </p>
         )}
       </div>
+
+      {request.is_bill_missing && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <BillMissingBanner request={request} compact />
+        </div>
+      )}
 
       {/* Footer: Amount & Metadata */}
       <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">

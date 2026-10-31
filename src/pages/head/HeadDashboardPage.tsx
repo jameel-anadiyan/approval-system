@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
+import { canUserViewBillMissingRequest } from '../../lib/workflow';
 import {
   CheckCircle2,
   Clock,
@@ -16,12 +17,15 @@ import {
   AlertTriangle,
   CalendarDays,
   ArrowRight,
+  FileWarning,
 } from 'lucide-react';
 
 export const HeadDashboardPage: React.FC = () => {
   const { user } = useAuth();
   const { requests } = useRequests();
   const navigate = useNavigate();
+
+  const [selectedQueue, setSelectedQueue] = useState<'to_approve' | 'bill_missing'>('to_approve');
 
   // Waitlist access & counts
   const canViewWaitlist = Boolean(user?.role === 'admin' || user?.can_view_exhibition_waitlist);
@@ -43,6 +47,9 @@ export const HeadDashboardPage: React.FC = () => {
 
   // Queue 2: To Review (Route A requests waiting for Head review)
   const toReviewQueue = deptRequests.filter((r) => r.status === 'pending_head_review');
+
+  // Queue 3: Bill Missing strictly associated with this Head
+  const billMissingQueue = requests.filter((r) => canUserViewBillMissingRequest(r, user));
 
   // Pending consultations requested by other heads
   const pendingConsultationsCount = requests.reduce((count, r) => {
@@ -92,11 +99,20 @@ export const HeadDashboardPage: React.FC = () => {
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none border-b border-slate-200/90 pt-1">
         <button
           type="button"
-          className="px-4 py-2 text-xs font-bold rounded-xl bg-purple-700 text-white flex items-center gap-2 shadow-xs shrink-0"
+          onClick={() => setSelectedQueue('to_approve')}
+          className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs shrink-0 transition-all ${
+            selectedQueue === 'to_approve'
+              ? 'bg-purple-700 text-white'
+              : 'text-slate-700 hover:bg-slate-100'
+          }`}
         >
           <CheckCircle className="w-3.5 h-3.5" />
           <span>To Approve (Route B)</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-white text-[10px] font-bold">
+          <span
+            className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+              selectedQueue === 'to_approve' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+            }`}
+          >
             {toApproveQueue.length}
           </span>
         </button>
@@ -113,6 +129,32 @@ export const HeadDashboardPage: React.FC = () => {
           </span>
         </button>
 
+        {/* Glowing Red Bill Missing Tab */}
+        <button
+          type="button"
+          onClick={() => setSelectedQueue('bill_missing')}
+          className={`px-4 py-2 text-xs font-extrabold rounded-xl flex items-center gap-2 shrink-0 transition-all ${
+            selectedQueue === 'bill_missing'
+              ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400 ring-offset-2 animate-pulse'
+              : billMissingQueue.length > 0
+              ? 'bg-rose-50 text-rose-700 border-2 border-rose-400 hover:bg-rose-100 hover:border-rose-500 ring-2 ring-rose-200/50'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+          title="Requests with original bill missing"
+        >
+          <FileWarning className={`w-3.5 h-3.5 ${selectedQueue === 'bill_missing' ? 'text-white' : 'text-rose-600'}`} />
+          <span>Bill Missing</span>
+          {billMissingQueue.length > 0 && (
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                selectedQueue === 'bill_missing' ? 'bg-white text-rose-700' : 'bg-rose-600 text-white animate-bounce'
+              }`}
+            >
+              {billMissingQueue.length}
+            </span>
+          )}
+        </button>
+
         {canViewWaitlist && (
           <button
             type="button"
@@ -122,7 +164,7 @@ export const HeadDashboardPage: React.FC = () => {
           >
             <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping shrink-0" />
             <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-            <span className="text-rose-900">Waitlist Exhibitions (Red Tab)</span>
+            <span className="text-rose-900">Waitlist Exhibitions</span>
             <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black shadow-xs">
               {waitlistPendingCount}
             </span>
@@ -154,6 +196,40 @@ export const HeadDashboardPage: React.FC = () => {
           )}
         </button>
       </div>
+
+      {/* Bill Missing Banner when queue has items and head is on to_approve */}
+      {billMissingQueue.length > 0 && selectedQueue !== 'bill_missing' && (
+        <div
+          onClick={() => setSelectedQueue('bill_missing')}
+          className="p-4 bg-linear-to-r from-rose-50 via-red-50 to-rose-100/80 border-2 border-rose-400 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:shadow-md transition-all shadow-xs"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+              <FileWarning className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-black text-rose-950 font-display flex items-center gap-2 flex-wrap">
+                <span className="uppercase tracking-wider px-2 py-0.5 rounded-md bg-rose-200 text-rose-900 border border-rose-300 text-[10px] font-extrabold">
+                  Bill Missing Alert
+                </span>
+                <span className="text-rose-900 font-extrabold">
+                  {billMissingQueue.length} Department Request{billMissingQueue.length > 1 ? 's' : ''} Flagged for Missing Original Bill
+                </span>
+              </div>
+              <p className="text-[11px] text-rose-800 mt-1">
+                Disbursement entry has requested the original bill. Tap here to attach original bills and submit to the entry desk.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 shadow-sm transition-colors self-start sm:self-auto"
+          >
+            <span>Open Bill Missing Tab ({billMissingQueue.length})</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Special Waitlist Exhibition Red Banner (When pending requests exist) */}
       {canViewWaitlist && waitlistPendingCount > 0 && (
@@ -363,31 +439,84 @@ export const HeadDashboardPage: React.FC = () => {
           </div>
           <span className="text-[11px] text-slate-400 mt-1 block">All department requests</span>
         </div>
-      </div>
 
-      {/* Main Section: To-Approve Queue (Route B) */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base sm:text-lg font-bold text-slate-900 font-display flex items-center gap-2">
-            <span>To-Approve Queue (Route B Requests)</span>
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
-              {toApproveQueue.length}
-            </span>
-          </h2>
-          <span className="text-xs text-slate-400">
-            Sign directly with your official seal & signature
+        {/* Bill Missing KPI Card */}
+        <div
+          onClick={() => setSelectedQueue('bill_missing')}
+          className={`p-4 sm:p-5 rounded-2xl border-2 shadow-xs cursor-pointer transition-all col-span-2 sm:col-span-1 ${
+            billMissingQueue.length > 0
+              ? 'bg-rose-50/70 border-rose-400 hover:border-rose-600 hover:bg-rose-100/70 ring-2 ring-rose-300/40'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between text-rose-600 mb-2">
+            <span className="text-xs font-extrabold uppercase tracking-wider">Bill Missing</span>
+            <FileWarning className="w-4 h-4 text-rose-600" />
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-rose-950 font-display flex items-center gap-2">
+            <span>{billMissingQueue.length}</span>
+            {billMissingQueue.length > 0 && (
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping inline-block" />
+            )}
+          </div>
+          <span className="text-[11px] text-rose-700 font-semibold mt-1 block">
+            {billMissingQueue.length > 0 ? 'Original bill needed' : 'All bills intact'}
           </span>
         </div>
-
-        <RequestQueue
-          items={toApproveQueue}
-          bulkApprove
-          initialFilters={{ sort: 'oldest' }}
-          emptyIcon={CheckCircle2}
-          emptyTitle="No Pending Direct Approvals"
-          emptyDescription="You have cleared all Route B requests waiting for your approval and signature."
-        />
       </div>
+
+      {/* Main Section: To-Approve Queue (Route B) OR Bill Missing Queue */}
+      {selectedQueue === 'to_approve' ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 font-display flex items-center gap-2">
+              <span>To-Approve Queue (Route B Requests)</span>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                {toApproveQueue.length}
+              </span>
+            </h2>
+            <span className="text-xs text-slate-400">
+              Sign directly with your official seal & signature
+            </span>
+          </div>
+
+          <RequestQueue
+            items={toApproveQueue}
+            bulkApprove
+            initialFilters={{ sort: 'oldest' }}
+            emptyIcon={CheckCircle2}
+            emptyTitle="No Pending Direct Approvals"
+            emptyDescription="You have cleared all Route B requests waiting for your approval and signature."
+          />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base sm:text-lg font-bold text-rose-900 font-display flex items-center gap-2">
+              <FileWarning className="w-5 h-5 text-rose-600" />
+              <span>Bill Missing Queue (Upload & Submit Original Bills)</span>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-xs">
+                {billMissingQueue.length}
+              </span>
+            </h2>
+            <button
+              type="button"
+              onClick={() => setSelectedQueue('to_approve')}
+              className="text-xs text-slate-500 hover:text-slate-800 underline font-medium"
+            >
+              Back to Approvals
+            </button>
+          </div>
+
+          <RequestQueue
+            items={billMissingQueue}
+            initialFilters={{ sort: 'newest' }}
+            emptyIcon={FileWarning}
+            emptyTitle="No Missing Bills"
+            emptyDescription="None of your department requests currently have missing original bills."
+          />
+        </div>
+      )}
     </div>
   );
 };

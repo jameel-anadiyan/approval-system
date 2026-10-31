@@ -34,6 +34,9 @@ import { useAuth } from '../../context/AuthContext';
 import { downloadSignedPacket } from '../../lib/files';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { EditBankDetailsModal } from '../../components/requests/EditBankDetailsModal';
+import { MarkBillMissingModal } from '../../components/portals/MarkBillMissingModal';
+import { BillMissingBanner } from '../../components/requests/BillMissingBanner';
+import { canUserViewBillMissingRequest } from '../../lib/workflow';
 import { useDirectory } from '../../lib/directory';
 import {
   isPaymentUserAllowedForEntry,
@@ -58,7 +61,7 @@ export const DisbursementPage: React.FC = () => {
   const canAddEntry = isEntryOnly || isAdmin;
   const canPay = isPaymentOnly || isAdmin;
 
-  const [activeTab, setActiveTab] = useState<'awaiting' | 'clarification' | 'rejected' | 'paid'>(
+  const [activeTab, setActiveTab] = useState<'awaiting' | 'clarification' | 'bill_missing' | 'rejected' | 'paid'>(
     location.pathname.endsWith('/paid') ? 'paid' : 'awaiting'
   );
   const [payTarget, setPayTarget] = useState<{ request: RequestRecord; entry?: DisbursementEntry | null } | null>(null);
@@ -66,6 +69,7 @@ export const DisbursementPage: React.FC = () => {
   const [editEntryTarget, setEditEntryTarget] = useState<{ request: RequestRecord; entry: DisbursementEntry } | null>(null);
   const [assignEntryTarget, setAssignEntryTarget] = useState<RequestRecord | null>(null);
   const [clarifyTarget, setClarifyTarget] = useState<RequestRecord | null>(null);
+  const [billMissingTarget, setBillMissingTarget] = useState<RequestRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{
     path: string;
@@ -125,6 +129,9 @@ export const DisbursementPage: React.FC = () => {
     (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
   );
 
+  // Bill Missing Queue: requests where original bill is marked missing
+  const billMissingQueue = payable.filter((r) => canUserViewBillMissingRequest(r, user));
+
   // Rejected entries for Entry Only user or Admin
   const rejectedEntries = payable.flatMap((r) =>
     (r.disbursement_entries || [])
@@ -143,12 +150,14 @@ export const DisbursementPage: React.FC = () => {
       ? awaitingQueue
       : activeTab === 'clarification'
       ? underClarificationQueue
+      : activeTab === 'bill_missing'
+      ? billMissingQueue
       : activeTab === 'paid'
       ? paidQueue
       : [];
 
   const { filters, setFilters, result: filtered } = useRequestFilters(currentList, {
-    sort: activeTab === 'awaiting' ? 'oldest' : 'newest',
+    sort: (activeTab === 'awaiting' || activeTab === 'bill_missing') ? 'oldest' : 'newest',
   });
   const search = filters.q;
   const partialCount = awaitingQueue.filter((r) => paymentSummary(r).partial).length;
@@ -372,6 +381,32 @@ export const DisbursementPage: React.FC = () => {
           </span>
         </button>
 
+        <button
+          type="button"
+          onClick={() => setActiveTab('bill_missing')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeTab === 'bill_missing'
+              ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400 ring-offset-2'
+              : billMissingQueue.length > 0
+              ? 'text-rose-700 bg-rose-50 hover:bg-rose-100 border-2 border-rose-400 shadow-sm shadow-rose-500/20'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <AlertTriangle className={`w-3.5 h-3.5 ${billMissingQueue.length > 0 ? 'text-rose-500 animate-pulse' : ''}`} />
+          <span>Bill Missing</span>
+          <span
+            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+              activeTab === 'bill_missing'
+                ? 'bg-white/20 text-white'
+                : billMissingQueue.length > 0
+                ? 'bg-rose-600 text-white shadow-xs animate-pulse'
+                : 'bg-slate-200 text-slate-600'
+            }`}
+          >
+            {billMissingQueue.length}
+          </span>
+        </button>
+
         {(isEntryOnly || isAdmin) && (
           <button
             type="button"
@@ -503,6 +538,8 @@ export const DisbursementPage: React.FC = () => {
                   ? 'All Payments Disbursed!'
                   : activeTab === 'clarification'
                   ? 'No Requests Under Clarification'
+                  : activeTab === 'bill_missing'
+                  ? 'No Missing Bills!'
                   : 'No Paid Vouchers Yet'
               }
               description={
@@ -512,6 +549,8 @@ export const DisbursementPage: React.FC = () => {
                   ? 'No approved requests currently waiting for payment settlement.'
                   : activeTab === 'clarification'
                   ? 'There are currently no disbursement queries awaiting response from Department Heads.'
+                  : activeTab === 'bill_missing'
+                  ? 'Great job! All associated requests currently have their original bills attached.'
                   : 'Requests marked as paid will appear in this audit log.'
               }
             />
@@ -699,6 +738,12 @@ export const DisbursementPage: React.FC = () => {
                             </span>
                           )}
                         </div>
+
+                        {req.is_bill_missing && (
+                          <div className="mt-2.5">
+                            <BillMissingBanner request={req} onRefresh={() => {}} />
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-3 sm:pt-0 border-t sm:border-0 border-slate-100">
@@ -761,6 +806,21 @@ export const DisbursementPage: React.FC = () => {
                                 >
                                   <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
                                   <span>{isPendingHead ? 'Ask More' : 'Ask Head'}</span>
+                                </button>
+                              )}
+                              {(isEntryOnly || isAdmin) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setBillMissingTarget(req)}
+                                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                    req.is_bill_missing
+                                      ? 'border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100 shadow-xs'
+                                      : 'border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-rose-700'
+                                  }`}
+                                  title="Flag that the original bill is not attached"
+                                >
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                                  <span>{req.is_bill_missing ? 'Bill Missing Note' : 'Bill Not Attached'}</span>
                                 </button>
                               )}
                             </div>
@@ -1105,6 +1165,14 @@ export const DisbursementPage: React.FC = () => {
           request={bankEditRequest}
         />
       )}
+
+      {/* Mark Bill Missing Modal */}
+      <MarkBillMissingModal
+        isOpen={Boolean(billMissingTarget)}
+        onClose={() => setBillMissingTarget(null)}
+        request={billMissingTarget}
+        onSuccess={() => setNotice('Flagged request: original bill missing. Notified department & requester.')}
+      />
     </div>
   );
 };

@@ -375,6 +375,22 @@ export interface RequestRecord {
   bank_account_holder_name?: string | null;
   bank_verified?: boolean;
   bank_verification_message?: string | null;
+  /** Bill Missing workflow */
+  is_bill_missing?: boolean;
+  bill_missing_note?: string | null;
+  bill_missing_at?: string | null;
+  bill_missing_by?: string | null;
+  bill_missing_by_name?: string | null;
+  bill_missing_status?: 'missing' | 'submitted' | 'received' | null;
+  bill_submitted_at?: string | null;
+  bill_submitted_by?: string | null;
+  bill_submitted_by_name?: string | null;
+  bill_submitted_note?: string | null;
+  bill_submitted_file_path?: string | null;
+  bill_submitted_file_name?: string | null;
+  bill_received_at?: string | null;
+  bill_received_by?: string | null;
+  bill_received_by_name?: string | null;
 }
 
 export type DisbursementEntryStatus = 'pending' | 'pending_approval' | 'approved' | 'rejected' | 'paid' | 'cancelled' | 'on_hold';
