@@ -27,7 +27,6 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
 
 export interface DocumentPreviewItem {
   id?: string;
@@ -57,6 +56,7 @@ interface SingleDocViewerProps {
   index: number;
   total: number;
   multiplier: number;
+  onMultiplierChange: (m: number | ((prev: number) => number)) => void;
   containerWidth: number;
   isBackendConnected: boolean;
   onDeleteFile?: (file: DocumentPreviewItem) => Promise<boolean | void> | boolean | void;
@@ -70,6 +70,7 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
   index,
   total,
   multiplier,
+  onMultiplierChange,
   containerWidth,
   isBackendConnected,
   onDeleteFile,
@@ -185,6 +186,11 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
                   {file.badge}
                 </span>
               )}
+              {multiplier > 1 && (
+                <span className="text-[10px] font-mono font-bold bg-indigo-950 text-indigo-300 border border-indigo-700/60 px-2 py-0.5 rounded-full shrink-0">
+                  {multiplier}x Zoom
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
               {file.sizeBytes && <span>{formatFileSize(file.sizeBytes)}</span>}
@@ -198,8 +204,58 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
           </div>
         </div>
 
-        {/* Action icons for this specific document */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Action icons and Zoom Controls for this specific document */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+          {/* Dedicated Zoom Controls for this specific document */}
+          <div className="flex items-center bg-slate-950/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => onMultiplierChange((m) => Math.max(1, Math.round((m - 0.5) * 10) / 10))}
+              disabled={multiplier <= 1}
+              className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-30 cursor-pointer"
+              title={`Zoom Out Doc #${index + 1} (-)`}
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+
+            {[1, 2, 3].map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onMultiplierChange(m)}
+                className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold font-mono transition-all cursor-pointer ${
+                  multiplier === m
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`}
+                title={`Set Doc #${index + 1} zoom to ${m}x`}
+              >
+                {m}x
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => onMultiplierChange((m) => Math.min(5, Math.round((m + 0.5) * 10) / 10))}
+              disabled={multiplier >= 5}
+              className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-30 cursor-pointer"
+              title={`Zoom In Doc #${index + 1} (+)`}
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+
+            {multiplier > 1 && (
+              <button
+                type="button"
+                onClick={() => onMultiplierChange(1)}
+                className="p-1 hover:bg-slate-800 text-amber-400 hover:text-amber-300 rounded transition-colors ml-0.5 cursor-pointer"
+                title={`Reset Doc #${index + 1} zoom to 1x`}
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
           {resolvedUrl && (
             <a
               href={resolvedUrl}
@@ -367,7 +423,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 }) => {
   const { isBackendConnected } = useAuth();
   const [activeIndex, setActiveIndex] = useState(initialIndex);
-  const [multiplier, setMultiplier] = useState(1);
+  const [docMultipliers, setDocMultipliers] = useState<Record<number, number>>({});
   const [isFullScreen, setIsFullScreen] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const docRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -375,11 +431,22 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     typeof window !== 'undefined' ? window.innerWidth : 800
   );
 
-  const {
-    mouseFollowEnabled,
-    setMouseFollowEnabled,
-    handleMouseMove,
-  } = useDocumentMouseFollow({ multiplier });
+  const getDocMultiplier = useCallback(
+    (idx: number) => docMultipliers[idx] ?? 1,
+    [docMultipliers]
+  );
+
+  const setDocMultiplier = useCallback(
+    (idx: number, m: number | ((prev: number) => number)) => {
+      setDocMultipliers((prev) => {
+        const cur = prev[idx] ?? 1;
+        const nextVal = typeof m === 'function' ? m(cur) : m;
+        const clamped = Math.max(1, Math.min(5, Math.round(nextVal * 10) / 10));
+        return { ...prev, [idx]: clamped };
+      });
+    },
+    []
+  );
 
   // Measure scroll container width accurately for responsive rendering
   useEffect(() => {
@@ -400,7 +467,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setActiveIndex(Math.max(0, Math.min(initialIndex, files.length - 1)));
-      setMultiplier(1);
+      setDocMultipliers({});
       if (initialIndex > 0 && initialIndex < files.length) {
         setTimeout(() => {
           docRefs.current[initialIndex]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -442,23 +509,23 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     docRefs.current[idx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // Keyboard navigation: Escape to close, 1-5 for zoom multipliers
+  // Keyboard navigation: Escape to close, 1-5 for active document zoom
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
       } else if (['1', '2', '3', '4', '5'].includes(e.key)) {
-        setMultiplier(parseInt(e.key, 10));
+        setDocMultiplier(activeIndex, parseInt(e.key, 10));
       } else if (e.key === '+' || e.key === '=') {
-        setMultiplier((m) => Math.min(5, m + 1));
+        setDocMultiplier(activeIndex, (m) => Math.min(5, m + 0.5));
       } else if (e.key === '-') {
-        setMultiplier((m) => Math.max(1, m - 1));
+        setDocMultiplier(activeIndex, (m) => Math.max(1, m - 0.5));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, activeIndex, setDocMultiplier]);
 
   if (!isOpen || files.length === 0) return null;
 
@@ -519,54 +586,65 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
           {/* Action Toolbar */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-            {/* Zoom Multipliers */}
-            <div className="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5">
-              <button
-                type="button"
-                onClick={() => setMultiplier((m) => Math.max(1, m - 0.5))}
-                disabled={multiplier <= 1}
-                className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40"
-                title="Zoom Out (-)"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
+            {/* Active Document Zoom Controls */}
+            {(() => {
+              const activeMultiplier = getDocMultiplier(activeIndex);
+              return (
+                <div className="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5">
+                  {files.length > 1 && (
+                    <span className="text-[10px] font-bold text-indigo-300 px-1.5 hidden md:inline">
+                      Doc #{activeIndex + 1} Zoom:
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDocMultiplier(activeIndex, (m) => Math.max(1, Math.round((m - 0.5) * 10) / 10))}
+                    disabled={activeMultiplier <= 1}
+                    className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40 cursor-pointer"
+                    title={`Zoom Out Doc #${activeIndex + 1} (-)`}
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
 
-              {[1, 2, 3].map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMultiplier(m)}
-                  className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold font-mono transition-colors cursor-pointer ${
-                    multiplier === m
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  {m}x
-                </button>
-              ))}
+                  {[1, 2, 3].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setDocMultiplier(activeIndex, m)}
+                      className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold font-mono transition-colors cursor-pointer ${
+                        activeMultiplier === m
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                      }`}
+                      title={`Set Doc #${activeIndex + 1} zoom to ${m}x`}
+                    >
+                      {m}x
+                    </button>
+                  ))}
 
-              <button
-                type="button"
-                onClick={() => setMultiplier((m) => Math.min(5, m + 0.5))}
-                disabled={multiplier >= 5}
-                className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40"
-                title="Zoom In (+)"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setDocMultiplier(activeIndex, (m) => Math.min(5, Math.round((m + 0.5) * 10) / 10))}
+                    disabled={activeMultiplier >= 5}
+                    className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40 cursor-pointer"
+                    title={`Zoom In Doc #${activeIndex + 1} (+)`}
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
 
-              {multiplier > 1 && (
-                <button
-                  type="button"
-                  onClick={() => setMultiplier(1)}
-                  className="p-1 hover:bg-slate-700 text-amber-400 rounded transition-colors ml-0.5"
-                  title="Reset to 1x"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              )}
-            </div>
+                  {activeMultiplier > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setDocMultiplier(activeIndex, 1)}
+                      className="p-1 hover:bg-slate-700 text-amber-400 rounded transition-colors ml-0.5 cursor-pointer"
+                      title={`Reset Doc #${activeIndex + 1} to 1x`}
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Fullscreen Button */}
             <button
@@ -602,6 +680,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               const fIsPdf =
                 (file.mimeType && file.mimeType.includes('pdf')) ||
                 file.name.toLowerCase().endsWith('.pdf');
+              const docZoom = getDocMultiplier(idx);
               return (
                 <button
                   key={file.id || `${file.name}-${idx}`}
@@ -615,6 +694,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 >
                   {fIsPdf ? <FileText className="w-3.5 h-3.5 shrink-0" /> : <ImageIcon className="w-3.5 h-3.5 shrink-0" />}
                   <span>Doc #{idx + 1}</span>
+                  {docZoom > 1 && (
+                    <span className="text-[9px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30 px-1 rounded">
+                      {docZoom}x
+                    </span>
+                  )}
                   <span className={`text-[10px] font-mono truncate max-w-[100px] sm:max-w-[140px] ${active ? 'text-indigo-200' : 'text-slate-400'}`}>
                     {file.name}
                   </span>
@@ -627,7 +711,6 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         {/* Scrollable Continuous Preview Stream */}
         <div
           ref={scrollContainerRef}
-          onMouseMove={multiplier > 1 && mouseFollowEnabled ? handleMouseMove : undefined}
           className="preview-scrollbars flex-1 w-full bg-slate-950 p-2 sm:p-4 select-none overflow-x-auto overflow-y-auto relative"
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
@@ -637,7 +720,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               file={file}
               index={idx}
               total={files.length}
-              multiplier={multiplier}
+              multiplier={getDocMultiplier(idx)}
+              onMultiplierChange={(m) => setDocMultiplier(idx, m)}
               containerWidth={containerWidth}
               isBackendConnected={isBackendConnected}
               onDeleteFile={onDeleteFile}
@@ -648,14 +732,6 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               }}
             />
           ))}
-
-          {/* Floating Zoom Controls for Desktop */}
-          <ZoomMultiplierControls
-            multiplier={multiplier}
-            onSelectMultiplier={setMultiplier}
-            mouseFollowEnabled={mouseFollowEnabled}
-            onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
-          />
         </div>
 
         {/* Bottom Helper Bar */}
@@ -663,14 +739,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           <div className="flex items-center gap-2 truncate">
             {files.length > 1 ? (
               <span className="text-slate-300 font-medium">
-                Continuous Scroll Active • Showing all {files.length} documents
+                Continuous Scroll Active • Showing all {files.length} documents (zoom each independently)
               </span>
             ) : (
               <span>All pages rendered for continuous vertical scrolling.</span>
             )}
-            {multiplier > 1 && (
+            {getDocMultiplier(activeIndex) > 1 && (
               <span className="text-indigo-400 font-bold ml-2">
-                Zoom {multiplier}x
+                Doc #{activeIndex + 1} at {getDocMultiplier(activeIndex)}x
               </span>
             )}
           </div>

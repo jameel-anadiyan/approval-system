@@ -3,7 +3,7 @@ import { UploadCloud, Camera, FileText, Image as ImageIcon, Trash2, Eye } from '
 import { RequestFile } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
 import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
-import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
+import { useDocumentMouseFollow } from './ZoomMultiplierControls';
 
 interface FileUploaderProps {
   files: RequestFile[];
@@ -240,15 +240,36 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                     </span>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setPreviewIndex(inlinePreviewIndex)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                    title="Open large preview modal"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Preview</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {previewUrl && (
+                      <div className="flex items-center bg-slate-800 rounded-md p-0.5 border border-slate-700 gap-0.5">
+                        {[1, 2, 3].map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setInlineMultiplier(m)}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer ${
+                              inlineMultiplier === m
+                                ? 'bg-indigo-600 text-white'
+                                : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                            }`}
+                          >
+                            {m}x
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setPreviewIndex(inlinePreviewIndex)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                      title="Open large preview modal"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Preview</span>
+                    </button>
+                  </div>
                 </div>
 
                 {files.length > 1 && (
@@ -321,16 +342,6 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                     <div className="h-full flex items-center justify-center text-xs text-slate-400">
                       Preview ready
                     </div>
-                  )}
-
-                  {/* Floating Zoom Multiplier Controls with Mouse Follow */}
-                  {previewUrl && (
-                    <ZoomMultiplierControls
-                      multiplier={inlineMultiplier}
-                      onSelectMultiplier={setInlineMultiplier}
-                      mouseFollowEnabled={mouseFollowEnabled}
-                      onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
-                    />
                   )}
                 </div>
 

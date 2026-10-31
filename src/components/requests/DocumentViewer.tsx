@@ -23,7 +23,7 @@ import { useRequests } from '../../context/RequestContext';
 import { downloadStoredFile, useSignedUrl } from '../../lib/files';
 import { errMsg } from '../../lib/errorUtils';
 import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
-import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
+import { useDocumentMouseFollow } from './ZoomMultiplierControls';
 
 interface DocumentViewerProps {
   files: RequestFile[];
@@ -438,7 +438,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         {/* Toolbar Controls */}
         <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
           {/* Zoom Multipliers (1x, 2x, 3x, 4x) */}
-          <div className="hidden sm:flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700 gap-0.5">
+          <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700 gap-0.5">
             {[1, 2, 3, 4].map((m) => (
               <button
                 key={m}
@@ -655,16 +655,6 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <FileText className="w-8 h-8 text-slate-600 mb-2" />
             <p>Document preview ready</p>
           </div>
-        )}
-
-        {/* Floating Transparent Zoom Multiplier Controls with Mouse Follow */}
-        {previewUrl && (
-          <ZoomMultiplierControls
-            multiplier={multiplier}
-            onSelectMultiplier={setMultiplier}
-            mouseFollowEnabled={mouseFollowEnabled}
-            onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
-          />
         )}
       </div>
 
