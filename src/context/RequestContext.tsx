@@ -241,15 +241,19 @@ const LOCAL_STORAGE_REQ_KEY = 'approval_app_requests_store';
 import { errMsg } from '../lib/errorUtils';
 export { errMsg };
 
-/** Coerce numeric columns of a disbursement entry (Postgres numeric arrives as string). */
-const normEntry = <T extends Record<string, any>>(e: T) => ({
-  ...e,
-  amount: Number(e.amount),
-  adjustment_amount: Number(e.adjustment_amount ?? 0),
-  tds_amount: Number(e.tds_amount ?? 0),
-  paid_amount: Number(e.paid_amount ?? 0),
-  approved_amount: e.approved_amount === null || e.approved_amount === undefined ? null : Number(e.approved_amount),
-});
+/** Coerce numeric columns of a disbursement entry (Postgres numeric arrives as string) and preserve hold status. */
+const normEntry = <T extends Record<string, any>>(e: T) => {
+  const isHeld = e.status === 'on_hold' || Boolean(e.held_at && (!e.paid_at || Number(e.paid_amount || 0) === 0));
+  return {
+    ...e,
+    status: isHeld ? ('on_hold' as const) : e.status,
+    amount: Number(e.amount),
+    adjustment_amount: Number(e.adjustment_amount ?? 0),
+    tds_amount: Number(e.tds_amount ?? 0),
+    paid_amount: Number(e.paid_amount ?? 0),
+    approved_amount: e.approved_amount === null || e.approved_amount === undefined ? null : Number(e.approved_amount),
+  };
+};
 
 /** Newest action first, files in upload order, resolve owner head. */
 const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Profile>> = {}) =>
@@ -313,7 +317,7 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
     const bankVerified = Boolean(r.bank_verified ?? d.bank_verified ?? false);
     const bankVerificationMessage = r.bank_verification_message || d.bank_verification_message || null;
 
-    return {
+    const obj: RequestRecord = {
       ...r,
       status: currentStatus,
       decided_by: decidedBy,
@@ -346,15 +350,23 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
       disbursement_clarifications: [...(r.disbursement_clarifications || [])].sort(
         (a, b) => b.created_at.localeCompare(a.created_at)
       ),
-      disbursement_entries: (r.disbursement_entries || [])
-        .map((e) => normEntry(e))
-        .sort((a, b) => (a.entry_no ?? 0) - (b.entry_no ?? 0)),
+      disbursement_entries: (() => {
+        const ents = (r.disbursement_entries || [])
+          .map((e) => normEntry(e))
+          .sort((a, b) => (a.entry_no ?? 0) - (b.entry_no ?? 0));
+        return ents;
+      })(),
       files: [...(r.files || [])].sort(
         (a, b) =>
           ((a as RequestFile & { sort_order?: number }).sort_order ?? 0) -
             ((b as RequestFile & { sort_order?: number }).sort_order ?? 0) || a.created_at.localeCompare(b.created_at)
       ),
     };
+    // Ensure request status integrity: if any entry is on_hold, pending approval, or approved unpaid, the request cannot be 'paid'
+    if (obj.status === 'paid' && (obj.disbursement_entries || []).some((e: DisbursementEntry) => e.status === 'on_hold' || e.status === 'pending' || e.status === 'pending_approval' || (e.status === 'approved' && Number(e.paid_amount || 0) < Number(e.amount || 0)))) {
+      obj.status = 'approved';
+    }
+    return obj;
   });
 
 export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

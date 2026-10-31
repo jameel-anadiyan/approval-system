@@ -485,7 +485,7 @@ export const entryAvailable = (
   r: { amount?: number | null; paid_amount?: number | null; disbursement_entries?: DisbursementEntry[] | null }
 ) => {
   const reserved = (r.disbursement_entries || [])
-    .filter((e) => e.status === 'pending' || e.status === 'pending_approval' || e.status === 'approved')
+    .filter((e) => e.status === 'pending' || e.status === 'pending_approval' || e.status === 'approved' || e.status === 'on_hold')
     .reduce((s, e) => s + entryOutstanding(e) + (e.tds_settled ? 0 : Number(e.tds_amount || 0)), 0);
   return Math.max(0, round2(Number(r.amount || 0) - Number(r.paid_amount || 0) - reserved));
 };

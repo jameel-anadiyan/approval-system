@@ -720,4 +720,22 @@ grant execute on function public.mark_bill_received(uuid, text) to authenticated
 -- 10. Reload schema cache in PostgREST ------------------------------------------
 notify pgrst, 'reload schema';
 
+-- 11. Fix REQ-2026-000054 status if held by verifier -----------------------------
+-- Ensures held entry has status = 'on_hold' and request is not marked paid
+update public.disbursement_entries
+set status = 'on_hold'
+where request_id in (select id from public.requests where request_no = 'REQ-2026-000054')
+  and (held_at is not null or status = 'on_hold' or hold_reason is not null or paid_at is null);
+
+update public.requests
+set status = 'approved',
+    paid_at = null,
+    paid_by = null,
+    paid_by_name = null
+where request_no = 'REQ-2026-000054'
+  and exists (
+    select 1 from public.disbursement_entries de
+    where de.request_id = requests.id and de.status = 'on_hold'
+  );
+
 

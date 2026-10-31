@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   Pencil,
   Lock,
+  PauseCircle,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -1034,7 +1035,8 @@ export const DisbursementPage: React.FC = () => {
                             const isEntryPendingApproval = ent.status === 'pending_approval' || ent.status === 'pending';
                             const isEntryApproved = ent.status === 'approved';
                             const isEntryRejected = ent.status === 'rejected';
-                            const isEntryPaid = ent.status === 'paid';
+                            const isEntryOnHold = ent.status === 'on_hold';
+                            const isEntryPaid = ent.status === 'paid' && !isEntryOnHold;
                             const payCheck = isPaymentUserAllowedForEntry(user, ent, req, dir.users);
                             const canPayThisEntry = canPay && isEntryApproved && payCheck.allowed && !isPendingHead;
                             const isCashMode = ent.entry_type === 'cash';
@@ -1045,6 +1047,8 @@ export const DisbursementPage: React.FC = () => {
                                 className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors ${
                                   isEntryRejected
                                     ? 'bg-rose-50/50 border-rose-200'
+                                    : isEntryOnHold
+                                    ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-300/60'
                                     : isEntryApproved
                                     ? 'bg-purple-50/30 border-purple-200'
                                     : isEntryPendingApproval
@@ -1095,6 +1099,8 @@ export const DisbursementPage: React.FC = () => {
                                     className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
                                       isEntryPaid
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : isEntryOnHold
+                                        ? 'bg-amber-100 text-amber-900 border-amber-300'
                                         : isEntryApproved
                                         ? 'bg-purple-100 text-purple-800 border-purple-200'
                                         : isEntryRejected
@@ -1106,6 +1112,8 @@ export const DisbursementPage: React.FC = () => {
                                   >
                                     {isEntryPaid
                                       ? 'Paid'
+                                      : isEntryOnHold
+                                      ? 'On Hold by Verifier'
                                       : isEntryApproved
                                       ? entryPayable(ent) < entryOutstanding(ent)
                                         ? `Partially Approved · ${formatINR(entryPayable(ent))}`
@@ -1131,6 +1139,16 @@ export const DisbursementPage: React.FC = () => {
                                   {isEntryRejected && ent.rejection_reason && (
                                     <span className="w-full block text-[11px] text-rose-700 font-semibold bg-rose-100/60 border border-rose-200 px-2 py-1 rounded-md mt-1">
                                       Rejection Reason: {ent.rejection_reason}
+                                    </span>
+                                  )}
+                                  {isEntryOnHold && (
+                                    <span className="w-full block text-[11px] text-amber-900 font-semibold bg-amber-100/70 border border-amber-200 px-2.5 py-1 rounded-md mt-1">
+                                      Hold Reason: {ent.hold_reason || 'Placed on hold by verifier'}
+                                      {ent.held_at && (
+                                        <span className="font-normal text-amber-700 ml-1.5 text-[10px]">
+                                          · {formatISTDate(ent.held_at)}
+                                        </span>
+                                      )}
                                     </span>
                                   )}
                                 </div>
@@ -1177,6 +1195,22 @@ export const DisbursementPage: React.FC = () => {
                                         Awaiting Entry Approver
                                       </span>
                                     )
+                                  ) : isEntryOnHold ? (
+                                    isEntryApprover ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => navigate('/entry-approvals')}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-all active:scale-95"
+                                      >
+                                        <PauseCircle className="w-3.5 h-3.5" />
+                                        <span>Review Held Entry #{ent.entry_no}</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[11px] font-bold text-amber-900 bg-amber-100 px-2.5 py-1 rounded-md border border-amber-300 flex items-center gap-1">
+                                        <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                                        <span>Entry on Hold</span>
+                                      </span>
+                                    )
                                   ) : isEntryRejected ? (
                                     (canAddEntry || ent.created_by === user?.id) && (
                                       <button
@@ -1187,12 +1221,12 @@ export const DisbursementPage: React.FC = () => {
                                         Edit &amp; Resubmit
                                       </button>
                                     )
-                                  ) : (
+                                  ) : isEntryPaid ? (
                                     <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 flex items-center gap-1">
                                       <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                                       <span>Entry Paid</span>
                                     </span>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
                             );

@@ -83,6 +83,7 @@ import {
   ExternalLink,
   Paperclip,
   FileWarning,
+  PauseCircle,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -1483,9 +1484,11 @@ export const RequestDetailPage: React.FC = () => {
                   ) : (
                     <div className="space-y-2">
                       {entries.map((ent) => {
-                        const isPendingApproval = ent.status === 'pending_approval';
+                        const isPendingApproval = ent.status === 'pending_approval' || ent.status === 'pending';
                         const isRejected = ent.status === 'rejected';
-                        const isReadyForPay = isEntryReadyForPayment(ent);
+                        const isOnHold = ent.status === 'on_hold';
+                        const isEntryPaid = (ent.status === 'paid' || (Number(ent.amount) > 0 && Number(ent.paid_amount || 0) >= Number(ent.amount))) && !isOnHold;
+                        const isReadyForPay = isEntryReadyForPayment(ent) && !isOnHold && !isEntryPaid;
                         const isCash = ent.entry_type === 'cash';
 
                         return (
@@ -1494,6 +1497,8 @@ export const RequestDetailPage: React.FC = () => {
                             className={`p-3 rounded-xl border flex flex-col gap-2 text-xs transition-colors ${
                               isRejected
                                 ? 'bg-rose-50/50 border-rose-200'
+                                : isOnHold
+                                ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-200'
                                 : isPendingApproval
                                 ? 'bg-amber-50/40 border-amber-200'
                                 : isReadyForPay
@@ -1542,7 +1547,13 @@ export const RequestDetailPage: React.FC = () => {
                                 )}
 
                                 {/* Approver / Review Status Badge */}
-                                {isPendingApproval && (
+                                {isOnHold && (
+                                  <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-300 flex items-center gap-1 shadow-2xs">
+                                    <PauseCircle className="w-3 h-3 text-amber-600" />
+                                    <span>On Hold by Verifier</span>
+                                  </span>
+                                )}
+                                {isPendingApproval && !isOnHold && (
                                   entryHasBalanceAwaitingApproval(ent) ? (
                                     <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-violet-100 text-violet-900 border border-violet-300">
                                       Balance {formatINR(entryOutstanding(ent))} Awaiting Verification
@@ -1553,7 +1564,7 @@ export const RequestDetailPage: React.FC = () => {
                                     </span>
                                   )
                                 )}
-                                {ent.status === 'approved' && (
+                                {ent.status === 'approved' && !isOnHold && (
                                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-sky-100 text-sky-900 border border-sky-300">
                                     {entryPayable(ent) < entryOutstanding(ent)
                                       ? `Partially Approved · ${formatINR(entryPayable(ent))}`
@@ -1563,6 +1574,12 @@ export const RequestDetailPage: React.FC = () => {
                                 {isRejected && (
                                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
                                     Rejected
+                                  </span>
+                                )}
+                                {isEntryPaid && (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                    <span>Paid</span>
                                   </span>
                                 )}
 
@@ -1587,7 +1604,12 @@ export const RequestDetailPage: React.FC = () => {
                               </div>
 
                               <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                                {isPendingApproval ? (
+                                {isOnHold ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                                    <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>Placed on Hold</span>
+                                  </span>
+                                ) : isPendingApproval ? (
                                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                                     Awaiting Approver
                                   </span>
@@ -1642,10 +1664,14 @@ export const RequestDetailPage: React.FC = () => {
                                       </span>
                                     );
                                   })()
-                                ) : (
+                                ) : isEntryPaid ? (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                                     <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                     <span>{Number(ent.amount) === 0 && Number(ent.adjustment_amount || 0) > 0 ? 'Adjusted' : 'Paid'}</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                                    <span>Pending</span>
                                   </span>
                                 )}
                               </div>
@@ -1670,6 +1696,20 @@ export const RequestDetailPage: React.FC = () => {
                                     Click here to edit and resubmit &rarr;
                                   </button>
                                 )}
+                              </div>
+                            )}
+
+                            {/* Hold Banner for on_hold entries */}
+                            {isOnHold && (
+                              <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between gap-2 flex-wrap text-amber-950 bg-amber-50/70 p-2.5 rounded-lg mt-1">
+                                <div className="flex items-center gap-1.5">
+                                  <PauseCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                                  <span>
+                                    <strong>Verifier Hold:</strong> {ent.hold_reason || 'Placed on hold by verifier'}
+                                    {ent.held_by_name ? ` · By ${ent.held_by_name}` : ''}
+                                    {ent.held_at ? ` on ${formatISTDate(ent.held_at, false)}` : ''}
+                                  </span>
+                                </div>
                               </div>
                             )}
                           </div>

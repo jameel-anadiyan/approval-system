@@ -1171,6 +1171,11 @@ export const EntryApprovalsPage: React.FC = () => {
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200">
                             Returned for Correction
                           </span>
+                        ) : entry.status === 'on_hold' ? (
+                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                            <PauseCircle className="w-3 h-3 text-amber-700" />
+                            <span>Placed on Hold</span>
+                          </span>
                         ) : (
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
                             {entry.status === 'paid'
