@@ -605,12 +605,25 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isBackendConnected) {
       let requestId: string | undefined;
       try {
+        const mergedDetails = {
+          ...(data.details ?? {}),
+          disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? null) as DisbursementMode,
+          enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
+          bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
+          bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
+          bank_name: data.bank_name ?? data.details?.bank_name ?? null,
+          bank_branch: data.bank_branch ?? data.details?.bank_branch ?? null,
+          bank_account_holder_name: data.bank_account_holder_name ?? data.details?.bank_account_holder_name ?? null,
+          bank_verified: Boolean(data.bank_verified ?? data.details?.bank_verified ?? false),
+          bank_verification_message: data.bank_verification_message ?? data.details?.bank_verification_message ?? null,
+        };
+
         const { data: newId, error } = await supabase.rpc('create_typed_draft', {
           p_type: type,
           p_title: data.title,
           p_amount: type === 'non_cash' ? 0 : (type === 'general' || type === 'asset' || type === 'asset_below_20k' || type === 'stock_transfer' ? data.amount : null),
           p_notes: data.notes || null,
-          p_details: data.details ?? {},
+          p_details: mergedDetails,
           p_target_head_id: data.target_head_id || null,
         });
         if (error) throw error;
@@ -662,7 +675,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             bank_verification_message: data.bank_verification_message ?? data.details?.bank_verification_message ?? null,
           };
           try {
-            await supabase.from('requests').update(bankPayload).eq('id', requestId);
+            const { error: rpcErr } = await supabase.rpc('update_request_bank_details', {
+              p_request_id: requestId,
+              p_disbursement_mode: bankPayload.disbursement_mode,
+              p_enter_bank_details_later: bankPayload.enter_bank_details_later,
+              p_bank_account_no: bankPayload.bank_account_no,
+              p_bank_ifsc: bankPayload.bank_ifsc,
+              p_bank_name: bankPayload.bank_name,
+              p_bank_branch: bankPayload.bank_branch,
+              p_bank_account_holder_name: bankPayload.bank_account_holder_name,
+              p_bank_verified: bankPayload.bank_verified,
+              p_bank_verification_message: bankPayload.bank_verification_message,
+            });
+            if (rpcErr) {
+              await supabase.from('requests').update(bankPayload).eq('id', requestId);
+            }
           } catch (bErr) {
             console.warn('Bank fields update notice:', bErr);
           }
@@ -833,7 +860,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         if (Object.keys(updatePayload).length > 0) {
           try {
-            await supabase.from('requests').update(updatePayload).eq('id', id);
+            const { error: rpcErr } = await supabase.rpc('update_request_bank_details', {
+              p_request_id: id,
+              p_disbursement_mode: updatePayload.disbursement_mode ?? null,
+              p_enter_bank_details_later: Boolean(updatePayload.enter_bank_details_later),
+              p_bank_account_no: updatePayload.bank_account_no ?? null,
+              p_bank_ifsc: updatePayload.bank_ifsc ?? null,
+              p_bank_name: updatePayload.bank_name ?? null,
+              p_bank_branch: updatePayload.bank_branch ?? null,
+              p_bank_account_holder_name: updatePayload.bank_account_holder_name ?? null,
+              p_bank_verified: Boolean(updatePayload.bank_verified),
+              p_bank_verification_message: updatePayload.bank_verification_message ?? null,
+            });
+            if (rpcErr) {
+              await supabase.from('requests').update(updatePayload).eq('id', id);
+            }
           } catch {}
         }
       }
@@ -905,28 +946,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (isBackendConnected) {
       try {
-        let rpcWorked = false;
-        try {
-          const { data: rpcRes, error: rpcErr } = await supabase.rpc('update_request_bank_details', {
-            p_request_id: id,
-            p_disbursement_mode: payload.disbursement_mode,
-            p_enter_bank_details_later: payload.enter_bank_details_later,
-            p_bank_account_no: payload.bank_account_no,
-            p_bank_ifsc: payload.bank_ifsc,
-            p_bank_name: payload.bank_name,
-            p_bank_branch: payload.bank_branch,
-            p_bank_account_holder_name: payload.bank_account_holder_name,
-            p_bank_verified: payload.bank_verified,
-            p_bank_verification_message: payload.bank_verification_message,
-          });
-          if (!rpcErr && (rpcRes as any)?.success !== false) {
-            rpcWorked = true;
-          }
-        } catch {
-          // Fallback to direct update if RPC is not present
-        }
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('update_request_bank_details', {
+          p_request_id: id,
+          p_disbursement_mode: payload.disbursement_mode,
+          p_enter_bank_details_later: payload.enter_bank_details_later,
+          p_bank_account_no: payload.bank_account_no,
+          p_bank_ifsc: payload.bank_ifsc,
+          p_bank_name: payload.bank_name,
+          p_bank_branch: payload.bank_branch,
+          p_bank_account_holder_name: payload.bank_account_holder_name,
+          p_bank_verified: payload.bank_verified,
+          p_bank_verification_message: payload.bank_verification_message,
+        });
 
-        if (!rpcWorked) {
+        if (rpcErr) {
+          // If RPC is missing or threw, try direct update as fallback only
           const updatedDetails = {
             ...(current.details || {}),
             ...payload,
@@ -941,16 +975,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             .eq('id', id);
 
           if (directErr) {
-            const { error: fallbackErr } = await supabase
-              .from('requests')
-              .update({
-                details: updatedDetails,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', id);
-            if (fallbackErr) throw fallbackErr;
+            const isMissing = rpcErr.code === 'PGRST202' || rpcErr.message?.includes('not found') || rpcErr.message?.includes('schema cache');
+            const isPermDenied = directErr.message?.includes('permission denied');
+            if (isMissing || isPermDenied) {
+              return {
+                success: false,
+                error: 'Database update requires running fix_request_bank_details.sql in your Supabase SQL Editor to grant permissions and install update_request_bank_details.',
+              };
+            }
+            return { success: false, error: directErr.message || rpcErr.message };
           }
+        } else if ((rpcRes as any)?.success === false) {
+          return { success: false, error: (rpcRes as any)?.error || 'Failed to update bank details' };
         }
+
         await loadRequests(true);
         return { success: true };
       } catch (err: any) {
