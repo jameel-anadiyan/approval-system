@@ -251,6 +251,11 @@ export interface WhatsAppConfig {
   notify_requester: boolean;
   notify_head: boolean;
   admin_phone_number?: string;
+  template_name?: string;
+  template_language?: string;
+  use_template?: boolean;
+  custom_body_template?: string;
+  custom_caption_template?: string;
 }
 
 export interface ConnectedEntryAccount {

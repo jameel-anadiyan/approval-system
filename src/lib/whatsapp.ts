@@ -16,6 +16,37 @@ export const DEFAULT_WHATSAPP_CONFIG: WhatsAppConfig = {
   notify_requester: true,
   notify_head: true,
   admin_phone_number: '+91 9846880713',
+  template_name: 'approval_notification',
+  template_language: 'en',
+  use_template: true,
+};
+
+export const META_TEMPLATE_SPEC = {
+  name: 'approval_notification',
+  category: 'UTILITY',
+  language: 'en',
+  bodyText:
+    `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
+    `Dear *{{1}}*,\n\n` +
+    `Your request has been approved and officially stamped with seal & signature.\n\n` +
+    `📋 *Request No:* {{2}}\n` +
+    `🎉 *Approval No:* {{3}}\n` +
+    `📝 *Subject:* {{4}}\n` +
+    `🏢 *Outlet / Shop:* {{5}}\n` +
+    `💰 *Amount:* {{6}}\n` +
+    `✍️ *Approved by:* {{7}}\n` +
+    `📅 *Approved on:* {{8}}\n\n` +
+    `📄 *The official signed approval document packet has been stamped.*`,
+  variables: [
+    { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+    { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+    { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+    { num: '{{4}}', name: 'Subject / Title', sample: 'Event Sponsorship & Promotion' },
+    { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+    { num: '{{6}}', name: 'Amount', sample: 'Rs. 50,000.00' },
+    { num: '{{7}}', name: 'Approver Name', sample: 'Managing Director' },
+    { num: '{{8}}', name: 'Approved Date', sample: '31 Oct 2026' },
+  ],
 };
 
 const STORAGE_KEY = 'approval_app_whatsapp_config';
@@ -115,13 +146,86 @@ export async function saveWhatsAppConfig(
   return { success: true };
 }
 
-interface SendDirectParams {
+/** Fetches existing message templates from Meta WhatsApp Business Account (WABA) */
+export async function fetchMetaTemplates(config?: WhatsAppConfig): Promise<{
+  success: boolean;
+  templates: { id: string; name: string; status: string; category: string; language: string }[];
+  error?: string;
+}> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  const wabaId = cfg.waba_id || '1792622932047989';
+  const token = cfg.access_token?.trim();
+  if (!token || !wabaId) return { success: false, templates: [], error: 'Missing access token or WABA ID' };
+
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, templates: [], error: data?.error?.message || `HTTP ${res.status}` };
+    }
+    return { success: true, templates: data.data || [] };
+  } catch (e: unknown) {
+    return { success: false, templates: [], error: errMsg(e) };
+  }
+}
+
+/** Registers or submits the approval_notification template in Meta WABA */
+export async function createMetaApprovalTemplate(config?: WhatsAppConfig): Promise<{
+  success: boolean;
+  templateId?: string;
+  status?: string;
+  error?: string;
+}> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  const wabaId = cfg.waba_id || '1792622932047989';
+  const token = cfg.access_token?.trim();
+  if (!token || !wabaId) return { success: false, error: 'Missing access token or WABA ID' };
+
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: cfg.template_name || META_TEMPLATE_SPEC.name,
+        category: META_TEMPLATE_SPEC.category,
+        language: cfg.template_language || META_TEMPLATE_SPEC.language,
+        components: [
+          {
+            type: 'BODY',
+            text: META_TEMPLATE_SPEC.bodyText,
+            example: {
+              body_text: [META_TEMPLATE_SPEC.variables.map((v) => v.sample)],
+            },
+          },
+        ],
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data?.error?.message || `HTTP ${res.status}` };
+    }
+    return { success: true, templateId: data?.id, status: data?.status || 'PENDING' };
+  } catch (e: unknown) {
+    return { success: false, error: errMsg(e) };
+  }
+}
+
+export interface SendDirectParams {
   to: string;
   documentUrl?: string;
   documentFilename?: string;
   caption?: string;
   text?: string;
   config?: WhatsAppConfig;
+  templateName?: string;
+  templateLanguage?: string;
+  templateBodyParams?: string[];
 }
 
 /** Sends a message or document directly using WhatsApp Cloud API (Graph API) */
@@ -150,7 +254,78 @@ export async function sendWhatsAppDirect(
     Boolean(params.documentUrl) &&
     (params.documentUrl!.startsWith('https://') || params.documentUrl!.startsWith('http://'));
 
-  // 1. Send Document Attachment if a remote HTTP/HTTPS URL is provided
+  // 1. Attempt Meta Pre-Approved Message Template dispatch if template parameters are supplied
+  if (params.templateBodyParams && params.templateBodyParams.length > 0 && config.use_template !== false) {
+    try {
+      const templateName = params.templateName || config.template_name || 'approval_notification';
+      const templateLanguage = params.templateLanguage || config.template_language || 'en';
+
+      const templatePayload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: recipient,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: templateLanguage },
+          components: [
+            {
+              type: 'body',
+              parameters: params.templateBodyParams.map((p) => ({ type: 'text', text: String(p) })),
+            },
+          ],
+        },
+      };
+
+      const tRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(templatePayload),
+      });
+
+      const tData = await tRes.json();
+      if (tRes.ok) {
+        const msgId = tData?.messages?.[0]?.id;
+
+        // If a document was also provided, send it as companion attachment
+        if (isRemoteDocUrl && params.documentUrl) {
+          try {
+            await fetch(url, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: recipient,
+                type: 'document',
+                document: {
+                  link: params.documentUrl,
+                  caption: params.caption || 'Approved Document Packet',
+                  filename: params.documentFilename || 'Approved_Document.pdf',
+                },
+              }),
+            });
+          } catch {
+            /* ignore document companion failure if template succeeded */
+          }
+        }
+
+        return { success: true, messageId: msgId };
+      }
+
+      console.warn('Meta template send returned error, falling back to direct document/text dispatch:', tData);
+    } catch (tErr) {
+      console.warn('Meta template dispatch exception, falling back to direct dispatch:', tErr);
+    }
+  }
+
+  // 2. Direct Document Attachment dispatch (or fallback from template)
   if (isRemoteDocUrl && params.documentUrl) {
     try {
       const docPayload = {
@@ -472,6 +647,18 @@ export async function sendApprovalWhatsAppNotification(
 
   const filename = `${approvalNo}_Approved_Document.pdf`;
 
+  const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const templateBodyParams = [
+    request.requester_name || 'Staff Member', // {{1}}
+    requestNo,                                // {{2}}
+    approvalNo,                               // {{3}}
+    titleStr,                                 // {{4}}
+    outletStr,                                // {{5}}
+    amountStr,                                // {{6}}
+    approverName,                             // {{7}}
+    dateStr,                                  // {{8}}
+  ];
+
   for (const target of uniqueTargets) {
     const res = await sendWhatsAppDirect({
       to: target.phone,
@@ -480,6 +667,9 @@ export async function sendApprovalWhatsAppNotification(
       caption,
       text: messageBody,
       config: cfg,
+      templateName: cfg.template_name || 'approval_notification',
+      templateLanguage: cfg.template_language || 'en',
+      templateBodyParams,
     });
 
     results.push({
@@ -510,4 +700,33 @@ export async function sendApprovalWhatsAppNotification(
     success: results.some((r) => r.ok),
     results,
   };
+}
+
+/** Sends a test message using the Meta approval_notification template */
+export async function sendTestWhatsAppTemplate(
+  toPhone: string,
+  config?: WhatsAppConfig
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  const cleanTo = cleanWhatsAppNumber(toPhone);
+  if (!cleanTo) return { success: false, error: 'Please enter a valid mobile number' };
+
+  const sampleParams = [
+    'Test Staff',
+    'REQ-2026-TEST',
+    'APR-2026-TEST',
+    'Test Approval Request',
+    'SWA Diamonds Calicut',
+    'Rs. 50,000.00',
+    'Managing Director',
+    new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+  ];
+
+  return sendWhatsAppDirect({
+    to: cleanTo,
+    templateName: cfg.template_name || 'approval_notification',
+    templateLanguage: cfg.template_language || 'en',
+    templateBodyParams: sampleParams,
+    config: cfg,
+  });
 }

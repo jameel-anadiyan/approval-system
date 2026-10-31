@@ -14,6 +14,9 @@ import {
   EyeOff,
   Phone,
   Sparkles,
+  FileText,
+  Copy,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { loadThreshold, saveThreshold } from '../../lib/directory';
@@ -23,7 +26,12 @@ import {
   loadWhatsAppConfig,
   saveWhatsAppConfig,
   sendTestWhatsAppMessage,
+  sendTestWhatsAppTemplate,
+  fetchMetaTemplates,
+  createMetaApprovalTemplate,
+  META_TEMPLATE_SPEC,
   DEFAULT_WHATSAPP_CONFIG,
+  cleanWhatsAppNumber,
 } from '../../lib/whatsapp';
 import type { WhatsAppConfig } from '../../types/database';
 
@@ -42,6 +50,95 @@ export const AdminSettingsPage: React.FC = () => {
   const [testPhone, setTestPhone] = useState('');
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Template state
+  const [templateStatus, setTemplateStatus] = useState<string | null>(null);
+  const [loadingTemplateStatus, setLoadingTemplateStatus] = useState(false);
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [testingTemplate, setTestingTemplate] = useState(false);
+  const [templateTestResult, setTemplateTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [copiedTemplate, setCopiedTemplate] = useState(false);
+
+  const checkTemplateStatus = async (cfg = waConfig) => {
+    setLoadingTemplateStatus(true);
+    try {
+      const res = await fetchMetaTemplates(cfg);
+      if (res.success) {
+        const tName = cfg.template_name || META_TEMPLATE_SPEC.name;
+        const found = res.templates.find((t) => t.name === tName);
+        if (found) {
+          setTemplateStatus(found.status);
+        } else {
+          setTemplateStatus('NOT_FOUND');
+        }
+      } else {
+        setTemplateStatus('ERROR');
+      }
+    } catch {
+      setTemplateStatus('ERROR');
+    } finally {
+      setLoadingTemplateStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    if (waConfig.access_token && waConfig.phone_number_id) {
+      checkTemplateStatus(waConfig);
+    }
+  }, [waConfig.access_token, waConfig.phone_number_id, waConfig.template_name]);
+
+  const handleCreateTemplate = async () => {
+    setCreatingTemplate(true);
+    try {
+      const res = await createMetaApprovalTemplate(waConfig);
+      if (res.success) {
+        setFlash({
+          text: `Template "${waConfig.template_name || 'approval_notification'}" submitted to Meta WABA (${res.status}).`,
+          ok: true,
+        });
+        await checkTemplateStatus(waConfig);
+      } else {
+        setFlash({ text: res.error || 'Failed to register template in Meta.', ok: false });
+      }
+    } catch (e: unknown) {
+      setFlash({ text: String(e), ok: false });
+    } finally {
+      setCreatingTemplate(false);
+    }
+  };
+
+  const handleTestTemplate = async () => {
+    const target = testPhone.trim() || waConfig.admin_phone_number || '9846880713';
+    setTestingTemplate(true);
+    setTemplateTestResult(null);
+    try {
+      const res = await sendTestWhatsAppTemplate(target, waConfig);
+      if (res.success) {
+        setTemplateTestResult({
+          ok: true,
+          message: `Template delivered to ${cleanWhatsAppNumber(target)}! (Message ID: ${res.messageId || 'OK'})`,
+        });
+      } else {
+        setTemplateTestResult({
+          ok: false,
+          message: res.error || 'Failed to deliver template message.',
+        });
+      }
+    } catch (err: unknown) {
+      setTemplateTestResult({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setTestingTemplate(false);
+    }
+  };
+
+  const handleCopyTemplateBody = () => {
+    navigator.clipboard.writeText(META_TEMPLATE_SPEC.bodyText);
+    setCopiedTemplate(true);
+    setTimeout(() => setCopiedTemplate(false), 3000);
+  };
 
   useEffect(() => {
     loadThreshold(isBackendConnected).then(setThreshold);
@@ -278,12 +375,142 @@ export const AdminSettingsPage: React.FC = () => {
             type="tel"
             value={waConfig.admin_phone_number || ''}
             onChange={(e) => setWaConfig({ ...waConfig, admin_phone_number: e.target.value })}
-            placeholder="e.g. +91 98765 43210 (receives copy of every approved document)"
+            placeholder="e.g. +91 98468 80713 (receives copy of every approved document)"
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
           />
           <span className="text-[10px] text-slate-400 mt-0.5 block">
             If provided, a duplicate copy of all approved document attachments will be sent to this phone number.
           </span>
+        </div>
+
+        {/* WhatsApp Template Configuration Section */}
+        <div className="pt-2 border-t border-slate-100 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-emerald-600" />
+              <span className="text-xs font-bold text-slate-900">Message Template (Meta WABA)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {templateStatus === 'APPROVED' && (
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Meta Approved (24/7 Delivery)
+                </span>
+              )}
+              {templateStatus === 'PENDING' && (
+                <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Meta Review Pending (Auto-fallback to direct message)
+                </span>
+              )}
+              {templateStatus === 'NOT_FOUND' && (
+                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-300">
+                  Not Registered
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => checkTemplateStatus(waConfig)}
+                disabled={loadingTemplateStatus}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                title="Refresh Meta Template Status"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingTemplateStatus ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={waConfig.use_template !== false}
+              onChange={(e) => setWaConfig({ ...waConfig, use_template: e.target.checked })}
+              className="rounded text-emerald-600 focus:ring-emerald-500 mt-0.5"
+            />
+            <div>
+              <span className="text-xs font-bold text-slate-800 block">
+                Use Pre-Approved Meta Template for Outbound Notifications
+              </span>
+              <span className="text-[11px] text-slate-500 leading-relaxed block mt-0.5">
+                Recommended for frequent delivery. Messages can be sent 24/7 without Meta&apos;s 24-hour response window restriction. If the template is pending or unapproved, the system automatically falls back to direct message delivery.
+              </span>
+            </div>
+          </label>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Template Name
+              </label>
+              <input
+                type="text"
+                value={waConfig.template_name || 'approval_notification'}
+                onChange={(e) => setWaConfig({ ...waConfig, template_name: e.target.value.toLowerCase().trim() })}
+                placeholder="approval_notification"
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
+              />
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Category: UTILITY</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Template Language
+              </label>
+              <select
+                value={waConfig.template_language || 'en'}
+                onChange={(e) => setWaConfig({ ...waConfig, template_language: e.target.value })}
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden bg-white"
+              >
+                <option value="en">English (en)</option>
+                <option value="en_US">English US (en_US)</option>
+              </select>
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Registered language in WABA</span>
+            </div>
+          </div>
+
+          {/* Template Text Preview & Quick Copy */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-800">Template Format (with 8 Positional Variables):</span>
+              <button
+                type="button"
+                onClick={handleCopyTemplateBody}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 transition-colors shadow-2xs"
+              >
+                {copiedTemplate ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                <span>{copiedTemplate ? 'Copied to Clipboard!' : 'Copy Template Body'}</span>
+              </button>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] text-slate-700 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+              {META_TEMPLATE_SPEC.bodyText}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[10px]">
+              {META_TEMPLATE_SPEC.variables.map((v) => (
+                <div key={v.num} className="bg-white p-2 rounded-lg border border-slate-200/80">
+                  <span className="font-mono font-bold text-emerald-700">{v.num}</span>{' '}
+                  <span className="text-slate-600">{v.name}</span>
+                </div>
+              ))}
+            </div>
+
+            {templateStatus === 'NOT_FOUND' && (
+              <div className="pt-2 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-slate-500">
+                  Template is not registered in Meta WABA yet. Click to register now.
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCreateTemplate}
+                  disabled={creatingTemplate}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs disabled:opacity-50 transition-colors"
+                >
+                  {creatingTemplate ? 'Registering…' : 'Register Template in Meta'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center justify-between gap-3 pt-2">
@@ -317,15 +544,28 @@ export const AdminSettingsPage: React.FC = () => {
                 className="w-full text-xs p-2.5 pl-9 rounded-lg border border-slate-200 bg-white focus:border-emerald-500 outline-hidden font-mono"
               />
             </div>
-            <button
-              type="button"
-              onClick={handleSendTestMessage}
-              disabled={sendingTest || !testPhone.trim()}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs disabled:opacity-50 transition-all shrink-0 cursor-pointer"
-            >
-              {sendingTest ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-              <span>{sendingTest ? 'Sending…' : 'Send Test WhatsApp'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSendTestMessage}
+                disabled={sendingTest || !testPhone.trim()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs disabled:opacity-50 transition-all shrink-0 cursor-pointer"
+                title="Send direct freeform test message"
+              >
+                {sendingTest ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                <span>{sendingTest ? 'Sending…' : 'Direct Test'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTestTemplate}
+                disabled={testingTemplate || !testPhone.trim()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs disabled:opacity-50 transition-all shrink-0 cursor-pointer"
+                title="Send test message using the Meta approval_notification template"
+              >
+                {testingTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                <span>{testingTemplate ? 'Sending…' : 'Template Test'}</span>
+              </button>
+            </div>
           </div>
 
           {testResult && (
@@ -340,6 +580,21 @@ export const AdminSettingsPage: React.FC = () => {
                 <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
               )}
               <span>{testResult.message}</span>
+            </div>
+          )}
+
+          {templateTestResult && (
+            <div
+              className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${
+                templateTestResult.ok ? 'bg-indigo-100 text-indigo-900' : 'bg-amber-100 text-amber-900'
+              }`}
+            >
+              {templateTestResult.ok ? (
+                <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              )}
+              <span>{templateTestResult.message}</span>
             </div>
           )}
         </div>
