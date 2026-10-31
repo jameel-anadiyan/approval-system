@@ -335,7 +335,7 @@ export const DisbursementModeSelector: React.FC<DisbursementModeSelectorProps> =
                 <div className="rounded-xl border border-indigo-100 bg-white p-3.5 space-y-2.5">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-800 flex items-center gap-1.5">
                     <Building2 className="w-3.5 h-3.5" />
-                    <span>Beneficiary Details (Auto-filled)</span>
+                    <span>Requester Bank Details (Auto-filled)</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">

@@ -65,7 +65,7 @@ export const DisbursementClarificationModal: React.FC<DisbursementClarificationM
         {/* Summary Card */}
         <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-slate-500 font-medium">Beneficiary / Requester:</span>
+            <span className="text-slate-500 font-medium">Requester Name:</span>
             <span className="font-bold text-slate-800">{request.requester_name}</span>
           </div>
           <div className="flex items-center justify-between">

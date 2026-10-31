@@ -245,7 +245,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
                 <Landmark className="w-3.5 h-3.5 text-indigo-600" />
-                Request Beneficiary Bank Account
+                Requester Bank Account
               </span>
               {request.bank_verified && (
                 <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
@@ -257,7 +257,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
             {request.bank_account_no ? (
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div>
-                  <span className="text-[10px] uppercase font-semibold text-slate-500 block">Beneficiary Name</span>
+                  <span className="text-[10px] uppercase font-semibold text-slate-500 block">Requester Name</span>
                   <span className="font-bold text-slate-900 block truncate">{request.bank_account_holder_name || '—'}</span>
                 </div>
                 <div>

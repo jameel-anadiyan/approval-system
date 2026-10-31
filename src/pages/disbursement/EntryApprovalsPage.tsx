@@ -686,7 +686,7 @@ export const EntryApprovalsPage: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search request #, title, beneficiary, department, officer…"
+              placeholder="Search request #, title, requester name, department, officer…"
               className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden bg-slate-50"
             />
           </div>
@@ -1165,7 +1165,7 @@ export const EntryApprovalsPage: React.FC = () => {
                         );
                       })()}
                       <span className="text-slate-400">·</span>
-                      <span className="text-slate-600 font-medium">Beneficiary: <strong>{request.requester_name}</strong></span>
+                      <span className="text-slate-600 font-medium">Requester Name: <strong>{request.requester_name}</strong></span>
                     </div>
 
                     <div className="flex items-center gap-3 text-slate-500 text-[11px]">

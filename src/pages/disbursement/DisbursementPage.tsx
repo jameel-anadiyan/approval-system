@@ -455,7 +455,7 @@ export const DisbursementPage: React.FC = () => {
                       {req.title}
                     </h3>
                     <div className="text-xs text-slate-500 mt-1 flex items-center gap-3">
-                      <span>Beneficiary: <strong>{req.requester_name}</strong></span>
+                      <span>Requester Name: <strong>{req.requester_name}</strong></span>
                       <span>Entry Amount: <strong className="text-slate-900 font-mono">{formatINR(ent.amount)}</strong></span>
                       {Number(ent.adjustment_amount || 0) > 0 && (
                         <span>Adj: <strong>{formatINR(Number(ent.adjustment_amount))}</strong></span>
@@ -691,7 +691,7 @@ export const DisbursementPage: React.FC = () => {
                         )}
 
                         <div className="text-xs text-slate-500 mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap">
-                          <span>Beneficiary: <strong>{req.requester_name}</strong></span>
+                          <span>Requester Name: <strong>{req.requester_name}</strong></span>
                           <span>Approved: {formatISTDate(req.decided_at, false)}</span>
                           {(req.payments?.length ?? 0) > 0 && (
                             <span className="font-semibold text-teal-700">
