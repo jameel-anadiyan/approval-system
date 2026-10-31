@@ -14,7 +14,7 @@ export const DEFAULT_WHATSAPP_CONFIG: WhatsAppConfig = {
   display_phone_number: '+91 80893 04002',
   notify_requester: true,
   notify_head: true,
-  admin_phone_number: '',
+  admin_phone_number: '+91 9846880713',
 };
 
 const STORAGE_KEY = 'approval_app_whatsapp_config';

@@ -124,7 +124,7 @@ values (
     'display_phone_number', '+91 80893 04002',
     'notify_requester', true,
     'notify_head', true,
-    'admin_phone_number', ''
+    'admin_phone_number', '+91 9846880713'
   )
 )
 on conflict (key) do update

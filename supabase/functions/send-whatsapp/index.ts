@@ -9,6 +9,7 @@ const DEFAULT_CONFIG = {
   access_token: "EAAzRU40ZBcyoBS1Uyk7UgqBlRIvb407NufgvmPdZBmZCjGsZAiDBervAm9MGZAhkVyou64W2lDt64ZByltVjcRVwvdkndcEPsUZAi0DvoISgKKbRUEZCQZABpLslfpvcrM1fE19UXaVyZCEhaz2ebIZAvuWGpvQG2KZBJNfrksm5vRN44PCuRpco8riA6NnSan6uUgZDZD",
   phone_number_id: "1391767714024374",
   display_phone_number: "+91 80893 04002",
+  admin_phone_number: "+91 9846880713",
 };
 
 function cleanPhone(p: string): string {
