@@ -1166,7 +1166,9 @@ export async function sendPaymentDisbursedWhatsAppNotification(
   paymentDate?: string | null,
   isFullyPaid: boolean = false,
   config?: WhatsAppConfig,
-  extraRecipientPhone?: string
+  extraRecipientPhone?: string,
+  attachmentUrl?: string | null,
+  attachmentFilename?: string | null
 ): Promise<{
   success: boolean;
   results: { recipient: string; name?: string; ok: boolean; error?: string }[];
@@ -1186,6 +1188,14 @@ export async function sendPaymentDisbursedWhatsAppNotification(
   const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
   const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
 
+  const defaultDocFilename = isFullyPaid
+    ? `${approvalNo}_Payment_Settlement_Receipt.pdf`
+    : `${approvalNo}_Partial_Payment_Receipt.pdf`;
+  const finalFilename = attachmentFilename || defaultDocFilename;
+  const companionCaption = isFullyPaid
+    ? `✅ Payment Completed Receipt · ${approvalNo} · ${modeStr}`
+    : `💳 Partial Payment Receipt · ${approvalNo} · ${modeStr}`;
+
   if (isFullyPaid) {
     const totalAmountStr = formatINR(request.amount || (request.paid_amount || 0));
     const messageBody =
@@ -1200,6 +1210,9 @@ export async function sendPaymentDisbursedWhatsAppNotification(
       `💳 *Payment Mode:* ${modeStr}\n` +
       `🔢 *Ref / UTR No:* ${refStr}\n` +
       `📅 *Payment Date:* ${dateStr}\n\n` +
+      (attachmentUrl
+        ? `📄 *Disbursement receipt attachment is delivered above.*\n\n`
+        : '') +
       `All scheduled disbursements for this approval are complete.`;
 
     const templateBodyParams = [
@@ -1217,6 +1230,9 @@ export async function sendPaymentDisbursedWhatsAppNotification(
     for (const target of targets) {
       const res = await sendWhatsAppDirect({
         to: target.phone,
+        documentUrl: attachmentUrl || undefined,
+        documentFilename: finalFilename,
+        caption: companionCaption,
         text: messageBody,
         config: cfg,
         templateName: 'payment_completed_notification',
@@ -1231,11 +1247,17 @@ export async function sendPaymentDisbursedWhatsAppNotification(
           request_id: request.id,
           recipient_phone: target.phone,
           recipient_name: target.name || null,
-          message_type: 'template',
+          message_type: attachmentUrl ? 'document' : 'template',
           status: res.success ? 'sent' : 'failed',
           meta_message_id: res.messageId || null,
           error_message: res.error || null,
-          details: { approval_no: approvalNo, request_no: requestNo, event: 'fully_paid', ref: refStr },
+          details: {
+            approval_no: approvalNo,
+            request_no: requestNo,
+            event: 'fully_paid',
+            ref: refStr,
+            has_attachment: Boolean(attachmentUrl),
+          },
         });
       } catch {
         /* ignore */
@@ -1258,6 +1280,9 @@ export async function sendPaymentDisbursedWhatsAppNotification(
       `💳 *Payment Mode:* ${modeStr}\n` +
       `🔢 *Ref / UTR No:* ${refStr}\n` +
       `📅 *Payment Date:* ${dateStr}\n\n` +
+      (attachmentUrl
+        ? `📄 *Disbursement receipt attachment is delivered above.*\n\n`
+        : '') +
       `The remaining balance will be disbursed in subsequent instalments.`;
 
     const templateBodyParams = [
@@ -1276,6 +1301,9 @@ export async function sendPaymentDisbursedWhatsAppNotification(
     for (const target of targets) {
       const res = await sendWhatsAppDirect({
         to: target.phone,
+        documentUrl: attachmentUrl || undefined,
+        documentFilename: finalFilename,
+        caption: companionCaption,
         text: messageBody,
         config: cfg,
         templateName: 'partial_payment_notification',
@@ -1290,7 +1318,7 @@ export async function sendPaymentDisbursedWhatsAppNotification(
           request_id: request.id,
           recipient_phone: target.phone,
           recipient_name: target.name || null,
-          message_type: 'template',
+          message_type: attachmentUrl ? 'document' : 'template',
           status: res.success ? 'sent' : 'failed',
           meta_message_id: res.messageId || null,
           error_message: res.error || null,
@@ -1300,6 +1328,7 @@ export async function sendPaymentDisbursedWhatsAppNotification(
             disbursed: disbursedAmount,
             remaining: remainingBalance,
             event: 'partial_paid',
+            has_attachment: Boolean(attachmentUrl),
           },
         });
       } catch {

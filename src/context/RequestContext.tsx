@@ -1920,6 +1920,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const currentReq = id
           ? getRequestById(id)
           : requests.find((r) => (r.disbursement_entries || []).some((e) => e.id === details.entry_id));
+
+        // Generate signed URL for the uploaded payment attachment if available
+        let paymentDocUrl: string | null = null;
+        if (storagePath && isBackendConnected) {
+          try {
+            const { data: signData } = await supabase.storage
+              .from('request-files')
+              .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+            paymentDocUrl = signData?.signedUrl || null;
+          } catch (signErr) {
+            console.warn('Could not generate signed URL for payment document:', signErr);
+          }
+        }
+
         if (currentReq) {
           const disbursed = details.amount || 0;
           const balance = Math.max(0, (currentReq.amount || 0) - ((currentReq.paid_amount || 0) + disbursed));
@@ -1930,7 +1944,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             details.payment_mode,
             details.payment_ref,
             details.payment_date,
-            full
+            full,
+            undefined,
+            undefined,
+            paymentDocUrl,
+            docName || details.document_name || 'Disbursement_Receipt.pdf'
           ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
         }
         return { success: true, fully_paid: full };
@@ -2032,6 +2050,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       )
     );
 
+    let mockDocUrl: string | null = null;
+    if (details.document instanceof File) {
+      try {
+        mockDocUrl = URL.createObjectURL(details.document);
+      } catch {
+        /* ignore */
+      }
+    }
+
     sendPaymentDisbursedWhatsAppNotification(
       current,
       amt,
@@ -2039,7 +2066,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       details.payment_mode,
       details.payment_ref,
       date,
-      full
+      full,
+      undefined,
+      undefined,
+      mockDocUrl,
+      docName || details.document_name || 'Disbursement_Receipt.pdf'
     ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
 
     return { success: true, fully_paid: full };
