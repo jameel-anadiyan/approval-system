@@ -22,7 +22,13 @@ import { useAuth } from './AuthContext';
 import { MOCK_REQUESTS, MOCK_USERS, MOCK_REGIONS } from '../lib/mockData';
 import { loadThreshold } from '../lib/directory';
 import { getClientSessionId } from '../lib/entryLock';
-import { sendApprovalWhatsAppNotification } from '../lib/whatsapp';
+import {
+  sendApprovalWhatsAppNotification,
+  sendRejectionWhatsAppNotification,
+  sendCancellationWhatsAppNotification,
+  sendReturnedWhatsAppNotification,
+  sendPaymentDisbursedWhatsAppNotification,
+} from '../lib/whatsapp';
 
 type Result = { success: boolean; error?: string; warning?: string };
 
@@ -1502,6 +1508,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!user) return { success: false, error: 'Must be logged in' };
     if (!remarks.trim()) return { success: false, error: 'A remark is required when returning a request.' };
 
+    const targetReq = getRequestById(id);
+
     if (isBackendConnected) {
       try {
         await uploadActionVoice(id, voice);
@@ -1511,13 +1519,18 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         if (error) throw error;
         await loadRequests();
+        if (targetReq) {
+          sendReturnedWhatsAppNotification(targetReq, remarks, user.full_name).catch((e) =>
+            console.warn('Return WhatsApp notification failed:', e)
+          );
+        }
         return { success: true };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
       }
     }
 
-    const current = getRequestById(id);
+    const current = targetReq;
     if (!current) return { success: false, error: 'Request not found' };
 
     const action: RequestAction = {
@@ -1547,12 +1560,18 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       )
     );
 
+    sendReturnedWhatsAppNotification(current, remarks, user.full_name).catch((e) =>
+      console.warn('Return WhatsApp notification failed:', e)
+    );
+
     return { success: true };
   };
 
   const rejectRequest = async (id: string, reason: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (!reason.trim()) return { success: false, error: 'A reason is required when rejecting a request.' };
+
+    const targetReq = getRequestById(id);
 
     if (isBackendConnected) {
       try {
@@ -1563,13 +1582,18 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         if (error) throw error;
         await loadRequests();
+        if (targetReq) {
+          sendRejectionWhatsAppNotification(targetReq, reason, user.full_name).catch((e) =>
+            console.warn('Rejection WhatsApp notification failed:', e)
+          );
+        }
         return { success: true };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
       }
     }
 
-    const current = getRequestById(id);
+    const current = targetReq;
     if (!current) return { success: false, error: 'Request not found' };
 
     const action: RequestAction = {
@@ -1600,6 +1624,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
           : r
       )
+    );
+
+    sendRejectionWhatsAppNotification(current, reason, user.full_name).catch((e) =>
+      console.warn('Rejection WhatsApp notification failed:', e)
     );
 
     return { success: true };
@@ -1888,7 +1916,24 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           throw error;
         }
         await loadRequests();
-        return { success: true, fully_paid: !!(data as { fully_paid?: boolean } | null)?.fully_paid };
+        const full = !!(data as { fully_paid?: boolean } | null)?.fully_paid;
+        const currentReq = id
+          ? getRequestById(id)
+          : requests.find((r) => (r.disbursement_entries || []).some((e) => e.id === details.entry_id));
+        if (currentReq) {
+          const disbursed = details.amount || 0;
+          const balance = Math.max(0, (currentReq.amount || 0) - ((currentReq.paid_amount || 0) + disbursed));
+          sendPaymentDisbursedWhatsAppNotification(
+            currentReq,
+            disbursed,
+            balance,
+            details.payment_mode,
+            details.payment_ref,
+            details.payment_date,
+            full
+          ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
+        }
+        return { success: true, fully_paid: full };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
       }
@@ -1986,6 +2031,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           : r
       )
     );
+
+    sendPaymentDisbursedWhatsAppNotification(
+      current,
+      amt,
+      Math.max(0, current.amount - paid),
+      details.payment_mode,
+      details.payment_ref,
+      date,
+      full
+    ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
 
     return { success: true, fully_paid: full };
   };
@@ -3448,6 +3503,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const { error } = await supabase.rpc('cancel_approved_request', { p_request_id: id, p_reason: reason });
         if (error) throw error;
         await loadRequests(true);
+        sendCancellationWhatsAppNotification(r, reason, user.full_name).catch((e) =>
+          console.warn('Cancellation WhatsApp notification failed:', e)
+        );
         return { success: true };
       } catch (err: unknown) {
         await loadRequests(true);
@@ -3485,6 +3543,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
           : req
       )
+    );
+    sendCancellationWhatsAppNotification(r, reason, user.full_name).catch((e) =>
+      console.warn('Cancellation WhatsApp notification failed:', e)
     );
     return { success: true };
   };

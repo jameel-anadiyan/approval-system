@@ -29,6 +29,8 @@ import {
   sendTestWhatsAppTemplate,
   fetchMetaTemplates,
   createMetaApprovalTemplate,
+  registerAllMetaTemplates,
+  META_TEMPLATES,
   META_TEMPLATE_SPEC,
   DEFAULT_WHATSAPP_CONFIG,
   cleanWhatsAppNumber,
@@ -47,14 +49,16 @@ export const AdminSettingsPage: React.FC = () => {
   const [waConfig, setWaConfig] = useState<WhatsAppConfig>(DEFAULT_WHATSAPP_CONFIG);
   const [savingWa, setSavingWa] = useState(false);
   const [showToken, setShowToken] = useState(false);
-  const [testPhone, setTestPhone] = useState('');
+  const [testPhone, setTestPhone] = useState('9846880713');
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-  // Template state
-  const [templateStatus, setTemplateStatus] = useState<string | null>(null);
+  // Multi-Template state
+  const [templatesMap, setTemplatesMap] = useState<Record<string, { status: string; id?: string; language?: string }>>({});
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>('approval_notification');
   const [loadingTemplateStatus, setLoadingTemplateStatus] = useState(false);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [registeringAll, setRegisteringAll] = useState(false);
   const [testingTemplate, setTestingTemplate] = useState(false);
   const [templateTestResult, setTemplateTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [copiedTemplate, setCopiedTemplate] = useState(false);
@@ -64,18 +68,17 @@ export const AdminSettingsPage: React.FC = () => {
     try {
       const res = await fetchMetaTemplates(cfg);
       if (res.success) {
-        const tName = cfg.template_name || META_TEMPLATE_SPEC.name;
-        const found = res.templates.find((t) => t.name === tName);
-        if (found) {
-          setTemplateStatus(found.status);
-        } else {
-          setTemplateStatus('NOT_FOUND');
+        const map: Record<string, { status: string; id?: string; language?: string }> = {};
+        for (const t of res.templates) {
+          // If multiple language variants exist, prefer APPROVED
+          if (!map[t.name] || map[t.name].status !== 'APPROVED') {
+            map[t.name] = { status: t.status, id: t.id, language: t.language };
+          }
         }
-      } else {
-        setTemplateStatus('ERROR');
+        setTemplatesMap(map);
       }
     } catch {
-      setTemplateStatus('ERROR');
+      /* ignore */
     } finally {
       setLoadingTemplateStatus(false);
     }
@@ -85,15 +88,15 @@ export const AdminSettingsPage: React.FC = () => {
     if (waConfig.access_token && waConfig.phone_number_id) {
       checkTemplateStatus(waConfig);
     }
-  }, [waConfig.access_token, waConfig.phone_number_id, waConfig.template_name]);
+  }, [waConfig.access_token, waConfig.phone_number_id]);
 
-  const handleCreateTemplate = async () => {
+  const handleRegisterTemplate = async (templateKey: string) => {
     setCreatingTemplate(true);
     try {
-      const res = await createMetaApprovalTemplate(waConfig);
+      const res = await createMetaApprovalTemplate(waConfig, templateKey);
       if (res.success) {
         setFlash({
-          text: `Template "${waConfig.template_name || 'approval_notification'}" submitted to Meta WABA (${res.status}).`,
+          text: `Template "${templateKey}" submitted to Meta WABA (${res.status}).`,
           ok: true,
         });
         await checkTemplateStatus(waConfig);
@@ -107,21 +110,37 @@ export const AdminSettingsPage: React.FC = () => {
     }
   };
 
-  const handleTestTemplate = async () => {
+  const handleRegisterAll = async () => {
+    setRegisteringAll(true);
+    try {
+      const res = await registerAllMetaTemplates(waConfig);
+      setFlash({
+        text: `Submitted standard templates to Meta WABA (${res.registeredCount} active/registered).`,
+        ok: true,
+      });
+      await checkTemplateStatus(waConfig);
+    } catch (e: unknown) {
+      setFlash({ text: String(e), ok: false });
+    } finally {
+      setRegisteringAll(false);
+    }
+  };
+
+  const handleTestTemplate = async (templateKey = selectedTemplateKey) => {
     const target = testPhone.trim() || waConfig.admin_phone_number || '9846880713';
     setTestingTemplate(true);
     setTemplateTestResult(null);
     try {
-      const res = await sendTestWhatsAppTemplate(target, waConfig);
+      const res = await sendTestWhatsAppTemplate(target, templateKey, waConfig);
       if (res.success) {
         setTemplateTestResult({
           ok: true,
-          message: `Template delivered to ${cleanWhatsAppNumber(target)}! (Message ID: ${res.messageId || 'OK'})`,
+          message: `Template "${templateKey}" delivered to ${cleanWhatsAppNumber(target)}! (Message ID: ${res.messageId || 'OK'})`,
         });
       } else {
         setTemplateTestResult({
           ok: false,
-          message: res.error || 'Failed to deliver template message.',
+          message: res.error || `Failed to deliver template "${templateKey}".`,
         });
       }
     } catch (err: unknown) {
@@ -134,8 +153,8 @@ export const AdminSettingsPage: React.FC = () => {
     }
   };
 
-  const handleCopyTemplateBody = () => {
-    navigator.clipboard.writeText(META_TEMPLATE_SPEC.bodyText);
+  const handleCopyTemplateBody = (text: string) => {
+    navigator.clipboard.writeText(text);
     setCopiedTemplate(true);
     setTimeout(() => setCopiedTemplate(false), 3000);
   };
@@ -383,36 +402,34 @@ export const AdminSettingsPage: React.FC = () => {
           </span>
         </div>
 
-        {/* WhatsApp Template Configuration Section */}
-        <div className="pt-2 border-t border-slate-100 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-emerald-600" />
-              <span className="text-xs font-bold text-slate-900">Message Template (Meta WABA)</span>
+        {/* WhatsApp Multi-Template Configuration Section */}
+        <div className="pt-2 border-t border-slate-100 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-900">Message Templates (Meta WABA UTILITY)</span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Pre-approved 24/7 WhatsApp templates for every stage of the request lifecycle.
+              </p>
             </div>
             <div className="flex items-center gap-2">
-              {templateStatus === 'APPROVED' && (
-                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Meta Approved (24/7 Delivery)
-                </span>
-              )}
-              {templateStatus === 'PENDING' && (
-                <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  Meta Review Pending (Auto-fallback to direct message)
-                </span>
-              )}
-              {templateStatus === 'NOT_FOUND' && (
-                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-300">
-                  Not Registered
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={handleRegisterAll}
+                disabled={registeringAll}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold transition-colors disabled:opacity-50"
+                title="Register or update all 6 templates in Meta WABA"
+              >
+                {registeringAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                <span>{registeringAll ? 'Syncing…' : 'Sync All in Meta'}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => checkTemplateStatus(waConfig)}
                 disabled={loadingTemplateStatus}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                className="p-1.5 text-slate-500 hover:text-slate-800 rounded-lg hover:bg-slate-100 border border-slate-200 transition-colors"
                 title="Refresh Meta Template Status"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingTemplateStatus ? 'animate-spin' : ''}`} />
@@ -429,88 +446,132 @@ export const AdminSettingsPage: React.FC = () => {
             />
             <div>
               <span className="text-xs font-bold text-slate-800 block">
-                Use Pre-Approved Meta Template for Outbound Notifications
+                Use Pre-Approved Meta Templates for Outbound Notifications
               </span>
               <span className="text-[11px] text-slate-500 leading-relaxed block mt-0.5">
-                Recommended for frequent delivery. Messages can be sent 24/7 without Meta&apos;s 24-hour response window restriction. If the template is pending or unapproved, the system automatically falls back to direct message delivery.
+                Recommended for frequent delivery. Messages can be sent 24/7 without Meta&apos;s 24-hour response window restriction. If a template is pending or unapproved, the system automatically falls back to direct message delivery with companion attachments.
               </span>
             </div>
           </label>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Template Name
-              </label>
-              <input
-                type="text"
-                value={waConfig.template_name || 'approval_notification'}
-                onChange={(e) => setWaConfig({ ...waConfig, template_name: e.target.value.toLowerCase().trim() })}
-                placeholder="approval_notification"
-                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
-              />
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Category: UTILITY</span>
-            </div>
+          {/* Template Selector Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/80">
+            {Object.entries(META_TEMPLATES).map(([key, def]) => {
+              const metaInfo = templatesMap[def.name];
+              const isApproved = metaInfo?.status === 'APPROVED';
+              const isPending = metaInfo?.status === 'PENDING';
+              const isSelected = selectedTemplateKey === key;
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Template Language
-              </label>
-              <select
-                value={waConfig.template_language || 'en'}
-                onChange={(e) => setWaConfig({ ...waConfig, template_language: e.target.value })}
-                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden bg-white"
-              >
-                <option value="en">English (en)</option>
-                <option value="en_US">English US (en_US)</option>
-              </select>
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Registered language in WABA</span>
-            </div>
-          </div>
-
-          {/* Template Text Preview & Quick Copy */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-bold text-slate-800">Template Format (with 8 Positional Variables):</span>
-              <button
-                type="button"
-                onClick={handleCopyTemplateBody}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 transition-colors shadow-2xs"
-              >
-                {copiedTemplate ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
-                <span>{copiedTemplate ? 'Copied to Clipboard!' : 'Copy Template Body'}</span>
-              </button>
-            </div>
-
-            <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] text-slate-700 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
-              {META_TEMPLATE_SPEC.bodyText}
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[10px]">
-              {META_TEMPLATE_SPEC.variables.map((v) => (
-                <div key={v.num} className="bg-white p-2 rounded-lg border border-slate-200/80">
-                  <span className="font-mono font-bold text-emerald-700">{v.num}</span>{' '}
-                  <span className="text-slate-600">{v.name}</span>
-                </div>
-              ))}
-            </div>
-
-            {templateStatus === 'NOT_FOUND' && (
-              <div className="pt-2 flex items-center justify-between gap-3">
-                <span className="text-[11px] text-slate-500">
-                  Template is not registered in Meta WABA yet. Click to register now.
-                </span>
+              return (
                 <button
+                  key={key}
                   type="button"
-                  onClick={handleCreateTemplate}
-                  disabled={creatingTemplate}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs disabled:opacity-50 transition-colors"
+                  onClick={() => setSelectedTemplateKey(key)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 ${
+                    isSelected
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/70'
+                  }`}
                 >
-                  {creatingTemplate ? 'Registering…' : 'Register Template in Meta'}
+                  <span>{def.title}</span>
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      isApproved ? 'bg-emerald-300' : isPending ? 'bg-amber-300 animate-pulse' : 'bg-slate-300'
+                    }`}
+                    title={
+                      isApproved
+                        ? 'Meta Approved'
+                        : isPending
+                        ? 'Meta Review Pending'
+                        : 'Not Registered'
+                    }
+                  />
                 </button>
-              </div>
-            )}
+              );
+            })}
           </div>
+
+          {/* Active Template Details Card */}
+          {(() => {
+            const currentDef = META_TEMPLATES[selectedTemplateKey] || META_TEMPLATE_SPEC;
+            const metaInfo = templatesMap[currentDef.name];
+            const isApproved = metaInfo?.status === 'APPROVED';
+            const isPending = metaInfo?.status === 'PENDING';
+            const notRegistered = !metaInfo;
+
+            return (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900">{currentDef.title}</span>
+                      <span className="font-mono text-[11px] text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+                        {currentDef.name}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">
+                      Category: {currentDef.category} · Positional Format ({currentDef.variables.length} parameters)
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isApproved && (
+                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        Meta Approved (24/7 Delivery)
+                      </span>
+                    )}
+                    {isPending && (
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        Meta Review Pending (Auto-fallback active)
+                      </span>
+                    )}
+                    {notRegistered && (
+                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-300">
+                        Not Registered
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopyTemplateBody(currentDef.bodyText)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 transition-colors shadow-2xs"
+                    >
+                      {copiedTemplate ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                      <span>{copiedTemplate ? 'Copied!' : 'Copy Body'}</span>
+                    </button>
+
+                    {notRegistered && (
+                      <button
+                        type="button"
+                        onClick={() => handleRegisterTemplate(selectedTemplateKey)}
+                        disabled={creatingTemplate}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-xs disabled:opacity-50 transition-colors"
+                      >
+                        {creatingTemplate ? 'Submitting…' : 'Register in Meta'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Formatted body preview */}
+                <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] text-slate-700 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+                  {currentDef.bodyText}
+                </div>
+
+                {/* Positional variables mapping */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[10px]">
+                  {currentDef.variables.map((v) => (
+                    <div key={v.num} className="bg-white p-2 rounded-lg border border-slate-200/80">
+                      <span className="font-mono font-bold text-emerald-700">{v.num}</span>{' '}
+                      <span className="text-slate-600">{v.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="flex items-center justify-between gap-3 pt-2">
@@ -557,13 +618,13 @@ export const AdminSettingsPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={handleTestTemplate}
+                onClick={() => handleTestTemplate(selectedTemplateKey)}
                 disabled={testingTemplate || !testPhone.trim()}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs disabled:opacity-50 transition-all shrink-0 cursor-pointer"
-                title="Send test message using the Meta approval_notification template"
+                title={`Send test message using "${selectedTemplateKey}" template`}
               >
                 {testingTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                <span>{testingTemplate ? 'Sending…' : 'Template Test'}</span>
+                <span>{testingTemplate ? 'Sending…' : `Test Template (${(META_TEMPLATES[selectedTemplateKey] || META_TEMPLATE_SPEC).title})`}</span>
               </button>
             </div>
           </div>

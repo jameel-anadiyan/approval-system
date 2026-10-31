@@ -21,33 +21,195 @@ export const DEFAULT_WHATSAPP_CONFIG: WhatsAppConfig = {
   use_template: true,
 };
 
-export const META_TEMPLATE_SPEC = {
-  name: 'approval_notification',
-  category: 'UTILITY',
-  language: 'en',
-  bodyText:
-    `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
-    `Dear *{{1}}*,\n\n` +
-    `Your request has been approved and officially stamped with seal & signature.\n\n` +
-    `📋 *Request No:* {{2}}\n` +
-    `🎉 *Approval No:* {{3}}\n` +
-    `📝 *Subject:* {{4}}\n` +
-    `🏢 *Outlet / Shop:* {{5}}\n` +
-    `💰 *Amount:* {{6}}\n` +
-    `✍️ *Approved by:* {{7}}\n` +
-    `📅 *Approved on:* {{8}}\n\n` +
-    `📄 *The official signed approval document packet has been stamped.*`,
-  variables: [
-    { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
-    { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
-    { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
-    { num: '{{4}}', name: 'Subject / Title', sample: 'Event Sponsorship & Promotion' },
-    { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
-    { num: '{{6}}', name: 'Amount', sample: 'Rs. 50,000.00' },
-    { num: '{{7}}', name: 'Approver Name', sample: 'Managing Director' },
-    { num: '{{8}}', name: 'Approved Date', sample: '31 Oct 2026' },
-  ],
+export interface MetaTemplateDefinition {
+  name: string;
+  title: string;
+  category: 'UTILITY';
+  language: string;
+  bodyText: string;
+  variables: { num: string; name: string; sample: string }[];
+}
+
+export const META_TEMPLATES: Record<string, MetaTemplateDefinition> = {
+  approval_notification: {
+    name: 'approval_notification',
+    title: 'Approved Document Packet',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `Your request has been approved and officially stamped with seal & signature.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💰 *Amount:* {{6}}\n` +
+      `✍️ *Approved by:* {{7}}\n` +
+      `📅 *Approved on:* {{8}}\n\n` +
+      `📄 *The official signed approval document packet has been stamped.*`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Event Sponsorship & Promotion' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Amount', sample: 'Rs. 50,000.00' },
+      { num: '{{7}}', name: 'Approver Name', sample: 'Managing Director' },
+      { num: '{{8}}', name: 'Approved Date', sample: '31 Oct 2026' },
+    ],
+  },
+  rejection_notification: {
+    name: 'rejection_notification',
+    title: 'Request Rejected',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `❌ *YOUR REQUEST HAS BEEN REJECTED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `Your approval request has been reviewed and rejected.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `📝 *Subject:* {{3}}\n` +
+      `🏢 *Outlet / Shop:* {{4}}\n` +
+      `💰 *Amount:* {{5}}\n` +
+      `✍️ *Decision by:* {{6}}\n` +
+      `📅 *Date:* {{7}}\n` +
+      `⚠️ *Reason:* {{8}}\n\n` +
+      `Please contact your department head or administrator for further details.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Subject / Title', sample: 'Event Sponsorship' },
+      { num: '{{4}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{5}}', name: 'Amount', sample: 'Rs. 50,000.00' },
+      { num: '{{6}}', name: 'Decision by', sample: 'Managing Director' },
+      { num: '{{7}}', name: 'Date', sample: '31 Oct 2026' },
+      { num: '{{8}}', name: 'Reason', sample: 'Budget allocation exceeded for this quarter' },
+    ],
+  },
+  cancellation_notification: {
+    name: 'cancellation_notification',
+    title: 'Approval Cancelled',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `⚠️ *APPROVAL HAS BEEN CANCELLED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `The prior approval for your request has been cancelled.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Prior Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💰 *Amount:* {{6}}\n` +
+      `✍️ *Cancelled by:* {{7}}\n` +
+      `📅 *Date:* {{8}}\n` +
+      `🛑 *Reason:* {{9}}\n\n` +
+      `No further disbursements or actions will be processed against this approval.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Prior Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Event Sponsorship' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Amount', sample: 'Rs. 50,000.00' },
+      { num: '{{7}}', name: 'Cancelled by', sample: 'Operations Head' },
+      { num: '{{8}}', name: 'Date', sample: '31 Oct 2026' },
+      { num: '{{9}}', name: 'Reason', sample: 'Vendor quotation revised' },
+    ],
+  },
+  returned_notification: {
+    name: 'returned_notification',
+    title: 'Request Returned / Sent Back',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `↩️ *REQUEST RETURNED FOR ACTION*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `Your approval request has been returned for clarification or correction.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `📝 *Subject:* {{3}}\n` +
+      `🏢 *Outlet / Shop:* {{4}}\n` +
+      `💰 *Amount:* {{5}}\n` +
+      `✍️ *Returned by:* {{6}}\n` +
+      `📅 *Date:* {{7}}\n` +
+      `💬 *Remarks / Notes:* {{8}}\n\n` +
+      `Please review the remarks and update your request in the approval portal.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Subject / Title', sample: 'Store Renovation' },
+      { num: '{{4}}', name: 'Outlet / Shop', sample: 'Kochi Showroom' },
+      { num: '{{5}}', name: 'Amount', sample: 'Rs. 1,20,000.00' },
+      { num: '{{6}}', name: 'Returned by', sample: 'Accounts Verifier' },
+      { num: '{{7}}', name: 'Date', sample: '31 Oct 2026' },
+      { num: '{{8}}', name: 'Remarks / Notes', sample: 'Please attach supporting tax invoices' },
+    ],
+  },
+  payment_completed_notification: {
+    name: 'payment_completed_notification',
+    title: 'Payment Completed & Closed',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `💵 *PAYMENT COMPLETED & CLOSED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `The final payment for your approved request has been processed and this request is now closed.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💰 *Total Amount:* {{6}}\n` +
+      `💳 *Payment Mode:* {{7}}\n` +
+      `🔢 *Ref / UTR No:* {{8}}\n` +
+      `📅 *Payment Date:* {{9}}\n\n` +
+      `All scheduled disbursements for this approval are complete.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Marketing Material' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Total Amount', sample: 'Rs. 50,000.00' },
+      { num: '{{7}}', name: 'Payment Mode', sample: 'Bank Transfer' },
+      { num: '{{8}}', name: 'Ref / UTR No', sample: 'UTR98472918471' },
+      { num: '{{9}}', name: 'Payment Date', sample: '31 Oct 2026' },
+    ],
+  },
+  partial_payment_notification: {
+    name: 'partial_payment_notification',
+    title: 'Partial Payment Disbursed',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `💳 *PARTIAL PAYMENT DISBURSED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `A partial payment has been disbursed for your approved request.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💵 *Disbursed Amount:* {{6}}\n` +
+      `📊 *Remaining Balance:* {{7}}\n` +
+      `💳 *Payment Mode:* {{8}}\n` +
+      `🔢 *Ref / UTR No:* {{9}}\n` +
+      `📅 *Payment Date:* {{10}}\n\n` +
+      `The remaining balance will be disbursed in subsequent instalments.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Interior Work' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Disbursed Amount', sample: 'Rs. 25,000.00' },
+      { num: '{{7}}', name: 'Remaining Balance', sample: 'Rs. 25,000.00' },
+      { num: '{{8}}', name: 'Payment Mode', sample: 'Bank Transfer' },
+      { num: '{{9}}', name: 'Ref / UTR No', sample: 'UTR102938472' },
+      { num: '{{10}}', name: 'Payment Date', sample: '31 Oct 2026' },
+    ],
+  },
 };
+
+export const META_TEMPLATE_SPEC = META_TEMPLATES.approval_notification;
 
 const STORAGE_KEY = 'approval_app_whatsapp_config';
 
@@ -171,8 +333,11 @@ export async function fetchMetaTemplates(config?: WhatsAppConfig): Promise<{
   }
 }
 
-/** Registers or submits the approval_notification template in Meta WABA */
-export async function createMetaApprovalTemplate(config?: WhatsAppConfig): Promise<{
+/** Registers or submits a template in Meta WABA */
+export async function createMetaApprovalTemplate(
+  config?: WhatsAppConfig,
+  templateKey: string = 'approval_notification'
+): Promise<{
   success: boolean;
   templateId?: string;
   status?: string;
@@ -183,6 +348,8 @@ export async function createMetaApprovalTemplate(config?: WhatsAppConfig): Promi
   const token = cfg.access_token?.trim();
   if (!token || !wabaId) return { success: false, error: 'Missing access token or WABA ID' };
 
+  const spec = META_TEMPLATES[templateKey] || META_TEMPLATE_SPEC;
+
   try {
     const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
       method: 'POST',
@@ -191,15 +358,15 @@ export async function createMetaApprovalTemplate(config?: WhatsAppConfig): Promi
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        name: cfg.template_name || META_TEMPLATE_SPEC.name,
-        category: META_TEMPLATE_SPEC.category,
-        language: cfg.template_language || META_TEMPLATE_SPEC.language,
+        name: spec.name,
+        category: spec.category,
+        language: cfg.template_language || spec.language,
         components: [
           {
             type: 'BODY',
-            text: META_TEMPLATE_SPEC.bodyText,
+            text: spec.bodyText,
             example: {
-              body_text: [META_TEMPLATE_SPEC.variables.map((v) => v.sample)],
+              body_text: [spec.variables.map((v) => v.sample)],
             },
           },
         ],
@@ -214,6 +381,32 @@ export async function createMetaApprovalTemplate(config?: WhatsAppConfig): Promi
   } catch (e: unknown) {
     return { success: false, error: errMsg(e) };
   }
+}
+
+/** Registers all standard lifecycle templates in Meta WABA */
+export async function registerAllMetaTemplates(config?: WhatsAppConfig): Promise<{
+  success: boolean;
+  registeredCount: number;
+  results: { name: string; ok: boolean; status?: string; error?: string }[];
+}> {
+  const results: { name: string; ok: boolean; status?: string; error?: string }[] = [];
+  const cfg = config || (await loadWhatsAppConfig(true));
+
+  for (const [key, spec] of Object.entries(META_TEMPLATES)) {
+    const res = await createMetaApprovalTemplate(cfg, key);
+    results.push({
+      name: spec.name,
+      ok: res.success,
+      status: res.status,
+      error: res.error,
+    });
+  }
+
+  return {
+    success: results.some((r) => r.ok),
+    registeredCount: results.filter((r) => r.ok).length,
+    results,
+  };
 }
 
 export interface SendDirectParams {
@@ -501,71 +694,25 @@ export async function sendTestWhatsAppMessage(
 }
 
 /**
- * Builds and dispatches the "your approval has been approved" WhatsApp message
- * along with the signed approval PDF attachment to the requester, head, and admin.
+ * Resolves all target recipients for a request notification:
+ * 1. Extra recipient (if provided)
+ * 2. Requester (from profile or mock data)
+ * 3. Department Head (from owner_head_id or mock data)
+ * 4. Admin copy (cfg.admin_phone_number or +91 9846880713)
  */
-export async function sendApprovalWhatsAppNotification(
+export async function getNotificationRecipients(
   request: RequestRecord,
-  signedPdfUrl: string,
-  config?: WhatsAppConfig,
-  extraRecipientPhone?: string,
-  customApproverName?: string
-): Promise<{
-  success: boolean;
-  results: { recipient: string; name?: string; ok: boolean; error?: string }[];
-}> {
-  const cfg = config || (await loadWhatsAppConfig(true));
-  if (!cfg.enabled) {
-    return { success: false, results: [] };
-  }
-
-  const approvalNo = request.approval_no || 'APPROVED';
-  const requestNo = request.request_no || 'REQ';
-  const amountStr =
-    request.request_type === 'stock_transfer'
-      ? `Stock Transfer (MRP: ${formatINR(request.amount || 0)})`
-      : request.request_type === 'non_cash'
-      ? 'Non-Cash (No direct disbursement)'
-      : formatINR(request.amount || 0);
-
-  const approverName =
-    customApproverName ||
-    (request.actions || []).find((a) => a.action === 'approved')?.actor_name ||
-    'Authorized Head / Admin';
-
-  const titleStr = request.title || 'Official Approval';
-  const outletStr = request.shop_name || 'All Outlets';
-
-  const caption =
-    `✅ *Your approval has been approved!*\n` +
-    `Request No: ${requestNo}\n` +
-    `Approval No: ${approvalNo}\n` +
-    `Amount: ${amountStr}`;
-
-  const messageBody =
-    `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
-    `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
-    `Your request has been approved and officially stamped with seal & signature.\n\n` +
-    `📋 *Request No:* ${requestNo}\n` +
-    `🎉 *Approval No:* ${approvalNo}\n` +
-    `📝 *Subject:* ${titleStr}\n` +
-    `🏢 *Outlet / Shop:* ${outletStr}\n` +
-    `💰 *Amount:* ${amountStr}\n` +
-    `✍️ *Approved by:* ${approverName}\n` +
-    `📅 *Approved on:* ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}\n\n` +
-    `📄 *The official signed approval document packet is attached above.*`;
-
-  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
-
-  // Determine recipients
+  cfg: WhatsAppConfig,
+  extraRecipientPhone?: string
+): Promise<{ phone: string; name?: string }[]> {
   const targets: { phone: string; name?: string }[] = [];
 
-  // 1. Extra explicit recipient (e.g. from modal or parameter)
+  // 1. Extra explicit recipient
   if (extraRecipientPhone) {
     targets.push({ phone: extraRecipientPhone, name: 'Specified Recipient' });
   }
 
-  // 2. Requester (from requester profile or mock data fallback)
+  // 2. Requester
   if (cfg.notify_requester && request.requester_id) {
     let reqPhone: string | undefined;
     let reqName = request.requester_name;
@@ -597,7 +744,7 @@ export async function sendApprovalWhatsAppNotification(
     }
   }
 
-  // 3. Head (from request owner_head_id or requester's default_head_id)
+  // 3. Head
   if (cfg.notify_head) {
     const headId = request.owner_head_id;
     if (headId && headId !== request.requester_id) {
@@ -632,22 +779,76 @@ export async function sendApprovalWhatsAppNotification(
     }
   }
 
-  // 4. Admin copy phone number (always ensures 9846880713 receives a copy)
+  // 4. Admin copy
   const adminPhone = (cfg.admin_phone_number && cfg.admin_phone_number.trim()) || '+91 9846880713';
   targets.push({ phone: adminPhone, name: 'Admin Test Copy' });
 
-  // Deduplicate by cleaned phone number
+  // Deduplicate
   const seen = new Set<string>();
-  const uniqueTargets = targets.filter((t) => {
+  return targets.filter((t) => {
     const clean = cleanWhatsAppNumber(t.phone);
     if (!clean || seen.has(clean)) return false;
     seen.add(clean);
     return true;
   });
+}
 
-  const filename = `${approvalNo}_Approved_Document.pdf`;
+/**
+ * Builds and dispatches the "your approval has been approved" WhatsApp message
+ * along with the signed approval PDF attachment to the requester, head, and admin.
+ */
+export async function sendApprovalWhatsAppNotification(
+  request: RequestRecord,
+  signedPdfUrl: string,
+  config?: WhatsAppConfig,
+  extraRecipientPhone?: string,
+  customApproverName?: string
+): Promise<{
+  success: boolean;
+  results: { recipient: string; name?: string; ok: boolean; error?: string }[];
+}> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  if (!cfg.enabled) {
+    return { success: false, results: [] };
+  }
 
+  const approvalNo = request.approval_no || 'APPROVED';
+  const requestNo = request.request_no || 'REQ';
+  const amountStr =
+    request.request_type === 'stock_transfer'
+      ? `Stock Transfer (MRP: ${formatINR(request.amount || 0)})`
+      : request.request_type === 'non_cash'
+      ? 'Non-Cash (No direct disbursement)'
+      : formatINR(request.amount || 0);
+
+  const approverName =
+    customApproverName ||
+    (request.actions || []).find((a) => a.action === 'approved')?.actor_name ||
+    'Authorized Head / Admin';
+
+  const titleStr = request.title || 'Official Approval';
+  const outletStr = request.shop_name || 'All Outlets';
   const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  const caption =
+    `✅ *Your approval has been approved!*\n` +
+    `Request No: ${requestNo}\n` +
+    `Approval No: ${approvalNo}\n` +
+    `Amount: ${amountStr}`;
+
+  const messageBody =
+    `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
+    `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
+    `Your request has been approved and officially stamped with seal & signature.\n\n` +
+    `📋 *Request No:* ${requestNo}\n` +
+    `🎉 *Approval No:* ${approvalNo}\n` +
+    `📝 *Subject:* ${titleStr}\n` +
+    `🏢 *Outlet / Shop:* ${outletStr}\n` +
+    `💰 *Amount:* ${amountStr}\n` +
+    `✍️ *Approved by:* ${approverName}\n` +
+    `📅 *Approved on:* ${dateStr}\n\n` +
+    `📄 *The official signed approval document packet has been stamped.*`;
+
   const templateBodyParams = [
     request.requester_name || 'Staff Member', // {{1}}
     requestNo,                                // {{2}}
@@ -659,7 +860,11 @@ export async function sendApprovalWhatsAppNotification(
     dateStr,                                  // {{8}}
   ];
 
-  for (const target of uniqueTargets) {
+  const filename = `${approvalNo}_Approved_Document.pdf`;
+  const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
+  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
+
+  for (const target of targets) {
     const res = await sendWhatsAppDirect({
       to: target.phone,
       documentUrl: signedPdfUrl,
@@ -667,7 +872,7 @@ export async function sendApprovalWhatsAppNotification(
       caption,
       text: messageBody,
       config: cfg,
-      templateName: cfg.template_name || 'approval_notification',
+      templateName: 'approval_notification',
       templateLanguage: cfg.template_language || 'en',
       templateBodyParams,
     });
@@ -679,7 +884,6 @@ export async function sendApprovalWhatsAppNotification(
       error: res.error,
     });
 
-    // Log to whatsapp_logs if backend is connected
     try {
       await supabase.from('whatsapp_logs').insert({
         request_id: request.id,
@@ -689,42 +893,440 @@ export async function sendApprovalWhatsAppNotification(
         status: res.success ? 'sent' : 'failed',
         meta_message_id: res.messageId || null,
         error_message: res.error || null,
-        details: { approval_no: approvalNo, request_no: requestNo },
+        details: { approval_no: approvalNo, request_no: requestNo, event: 'approval' },
       });
     } catch {
-      /* ignore logging error */
+      /* ignore */
     }
   }
 
-  return {
-    success: results.some((r) => r.ok),
-    results,
-  };
+  return { success: results.some((r) => r.ok), results };
 }
 
-/** Sends a test message using the Meta approval_notification template */
+/**
+ * Builds and dispatches the "request rejected" WhatsApp message with reason.
+ */
+export async function sendRejectionWhatsAppNotification(
+  request: RequestRecord,
+  reason: string,
+  decidedByName?: string,
+  config?: WhatsAppConfig,
+  extraRecipientPhone?: string
+): Promise<{
+  success: boolean;
+  results: { recipient: string; name?: string; ok: boolean; error?: string }[];
+}> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  if (!cfg.enabled) return { success: false, results: [] };
+
+  const requestNo = request.request_no || 'REQ';
+  const amountStr = formatINR(request.amount || 0);
+  const titleStr = request.title || 'Official Request';
+  const outletStr = request.shop_name || 'All Outlets';
+  const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const decider = decidedByName || 'Managing Authority';
+  const reasonText = reason.trim() || 'No specific reason provided';
+
+  const messageBody =
+    `❌ *YOUR REQUEST HAS BEEN REJECTED*\n\n` +
+    `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
+    `Your approval request has been reviewed and rejected.\n\n` +
+    `📋 *Request No:* ${requestNo}\n` +
+    `📝 *Subject:* ${titleStr}\n` +
+    `🏢 *Outlet / Shop:* ${outletStr}\n` +
+    `💰 *Amount:* ${amountStr}\n` +
+    `✍️ *Decision by:* ${decider}\n` +
+    `📅 *Date:* ${dateStr}\n` +
+    `⚠️ *Reason:* ${reasonText}\n\n` +
+    `Please contact your department head or administrator for further details.`;
+
+  const templateBodyParams = [
+    request.requester_name || 'Staff Member', // {{1}}
+    requestNo,                                // {{2}}
+    titleStr,                                 // {{3}}
+    outletStr,                                // {{4}}
+    amountStr,                                // {{5}}
+    decider,                                  // {{6}}
+    dateStr,                                  // {{7}}
+    reasonText,                               // {{8}}
+  ];
+
+  const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
+  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
+
+  for (const target of targets) {
+    const res = await sendWhatsAppDirect({
+      to: target.phone,
+      text: messageBody,
+      config: cfg,
+      templateName: 'rejection_notification',
+      templateLanguage: cfg.template_language || 'en',
+      templateBodyParams,
+    });
+
+    results.push({ recipient: target.phone, name: target.name, ok: res.success, error: res.error });
+
+    try {
+      await supabase.from('whatsapp_logs').insert({
+        request_id: request.id,
+        recipient_phone: target.phone,
+        recipient_name: target.name || null,
+        message_type: 'template',
+        status: res.success ? 'sent' : 'failed',
+        meta_message_id: res.messageId || null,
+        error_message: res.error || null,
+        details: { request_no: requestNo, reason: reasonText, event: 'rejected' },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { success: results.some((r) => r.ok), results };
+}
+
+/**
+ * Builds and dispatches the "approval cancelled" WhatsApp message with reason.
+ */
+export async function sendCancellationWhatsAppNotification(
+  request: RequestRecord,
+  reason: string,
+  cancelledByName?: string,
+  config?: WhatsAppConfig,
+  extraRecipientPhone?: string
+): Promise<{
+  success: boolean;
+  results: { recipient: string; name?: string; ok: boolean; error?: string }[];
+}> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  if (!cfg.enabled) return { success: false, results: [] };
+
+  const approvalNo = request.approval_no || 'APPROVED';
+  const requestNo = request.request_no || 'REQ';
+  const amountStr = formatINR(request.amount || 0);
+  const titleStr = request.title || 'Official Request';
+  const outletStr = request.shop_name || 'All Outlets';
+  const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const canceller = cancelledByName || 'Department Head / Admin';
+  const reasonText = reason.trim() || 'No specific reason provided';
+
+  const messageBody =
+    `⚠️ *APPROVAL HAS BEEN CANCELLED*\n\n` +
+    `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
+    `The prior approval for your request has been cancelled.\n\n` +
+    `📋 *Request No:* ${requestNo}\n` +
+    `🎉 *Prior Approval No:* ${approvalNo}\n` +
+    `📝 *Subject:* ${titleStr}\n` +
+    `🏢 *Outlet / Shop:* ${outletStr}\n` +
+    `💰 *Amount:* ${amountStr}\n` +
+    `✍️ *Cancelled by:* ${canceller}\n` +
+    `📅 *Date:* ${dateStr}\n` +
+    `🛑 *Reason:* ${reasonText}\n\n` +
+    `No further disbursements or actions will be processed against this approval.`;
+
+  const templateBodyParams = [
+    request.requester_name || 'Staff Member', // {{1}}
+    requestNo,                                // {{2}}
+    approvalNo,                               // {{3}}
+    titleStr,                                 // {{4}}
+    outletStr,                                // {{5}}
+    amountStr,                                // {{6}}
+    canceller,                                // {{7}}
+    dateStr,                                  // {{8}}
+    reasonText,                               // {{9}}
+  ];
+
+  const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
+  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
+
+  for (const target of targets) {
+    const res = await sendWhatsAppDirect({
+      to: target.phone,
+      text: messageBody,
+      config: cfg,
+      templateName: 'cancellation_notification',
+      templateLanguage: cfg.template_language || 'en',
+      templateBodyParams,
+    });
+
+    results.push({ recipient: target.phone, name: target.name, ok: res.success, error: res.error });
+
+    try {
+      await supabase.from('whatsapp_logs').insert({
+        request_id: request.id,
+        recipient_phone: target.phone,
+        recipient_name: target.name || null,
+        message_type: 'template',
+        status: res.success ? 'sent' : 'failed',
+        meta_message_id: res.messageId || null,
+        error_message: res.error || null,
+        details: { approval_no: approvalNo, request_no: requestNo, reason: reasonText, event: 'cancelled' },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { success: results.some((r) => r.ok), results };
+}
+
+/**
+ * Builds and dispatches the "request returned" WhatsApp message with remarks.
+ */
+export async function sendReturnedWhatsAppNotification(
+  request: RequestRecord,
+  remarks: string,
+  returnedByName?: string,
+  config?: WhatsAppConfig,
+  extraRecipientPhone?: string
+): Promise<{
+  success: boolean;
+  results: { recipient: string; name?: string; ok: boolean; error?: string }[];
+}> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  if (!cfg.enabled) return { success: false, results: [] };
+
+  const requestNo = request.request_no || 'REQ';
+  const amountStr = formatINR(request.amount || 0);
+  const titleStr = request.title || 'Official Request';
+  const outletStr = request.shop_name || 'All Outlets';
+  const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const returner = returnedByName || 'Accounts Verifier / Head';
+  const remarksText = remarks.trim() || 'Please check and resubmit';
+
+  const messageBody =
+    `↩️ *REQUEST RETURNED FOR ACTION*\n\n` +
+    `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
+    `Your approval request has been returned for clarification or correction.\n\n` +
+    `📋 *Request No:* ${requestNo}\n` +
+    `📝 *Subject:* ${titleStr}\n` +
+    `🏢 *Outlet / Shop:* ${outletStr}\n` +
+    `💰 *Amount:* ${amountStr}\n` +
+    `✍️ *Returned by:* ${returner}\n` +
+    `📅 *Date:* ${dateStr}\n` +
+    `💬 *Remarks / Notes:* ${remarksText}\n\n` +
+    `Please review the remarks and update your request in the approval portal.`;
+
+  const templateBodyParams = [
+    request.requester_name || 'Staff Member', // {{1}}
+    requestNo,                                // {{2}}
+    titleStr,                                 // {{3}}
+    outletStr,                                // {{4}}
+    amountStr,                                // {{5}}
+    returner,                                 // {{6}}
+    dateStr,                                  // {{7}}
+    remarksText,                              // {{8}}
+  ];
+
+  const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
+  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
+
+  for (const target of targets) {
+    const res = await sendWhatsAppDirect({
+      to: target.phone,
+      text: messageBody,
+      config: cfg,
+      templateName: 'returned_notification',
+      templateLanguage: cfg.template_language || 'en',
+      templateBodyParams,
+    });
+
+    results.push({ recipient: target.phone, name: target.name, ok: res.success, error: res.error });
+
+    try {
+      await supabase.from('whatsapp_logs').insert({
+        request_id: request.id,
+        recipient_phone: target.phone,
+        recipient_name: target.name || null,
+        message_type: 'template',
+        status: res.success ? 'sent' : 'failed',
+        meta_message_id: res.messageId || null,
+        error_message: res.error || null,
+        details: { request_no: requestNo, remarks: remarksText, event: 'returned' },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { success: results.some((r) => r.ok), results };
+}
+
+/**
+ * Builds and dispatches the WhatsApp disbursement message for either:
+ * - Complete paid and close (payment_completed_notification)
+ * - Partial payment (partial_payment_notification)
+ */
+export async function sendPaymentDisbursedWhatsAppNotification(
+  request: RequestRecord,
+  disbursedAmount: number,
+  remainingBalance: number,
+  paymentMode?: string | null,
+  paymentRef?: string | null,
+  paymentDate?: string | null,
+  isFullyPaid: boolean = false,
+  config?: WhatsAppConfig,
+  extraRecipientPhone?: string
+): Promise<{
+  success: boolean;
+  results: { recipient: string; name?: string; ok: boolean; error?: string }[];
+}> {
+  const cfg = config || (await loadWhatsAppConfig(true));
+  if (!cfg.enabled) return { success: false, results: [] };
+
+  const approvalNo = request.approval_no || 'APPROVED';
+  const requestNo = request.request_no || 'REQ';
+  const titleStr = request.title || 'Official Request';
+  const outletStr = request.shop_name || 'All Outlets';
+  const modeStr = paymentMode || 'Bank Transfer';
+  const refStr = paymentRef?.trim() || 'Processed';
+  const dateStr =
+    paymentDate || new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
+  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
+
+  if (isFullyPaid) {
+    const totalAmountStr = formatINR(request.amount || (request.paid_amount || 0));
+    const messageBody =
+      `💵 *PAYMENT COMPLETED & CLOSED*\n\n` +
+      `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
+      `The final payment for your approved request has been processed and this request is now closed.\n\n` +
+      `📋 *Request No:* ${requestNo}\n` +
+      `🎉 *Approval No:* ${approvalNo}\n` +
+      `📝 *Subject:* ${titleStr}\n` +
+      `🏢 *Outlet / Shop:* ${outletStr}\n` +
+      `💰 *Total Amount:* ${totalAmountStr}\n` +
+      `💳 *Payment Mode:* ${modeStr}\n` +
+      `🔢 *Ref / UTR No:* ${refStr}\n` +
+      `📅 *Payment Date:* ${dateStr}\n\n` +
+      `All scheduled disbursements for this approval are complete.`;
+
+    const templateBodyParams = [
+      request.requester_name || 'Staff Member', // {{1}}
+      requestNo,                                // {{2}}
+      approvalNo,                               // {{3}}
+      titleStr,                                 // {{4}}
+      outletStr,                                // {{5}}
+      totalAmountStr,                           // {{6}}
+      modeStr,                                  // {{7}}
+      refStr,                                   // {{8}}
+      dateStr,                                  // {{9}}
+    ];
+
+    for (const target of targets) {
+      const res = await sendWhatsAppDirect({
+        to: target.phone,
+        text: messageBody,
+        config: cfg,
+        templateName: 'payment_completed_notification',
+        templateLanguage: cfg.template_language || 'en',
+        templateBodyParams,
+      });
+
+      results.push({ recipient: target.phone, name: target.name, ok: res.success, error: res.error });
+
+      try {
+        await supabase.from('whatsapp_logs').insert({
+          request_id: request.id,
+          recipient_phone: target.phone,
+          recipient_name: target.name || null,
+          message_type: 'template',
+          status: res.success ? 'sent' : 'failed',
+          meta_message_id: res.messageId || null,
+          error_message: res.error || null,
+          details: { approval_no: approvalNo, request_no: requestNo, event: 'fully_paid', ref: refStr },
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    // Partial payment
+    const disbursedStr = formatINR(disbursedAmount);
+    const balanceStr = formatINR(remainingBalance);
+    const messageBody =
+      `💳 *PARTIAL PAYMENT DISBURSED*\n\n` +
+      `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
+      `A partial payment has been disbursed for your approved request.\n\n` +
+      `📋 *Request No:* ${requestNo}\n` +
+      `🎉 *Approval No:* ${approvalNo}\n` +
+      `📝 *Subject:* ${titleStr}\n` +
+      `🏢 *Outlet / Shop:* ${outletStr}\n` +
+      `💵 *Disbursed Amount:* ${disbursedStr}\n` +
+      `📊 *Remaining Balance:* ${balanceStr}\n` +
+      `💳 *Payment Mode:* ${modeStr}\n` +
+      `🔢 *Ref / UTR No:* ${refStr}\n` +
+      `📅 *Payment Date:* ${dateStr}\n\n` +
+      `The remaining balance will be disbursed in subsequent instalments.`;
+
+    const templateBodyParams = [
+      request.requester_name || 'Staff Member', // {{1}}
+      requestNo,                                // {{2}}
+      approvalNo,                               // {{3}}
+      titleStr,                                 // {{4}}
+      outletStr,                                // {{5}}
+      disbursedStr,                             // {{6}}
+      balanceStr,                               // {{7}}
+      modeStr,                                  // {{8}}
+      refStr,                                   // {{9}}
+      dateStr,                                  // {{10}}
+    ];
+
+    for (const target of targets) {
+      const res = await sendWhatsAppDirect({
+        to: target.phone,
+        text: messageBody,
+        config: cfg,
+        templateName: 'partial_payment_notification',
+        templateLanguage: cfg.template_language || 'en',
+        templateBodyParams,
+      });
+
+      results.push({ recipient: target.phone, name: target.name, ok: res.success, error: res.error });
+
+      try {
+        await supabase.from('whatsapp_logs').insert({
+          request_id: request.id,
+          recipient_phone: target.phone,
+          recipient_name: target.name || null,
+          message_type: 'template',
+          status: res.success ? 'sent' : 'failed',
+          meta_message_id: res.messageId || null,
+          error_message: res.error || null,
+          details: {
+            approval_no: approvalNo,
+            request_no: requestNo,
+            disbursed: disbursedAmount,
+            remaining: remainingBalance,
+            event: 'partial_paid',
+          },
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  return { success: results.some((r) => r.ok), results };
+}
+
+/** Sends a test message using any specified Meta template (default: approval_notification) */
 export async function sendTestWhatsAppTemplate(
   toPhone: string,
+  templateKey: string = 'approval_notification',
   config?: WhatsAppConfig
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const cfg = config || (await loadWhatsAppConfig(true));
   const cleanTo = cleanWhatsAppNumber(toPhone);
   if (!cleanTo) return { success: false, error: 'Please enter a valid mobile number' };
 
-  const sampleParams = [
-    'Test Staff',
-    'REQ-2026-TEST',
-    'APR-2026-TEST',
-    'Test Approval Request',
-    'SWA Diamonds Calicut',
-    'Rs. 50,000.00',
-    'Managing Director',
-    new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-  ];
+  const spec = META_TEMPLATES[templateKey] || META_TEMPLATE_SPEC;
+  const sampleParams = spec.variables.map((v) => v.sample);
 
   return sendWhatsAppDirect({
     to: cleanTo,
-    templateName: cfg.template_name || 'approval_notification',
+    templateName: spec.name,
     templateLanguage: cfg.template_language || 'en',
     templateBodyParams: sampleParams,
     config: cfg,
