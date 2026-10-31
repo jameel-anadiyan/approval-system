@@ -2809,12 +2809,34 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               updated_at: new Date().toISOString(),
             })
             .eq('id', requestId);
-          if (directErr) throw rpcErr;
+          if (directErr) {
+            const isMissingSchema =
+              rpcErr.message?.includes('schema cache') ||
+              rpcErr.message?.includes('mark_bill_missing') ||
+              directErr.message?.includes('column "is_bill_missing"') ||
+              directErr.message?.includes('does not exist');
+            if (isMissingSchema) {
+              return {
+                success: false,
+                error:
+                  'Database migration required: Please run migration 0069 in your Supabase SQL Editor to create the bill missing columns & RPC function (see Section 9 in fix_request_bank_details.sql).',
+              };
+            }
+            throw rpcErr;
+          }
         }
         await loadRequests(true);
         return { success: true };
       } catch (err: unknown) {
-        return { success: false, error: errMsg(err) };
+        const msg = errMsg(err);
+        if (msg.includes('schema cache') || msg.includes('mark_bill_missing')) {
+          return {
+            success: false,
+            error:
+              'Database migration required: Please run migration 0069 in your Supabase SQL Editor to create the bill missing columns & RPC function (see Section 9 in fix_request_bank_details.sql).',
+          };
+        }
+        return { success: false, error: msg };
       }
     }
 

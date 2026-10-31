@@ -641,8 +641,8 @@ begin
 
   if me.role <> 'admin'
     and r.requester_id <> me.id
-    and coalesce(r.department_id, '') <> coalesce(me.department_id, '')
-    and coalesce(r.regional_head_id, '') <> me.id::text
+    and (r.department_id is null or r.department_id <> me.department_id)
+    and (r.regional_head_id is null or r.regional_head_id <> me.id)
   then
     raise exception 'Permission denied: You are not associated with this request to submit bills';
   end if;
