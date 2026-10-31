@@ -8,7 +8,11 @@ alter table public.profiles add column if not exists whatsapp_number text;
 -- Allow authenticated users to update whatsapp_number on profiles through RLS
 grant update (full_name, username, designation, whatsapp_number, updated_at) on public.profiles to authenticated;
 
--- 2. Enhanced update_user_details RPC with whatsapp_number support
+-- 2. Drop existing update_user_details function first to avoid PostgreSQL 42P13 default conflict
+drop function if exists public.update_user_details(uuid, text, text, text);
+drop function if exists public.update_user_details(uuid, text, text, text, text);
+
+-- 3. Enhanced update_user_details RPC with whatsapp_number support
 create or replace function public.update_user_details(
   p_user_id uuid,
   p_full_name text,
@@ -106,28 +110,10 @@ begin
   );
 end $$;
 
--- 4-parameter backwards compatibility overload
-create or replace function public.update_user_details(
-  p_user_id uuid,
-  p_full_name text,
-  p_username text,
-  p_designation text
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public, auth
-as $$
-begin
-  return public.update_user_details(p_user_id, p_full_name, p_username, p_designation, null);
-end $$;
-
 revoke execute on function public.update_user_details(uuid, text, text, text, text) from public, anon;
 grant execute on function public.update_user_details(uuid, text, text, text, text) to authenticated;
-revoke execute on function public.update_user_details(uuid, text, text, text) from public, anon;
-grant execute on function public.update_user_details(uuid, text, text, text) to authenticated;
 
--- 3. Default WhatsApp Cloud API configuration in app_settings
+-- 4. Default WhatsApp Cloud API configuration in app_settings
 insert into public.app_settings (key, value)
 values (
   'whatsapp_config',
@@ -147,7 +133,7 @@ values (
 on conflict (key) do update
 set value = excluded.value;
 
--- 4. WhatsApp notification delivery log table
+-- 5. WhatsApp notification delivery log table
 create table if not exists public.whatsapp_logs (
   id bigint generated always as identity primary key,
   request_id uuid references public.requests(id) on delete set null,
