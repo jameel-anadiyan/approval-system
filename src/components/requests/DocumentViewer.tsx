@@ -610,12 +610,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         ) : previewUrl && isPdf ? (
           <div
             style={{
-              minWidth: `${Math.max(760, multiplier * 820)}px`,
+              minWidth: multiplier > 1 ? `${multiplier * 100}%` : '100%',
               width: `${multiplier * 100}%`,
               height: multiplier > 1 ? `${multiplier * 100}%` : '100%',
               minHeight: '440px',
             }}
-            className="relative mx-auto flex flex-col items-stretch transition-all duration-150"
+            className="relative mx-auto flex flex-col items-stretch transition-all duration-150 w-full"
           >
             <iframe
               src={`${previewUrl}#toolbar=1&navpanes=0`}
@@ -633,11 +633,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         ) : previewUrl && isImage ? (
           <div
             style={{
-              minWidth: `${Math.max(520, multiplier * 650)}px`,
+              minWidth: multiplier > 1 ? `${multiplier * 100}%` : '100%',
               width: `${multiplier * 100}%`,
               minHeight: '100%',
             }}
-            className="relative mx-auto flex items-center justify-center p-2 transition-all duration-150"
+            className="relative mx-auto flex items-center justify-center p-2 transition-all duration-150 w-full"
             onMouseMove={handleMouseMove}
           >
             <img

@@ -377,7 +377,7 @@ export interface RequestRecord {
   bank_verification_message?: string | null;
 }
 
-export type DisbursementEntryStatus = 'pending' | 'pending_approval' | 'approved' | 'rejected' | 'paid' | 'cancelled';
+export type DisbursementEntryStatus = 'pending' | 'pending_approval' | 'approved' | 'rejected' | 'paid' | 'cancelled' | 'on_hold';
 
 export interface DisbursementEntry {
   id: string;
@@ -398,6 +398,10 @@ export interface DisbursementEntry {
   rejected_by?: string | null;
   rejected_by_name?: string | null;
   rejection_reason?: string | null;
+  held_at?: string | null;
+  held_by?: string | null;
+  held_by_name?: string | null;
+  hold_reason?: string | null;
   paid_at?: string | null;
   paid_by?: string | null;
   paid_by_name?: string | null;

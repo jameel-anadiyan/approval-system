@@ -36,6 +36,8 @@ import {
   Percent,
   UserCheck,
   Eye,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 
@@ -78,17 +80,27 @@ function matchesEntryAccount(
 
 export const EntryApprovalsPage: React.FC = () => {
   const { isBackendConnected } = useAuth();
-  const { requests, refreshRequests, approveDisbursementEntry, approveMultipleDisbursementEntries, rejectDisbursementEntry } = useRequests();
+  const {
+    requests,
+    refreshRequests,
+    approveDisbursementEntry,
+    approveMultipleDisbursementEntries,
+    rejectDisbursementEntry,
+    holdDisbursementEntry,
+    unholdDisbursementEntry,
+  } = useRequests();
   const { users } = useDirectory();
 
   const [extraOfficers, setExtraOfficers] = useState<Profile[]>([]);
   const [directEntries, setDirectEntries] = useState<DisbursementEntry[]>([]);
   const [directRequests, setDirectRequests] = useState<Map<string, RequestRecord>>(new Map());
   const [isDirectLoading, setIsDirectLoading] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'on_hold' | 'approved' | 'rejected'>('pending');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rejectTarget, setRejectTarget] = useState<EntryWithRequest | null>(null);
   const [rejectReason, setRejectReason] = useState<string>('');
+  const [holdTarget, setHoldTarget] = useState<EntryWithRequest | null>(null);
+  const [holdReason, setHoldReason] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [partialTarget, setPartialTarget] = useState<EntryWithRequest | null>(null);
   const [partialStr, setPartialStr] = useState<string>('');
@@ -292,10 +304,16 @@ export const EntryApprovalsPage: React.FC = () => {
     () =>
       accountEntries.filter(
         (item) =>
-          item.entry.status === 'pending_approval' ||
-          item.entry.status === 'pending' ||
-          isPartialInProgress(item.entry)
+          item.entry.status !== 'on_hold' &&
+          (item.entry.status === 'pending_approval' ||
+            item.entry.status === 'pending' ||
+            isPartialInProgress(item.entry))
       ),
+    [accountEntries]
+  );
+
+  const onHoldQueue = useMemo(
+    () => accountEntries.filter((item) => item.entry.status === 'on_hold'),
     [accountEntries]
   );
 
@@ -310,7 +328,13 @@ export const EntryApprovalsPage: React.FC = () => {
   );
 
   const currentQueue =
-    activeTab === 'pending' ? pendingQueue : activeTab === 'approved' ? approvedQueue : rejectedQueue;
+    activeTab === 'pending'
+      ? pendingQueue
+      : activeTab === 'on_hold'
+      ? onHoldQueue
+      : activeTab === 'approved'
+      ? approvedQueue
+      : rejectedQueue;
 
   // Filtered by search and cash/bank mode
   const filteredList = useMemo(() => {
@@ -473,6 +497,49 @@ export const EntryApprovalsPage: React.FC = () => {
     }
   };
 
+  const handleHoldSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!holdTarget || !holdReason.trim()) return;
+
+    setIsProcessing(true);
+    setNotice(null);
+    try {
+      const res = await holdDisbursementEntry(holdTarget.entry.id, holdReason.trim());
+      if (!res.success) throw new Error(res.error || 'Failed to place on hold');
+      loadDirectEntries();
+      setNotice({
+        type: 'success',
+        message: `Entry #${holdTarget.entry.entry_no} placed on hold and moved to 'On Hold' list.`,
+      });
+      selectedIds.delete(holdTarget.entry.id);
+      setSelectedIds(new Set(selectedIds));
+      setHoldTarget(null);
+      setHoldReason('');
+    } catch (err: unknown) {
+      setNotice({ type: 'error', message: errMsg(err) });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleUnhold = async (entryId: string, entryNo: number) => {
+    setIsProcessing(true);
+    setNotice(null);
+    try {
+      const res = await unholdDisbursementEntry(entryId);
+      if (!res.success) throw new Error(res.error || 'Failed to unhold entry');
+      loadDirectEntries();
+      setNotice({
+        type: 'success',
+        message: `Entry #${entryNo} has been taken off hold and returned to Pending Approvals.`,
+      });
+    } catch (err: unknown) {
+      setNotice({ type: 'error', message: errMsg(err) });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Metrics
   const pendingTotalAmount = pendingQueue.reduce((s, item) => s + entryOutstanding(item.entry), 0);
   const pendingCashCount = pendingQueue.filter((item) => item.entry.entry_type === 'cash').length;
@@ -627,6 +694,29 @@ export const EntryApprovalsPage: React.FC = () => {
             }`}
           >
             {pendingQueue.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('on_hold');
+            setSelectedIds(new Set());
+          }}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeTab === 'on_hold'
+              ? 'bg-amber-500 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <PauseCircle className="w-3.5 h-3.5" />
+          <span>On Hold</span>
+          <span
+            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+              activeTab === 'on_hold' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {onHoldQueue.length}
           </span>
         </button>
 
@@ -879,21 +969,49 @@ export const EntryApprovalsPage: React.FC = () => {
       {filteredList.length === 0 ? (
         <div className="space-y-3">
           <EmptyState
-            icon={activeTab === 'pending' ? CheckCircle2 : activeTab === 'approved' ? ShieldCheck : XCircle}
+            icon={
+              activeTab === 'pending'
+                ? CheckCircle2
+                : activeTab === 'on_hold'
+                ? PauseCircle
+                : activeTab === 'approved'
+                ? ShieldCheck
+                : XCircle
+            }
             title={
               entryAccountFilter !== 'all'
-                ? `No ${activeTab === 'pending' ? 'Pending' : activeTab === 'approved' ? 'Approved' : 'Returned'} Entries for ${selectedAccountName}`
+                ? `No ${
+                    activeTab === 'pending'
+                      ? 'Pending'
+                      : activeTab === 'on_hold'
+                      ? 'On Hold'
+                      : activeTab === 'approved'
+                      ? 'Approved'
+                      : 'Returned'
+                  } Entries for ${selectedAccountName}`
                 : activeTab === 'pending'
                 ? 'No Entries Awaiting Approval'
+                : activeTab === 'on_hold'
+                ? 'No Entries On Hold'
                 : activeTab === 'approved'
                 ? 'No Approved Entries Found'
                 : 'No Returned Entries'
             }
             description={
               entryAccountFilter !== 'all'
-                ? `There are no ${activeTab === 'pending' ? 'pending' : activeTab === 'approved' ? 'approved' : 'returned'} disbursement entries for ${selectedAccountName}${modeFilter !== 'all' ? ` in ${modeFilter} mode` : ''}.`
+                ? `There are no ${
+                    activeTab === 'pending'
+                      ? 'pending'
+                      : activeTab === 'on_hold'
+                      ? 'on hold'
+                      : activeTab === 'approved'
+                      ? 'approved'
+                      : 'returned'
+                  } disbursement entries for ${selectedAccountName}${modeFilter !== 'all' ? ` in ${modeFilter} mode` : ''}.`
                 : activeTab === 'pending'
                 ? 'All disbursement entries created by entry officers have been reviewed.'
+                : activeTab === 'on_hold'
+                ? 'Entries placed on hold for verification or missing details will appear here.'
                 : 'Entries that have been approved or paid will be listed in this audit record.'
             }
           />
@@ -1125,6 +1243,34 @@ export const EntryApprovalsPage: React.FC = () => {
                   </div>
                 )}
 
+                {/* Hold reason banner */}
+                {entry.status === 'on_hold' && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold flex items-center gap-1.5 text-amber-900">
+                        <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Placed on Hold</span>
+                      </span>
+                      {entry.held_at && (
+                        <span className="text-[10px] font-mono text-amber-700">
+                          {formatISTDate(entry.held_at)}
+                        </span>
+                      )}
+                    </div>
+                    {entry.held_by_name && (
+                      <span className="text-[11px] text-amber-800">
+                        Held by: <strong>{entry.held_by_name}</strong>
+                      </span>
+                    )}
+                    {entry.hold_reason && (
+                      <div className="mt-1 p-2 rounded-lg bg-white/80 border border-amber-200/80 text-amber-900">
+                        <span className="font-bold">Hold Note: </span>
+                        <span>{entry.hold_reason}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Rejection reason (if returned) */}
                 {entry.status === 'rejected' && entry.rejection_reason && (
                   <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900">
@@ -1236,6 +1382,20 @@ export const EntryApprovalsPage: React.FC = () => {
                     <button
                       type="button"
                       disabled={isProcessing}
+                      onClick={() => {
+                        setHoldTarget({ entry, request });
+                        setHoldReason('');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs transition-colors cursor-pointer disabled:opacity-40"
+                      title="Place this entry on hold with a note"
+                    >
+                      <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Hold</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isProcessing}
                       onClick={() => openPartial({ entry, request })}
                       className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-800 font-bold text-xs transition-colors cursor-pointer"
                     >
@@ -1251,6 +1411,24 @@ export const EntryApprovalsPage: React.FC = () => {
                     >
                       <Check className="w-3.5 h-3.5" />
                       <span>Approve Full #{entry.entry_no} ({formatINR(outstanding)})</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Actions for On Hold entries */}
+                {entry.status === 'on_hold' && (
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <span className="mr-auto text-xs text-amber-800 font-medium">
+                      This entry is on hold and will not proceed to payment until unheld.
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isProcessing}
+                      onClick={() => handleUnhold(entry.id, entry.entry_no)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95"
+                    >
+                      <PlayCircle className="w-3.5 h-3.5" />
+                      <span>Unhold &amp; Return to Pending</span>
                     </button>
                   </div>
                 )}
@@ -1421,6 +1599,75 @@ export const EntryApprovalsPage: React.FC = () => {
               >
                 <XCircle className="w-3.5 h-3.5" />
                 <span>{isProcessing ? 'Returning…' : 'Return for Correction'}</span>
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Hold Modal */}
+      {holdTarget && (
+        <Modal
+          isOpen={true}
+          onClose={() => setHoldTarget(null)}
+          title={`Place Entry #${holdTarget.entry.entry_no} on Hold`}
+          description={`Request ${holdTarget.request.approval_no || holdTarget.request.request_no} · ${holdTarget.request.requester_name}`}
+          maxWidth="md"
+        >
+          <form onSubmit={handleHoldSubmit} className="space-y-4">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span>Entry Amount:</span>
+                <span className="font-bold text-slate-900">{formatINR(entryOutstanding(holdTarget.entry))}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Payment Mode:</span>
+                <span className="font-bold uppercase text-slate-900">{holdTarget.entry.entry_type}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Requester Name:</span>
+                <span className="font-bold text-slate-900">{holdTarget.request.requester_name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Entered by:</span>
+                <span>{holdTarget.entry.created_by_person_name || holdTarget.entry.created_by_name || 'Entry Officer'}</span>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="hold-reason" className="text-xs font-bold text-slate-700 block mb-1">
+                Reason for Placing on Hold <span className="text-amber-500">*</span>
+              </label>
+              <textarea
+                id="hold-reason"
+                required
+                rows={3}
+                value={holdReason}
+                onChange={(e) => setHoldReason(e.target.value)}
+                placeholder="Explain why this entry is being placed on hold (e.g. Awaiting supporting invoice, verifying with vendor, waiting for clarification)…"
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden bg-white"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                This entry will be moved out of Pending Approvals and kept in the 'On Hold' list. You can unhold it at any time to return it back to Pending.
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setHoldTarget(null)}
+                disabled={isProcessing}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isProcessing || !holdReason.trim()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <PauseCircle className="w-3.5 h-3.5" />
+                <span>{isProcessing ? 'Placing on Hold…' : 'Place on Hold'}</span>
               </button>
             </div>
           </form>

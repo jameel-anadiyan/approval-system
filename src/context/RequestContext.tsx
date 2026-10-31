@@ -149,6 +149,8 @@ interface RequestContextType {
   approveDisbursementEntry: (entryId: string, remarks?: string, approvedAmount?: number) => Promise<{ success: boolean; error?: string }>;
   approveMultipleDisbursementEntries: (entryIds: string[]) => Promise<{ success: boolean; approved_count?: number; error?: string }>;
   rejectDisbursementEntry: (entryId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  holdDisbursementEntry: (entryId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  unholdDisbursementEntry: (entryId: string, notes?: string) => Promise<{ success: boolean; error?: string }>;
   editRejectedDisbursementEntry: (
     entryId: string,
     amount: number,
@@ -2188,6 +2190,117 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const holdDisbursementEntry = async (
+    entryId: string,
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const rsn = reason.trim();
+    if (!rsn) return { success: false, error: 'Please enter a reason for placing on hold' };
+
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('hold_disbursement_entry', {
+          p_entry_id: entryId,
+          p_reason: rsn,
+        });
+        if (error) {
+          const { error: directErr } = await supabase
+            .from('disbursement_entries')
+            .update({
+              status: 'on_hold',
+              held_at: new Date().toISOString(),
+              held_by: user.id,
+              held_by_name: user.full_name,
+              hold_reason: rsn,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', entryId);
+          if (directErr) throw error;
+        }
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    const now = new Date().toISOString();
+    updateLocalRequests((prev) =>
+      prev.map((r) => ({
+        ...r,
+        disbursement_entries: (r.disbursement_entries || []).map((e) =>
+          e.id === entryId
+            ? {
+                ...e,
+                status: 'on_hold',
+                held_by: user.id,
+                held_by_name: user.full_name,
+                held_at: now,
+                hold_reason: rsn,
+              }
+            : e
+        ),
+      }))
+    );
+    return { success: true };
+  };
+
+  const unholdDisbursementEntry = async (
+    entryId: string,
+    notes?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+
+    if (isBackendConnected) {
+      try {
+        const { error } = await supabase.rpc('unhold_disbursement_entry', {
+          p_entry_id: entryId,
+          p_notes: notes || null,
+        });
+        if (error) {
+          const { error: directErr } = await supabase
+            .from('disbursement_entries')
+            .update({
+              status: 'pending_approval',
+              held_at: null,
+              held_by: null,
+              held_by_name: null,
+              hold_reason: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', entryId);
+          if (directErr) throw error;
+        }
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    // Mock
+    updateLocalRequests((prev) =>
+      prev.map((r) => ({
+        ...r,
+        disbursement_entries: (r.disbursement_entries || []).map((e) =>
+          e.id === entryId
+            ? {
+                ...e,
+                status: 'pending_approval',
+                held_by: null,
+                held_by_name: null,
+                held_at: null,
+                hold_reason: null,
+              }
+            : e
+        ),
+      }))
+    );
+    return { success: true };
+  };
+
   const editRejectedDisbursementEntry = async (
     entryId: string,
     amount: number,
@@ -3177,6 +3290,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         approveDisbursementEntry,
         approveMultipleDisbursementEntries,
         rejectDisbursementEntry,
+        holdDisbursementEntry,
+        unholdDisbursementEntry,
         editRejectedDisbursementEntry,
         payDisbursementEntry,
         assignDisbursementEntryUser,

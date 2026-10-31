@@ -281,11 +281,11 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                   {isPdf && previewUrl ? (
                     <div
                       style={{
-                        minWidth: `${Math.max(680, inlineMultiplier * 720)}px`,
+                        minWidth: inlineMultiplier > 1 ? `${inlineMultiplier * 100}%` : '100%',
                         width: `${inlineMultiplier * 100}%`,
                         height: inlineMultiplier > 1 ? `${inlineMultiplier * 100}%` : '100%',
                       }}
-                      className="relative transition-all duration-150"
+                      className="relative transition-all duration-150 w-full"
                     >
                       <iframe
                         src={`${previewUrl}#toolbar=1&navpanes=0`}
@@ -303,11 +303,11 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                   ) : previewUrl ? (
                     <div
                       style={{
-                        minWidth: `${Math.max(480, inlineMultiplier * 550)}px`,
+                        minWidth: inlineMultiplier > 1 ? `${inlineMultiplier * 100}%` : '100%',
                         width: `${inlineMultiplier * 100}%`,
                         minHeight: '100%',
                       }}
-                      className="relative flex items-center justify-center p-2 transition-all duration-150"
+                      className="relative flex items-center justify-center p-2 transition-all duration-150 w-full"
                       onMouseMove={handleMouseMove}
                     >
                       <img

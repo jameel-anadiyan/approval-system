@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Document, Page, pdfjs } from 'react-pdf';
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
+
 import { useAuth } from '../../context/AuthContext';
 import { useSignedUrl, downloadStoredFile, Bucket } from '../../lib/files';
 import { formatFileSize } from '../../lib/formatters';
@@ -11,13 +18,14 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
-  ZoomIn,
-  ZoomOut,
   RotateCcw,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Trash2,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { ZoomMultiplierControls, useDocumentMouseFollow } from './ZoomMultiplierControls';
 
@@ -44,6 +52,309 @@ interface DocumentPreviewModalProps {
   canDelete?: boolean;
 }
 
+interface SingleDocViewerProps {
+  file: DocumentPreviewItem;
+  index: number;
+  total: number;
+  multiplier: number;
+  containerWidth: number;
+  isBackendConnected: boolean;
+  onDeleteFile?: (file: DocumentPreviewItem) => Promise<boolean | void> | boolean | void;
+  canDelete?: boolean;
+  docRef: (el: HTMLDivElement | null) => void;
+  approvalNo?: string | null;
+}
+
+const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
+  file,
+  index,
+  total,
+  multiplier,
+  containerWidth,
+  isBackendConnected,
+  onDeleteFile,
+  canDelete = false,
+  docRef,
+  approvalNo,
+}) => {
+  const bucket: Bucket = file.bucket || 'request-files';
+  const signed = useSignedUrl(bucket, file.storagePath || null, isBackendConnected);
+
+  const resolvedUrl =
+    file.publicUrl &&
+    (file.publicUrl.startsWith('blob:') ||
+      file.publicUrl.startsWith('http') ||
+      file.publicUrl.startsWith('data:'))
+      ? file.publicUrl
+      : isBackendConnected
+      ? signed.url
+      : file.publicUrl || null;
+
+  const fileName = file.name || `Document #${index + 1}`;
+  const isPdf =
+    (file.mimeType && file.mimeType.includes('pdf')) ||
+    fileName.toLowerCase().endsWith('.pdf');
+  const isImage =
+    (file.mimeType &&
+      (file.mimeType.includes('image') ||
+        file.mimeType.includes('jpeg') ||
+        file.mimeType.includes('png') ||
+        file.mimeType.includes('webp'))) ||
+    fileName.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/i);
+
+  const [numPages, setNumPages] = useState<number | null>(file.pageCount || null);
+  const [pdfError, setPdfError] = useState<boolean>(false);
+  const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      if (file.storagePath) {
+        await downloadStoredFile(bucket, file.storagePath, fileName);
+      } else if (resolvedUrl) {
+        const a = document.createElement('a');
+        a.href = resolvedUrl;
+        a.download = fileName;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!onDeleteFile) return;
+    if (!window.confirm(`Delete "${fileName}"? This will remove this attachment.`)) return;
+    setDeleting(true);
+    try {
+      await onDeleteFile(file);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Responsive page width: fits mobile viewport or desktop max, scaled by zoom multiplier
+  const isMobile = containerWidth < 640;
+  const baseTargetWidth = isMobile
+    ? Math.max(260, containerWidth - 28)
+    : Math.max(340, Math.min(containerWidth - 64, 880));
+  const pageWidth = Math.round(baseTargetWidth * multiplier);
+
+  return (
+    <div
+      ref={docRef}
+      id={`doc-preview-${index}`}
+      className="scroll-mt-4 mb-8 flex flex-col items-center w-full"
+    >
+      {/* Document Section Header Card */}
+      <div className="w-full max-w-4xl bg-slate-900/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 mb-3 flex flex-wrap items-center justify-between gap-2.5 shadow-md">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+              approvalNo && index === 0
+                ? 'bg-emerald-600/30 text-emerald-400 border-emerald-500/40'
+                : isPdf
+                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                : 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+            }`}
+          >
+            {approvalNo && index === 0 ? (
+              <FileCheck className="w-4 h-4" />
+            ) : isPdf ? (
+              <FileText className="w-4 h-4" />
+            ) : (
+              <ImageIcon className="w-4 h-4" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs sm:text-sm font-bold text-slate-100 truncate max-w-[200px] sm:max-w-md">
+                {total > 1 && (
+                  <span className="text-indigo-400 mr-1.5 font-mono">
+                    Doc #{index + 1}:
+                  </span>
+                )}
+                {fileName}
+              </span>
+              {file.badge && (
+                <span className="text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-1.5 py-0.2 rounded shrink-0">
+                  {file.badge}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+              {file.sizeBytes && <span>{formatFileSize(file.sizeBytes)}</span>}
+              {numPages ? <span>• {numPages} {numPages === 1 ? 'page' : 'pages'}</span> : null}
+              {total > 1 && (
+                <span className="text-slate-500 hidden sm:inline">
+                  • Document {index + 1} of {total}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Action icons for this specific document */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {resolvedUrl && (
+            <a
+              href={resolvedUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors inline-flex items-center gap-1 text-xs"
+              title="Open document in new tab"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Open</span>
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading || (!resolvedUrl && !file.storagePath)}
+            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500 transition-colors inline-flex items-center gap-1 text-xs font-semibold disabled:opacity-50 cursor-pointer"
+            title="Download document"
+          >
+            {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">Download</span>
+          </button>
+          {(onDeleteFile || canDelete) && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="p-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white border border-rose-500 transition-colors inline-flex items-center text-xs disabled:opacity-50 cursor-pointer"
+              title="Delete document"
+            >
+              {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Render Document Content */}
+      <div className="w-full flex flex-col items-center">
+        {signed.loading ? (
+          <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400">
+            <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
+            <span className="text-xs">Loading document…</span>
+          </div>
+        ) : !resolvedUrl && !file.storagePath ? (
+          <div className="py-12 text-center text-slate-400">
+            <FileText className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+            <p className="text-xs font-semibold">Preview not available</p>
+            <p className="text-[11px] text-slate-500 mt-1">Please use the download button to view this file.</p>
+          </div>
+        ) : isPdf && resolvedUrl ? (
+          <div className="w-full flex flex-col items-center">
+            {!pdfError ? (
+              <Document
+                file={resolvedUrl}
+                onLoadSuccess={({ numPages: n }) => {
+                  setNumPages(n);
+                  setPdfError(false);
+                }}
+                onLoadError={(err) => {
+                  console.warn('react-pdf render error, falling back to native frame:', err);
+                  setPdfError(true);
+                }}
+                loading={
+                  <div className="py-14 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                    <span className="text-xs">Rendering PDF pages…</span>
+                  </div>
+                }
+                error={
+                  <div className="py-8 text-center text-xs text-rose-300">
+                    Could not render pages via canvas. Using standard viewer below…
+                  </div>
+                }
+                className="w-full flex flex-col items-center"
+              >
+                {Array.from({ length: numPages || 1 }, (_, pIdx) => (
+                  <div
+                    key={pIdx + 1}
+                    className="my-2.5 sm:my-3.5 flex flex-col items-center w-full"
+                  >
+                    <div className="max-w-full overflow-x-auto flex justify-center">
+                      <Page
+                        pageNumber={pIdx + 1}
+                        width={pageWidth}
+                        renderTextLayer={false}
+                        renderAnnotationLayer={false}
+                        className="shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white"
+                        loading={
+                          <div
+                            style={{ width: pageWidth, height: Math.round(pageWidth * 1.35) }}
+                            className="bg-slate-900 border border-slate-800 rounded-lg flex items-center justify-center text-slate-500 text-xs"
+                          >
+                            <Loader2 className="w-5 h-5 animate-spin mr-2 text-indigo-400" />
+                            <span>Page {pIdx + 1}…</span>
+                          </div>
+                        }
+                      />
+                    </div>
+                    {(numPages || 1) > 1 && (
+                      <span className="text-[10px] font-mono text-slate-400 mt-1 bg-slate-900/90 px-2 py-0.5 rounded border border-slate-800">
+                        Page {pIdx + 1} of {numPages}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </Document>
+            ) : (
+              /* Fallback if PDF canvas fails (e.g. strict CORS or unsupported compression) */
+              <div className="w-full max-w-4xl p-2 flex flex-col items-center">
+                <iframe
+                  src={`${resolvedUrl}#toolbar=1&navpanes=0`}
+                  title={fileName}
+                  className="w-full h-[600px] sm:h-[800px] rounded-xl border border-slate-800 bg-white shadow-xl"
+                />
+              </div>
+            )}
+          </div>
+        ) : isImage && resolvedUrl ? (
+          <div className="w-full flex justify-center p-2">
+            <img
+              src={resolvedUrl}
+              alt={fileName}
+              style={{
+                width: multiplier > 1 ? `${pageWidth}px` : 'auto',
+                maxWidth: multiplier > 1 ? undefined : '100%',
+              }}
+              className="max-h-[85vh] rounded-xl shadow-2xl object-contain border border-slate-800 mx-auto"
+            />
+          </div>
+        ) : (
+          <div className="py-12 text-center text-slate-400">
+            <FileText className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+            <p className="text-xs font-semibold">{fileName}</p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Direct preview is not available for this format. Please download the file to inspect it.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Automatic Next Document Indicator Divider */}
+      {index < total - 1 && (
+        <div className="w-full max-w-3xl my-8 flex items-center justify-center gap-3 select-none">
+          <div className="h-px bg-slate-800 flex-1" />
+          <span className="text-[11px] font-semibold text-slate-400 bg-slate-900 px-3.5 py-1.5 rounded-full border border-slate-800 flex items-center gap-1.5 shadow-sm">
+            <span>Scroll down for Doc #{index + 2}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-indigo-400 animate-bounce" />
+          </span>
+          <div className="h-px bg-slate-800 flex-1" />
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   isOpen,
   onClose,
@@ -58,104 +369,85 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [multiplier, setMultiplier] = useState(1);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const docRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [containerWidth, setContainerWidth] = useState<number>(
+    typeof window !== 'undefined' ? window.innerWidth : 800
+  );
 
   const {
-    containerRef: canvasRef,
     mouseFollowEnabled,
     setMouseFollowEnabled,
     handleMouseMove,
   } = useDocumentMouseFollow({ multiplier });
 
-  // Sync activeIndex whenever modal opens or initialIndex changes
+  // Measure scroll container width accurately for responsive rendering
+  useEffect(() => {
+    if (!isOpen) return;
+    const updateSize = () => {
+      if (scrollContainerRef.current) {
+        setContainerWidth(scrollContainerRef.current.clientWidth);
+      } else {
+        setContainerWidth(window.innerWidth);
+      }
+    };
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, [isOpen]);
+
+  // Jump to initialIndex when opened
   useEffect(() => {
     if (isOpen) {
       setActiveIndex(Math.max(0, Math.min(initialIndex, files.length - 1)));
       setMultiplier(1);
+      if (initialIndex > 0 && initialIndex < files.length) {
+        setTimeout(() => {
+          docRefs.current[initialIndex]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 200);
+      }
     }
   }, [isOpen, initialIndex, files.length]);
 
-  const current = files[activeIndex] || files[0];
-  const bucket: Bucket = current?.bucket || 'request-files';
-  const signed = useSignedUrl(bucket, current?.storagePath || null, isBackendConnected);
+  // Track active document during continuous scrolling
+  useEffect(() => {
+    if (!isOpen || files.length <= 1) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
 
-  // URL resolution priority:
-  // 1. Direct public/blob URL if provided
-  // 2. Resolved signed URL (Supabase or blob/data)
-  // 3. Fallback to storagePath if it starts with blob:/http
-  const resolvedUrl =
-    (current?.publicUrl && (current.publicUrl.startsWith('blob:') || current.publicUrl.startsWith('http') || current.publicUrl.startsWith('data:')))
-      ? current.publicUrl
-      : isBackendConnected
-      ? signed.url
-      : current?.publicUrl || null;
+    const handleScroll = () => {
+      const containerTop = container.getBoundingClientRect().top;
+      let closestIdx = 0;
+      let minDistance = Infinity;
 
-  const fileName = current?.name || 'document';
-  const isPdf =
-    (current?.mimeType && current.mimeType.includes('pdf')) ||
-    fileName.toLowerCase().endsWith('.pdf');
-  const isImage =
-    (current?.mimeType && (current.mimeType.includes('image') || current.mimeType.includes('jpeg') || current.mimeType.includes('png'))) ||
-    fileName.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/i);
-
-  const handleDownload = async () => {
-    if (!current) return;
-    setDownloading(true);
-    if (current.storagePath) {
-      await downloadStoredFile(bucket, current.storagePath, fileName);
-    } else if (resolvedUrl) {
-      const a = document.createElement('a');
-      a.href = resolvedUrl;
-      a.download = fileName;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }
-    setDownloading(false);
-  };
-
-  const handleDeleteDoc = async () => {
-    if (!current || !onDeleteFile) return;
-    if (!window.confirm(`Delete "${fileName}"? This will remove this attachment.`)) return;
-    setDeleting(true);
-    try {
-      const res = await onDeleteFile(current);
-      if (res !== false) {
-        if (files.length <= 1) {
-          onClose();
-        } else {
-          setActiveIndex((prev) => Math.max(0, Math.min(prev, files.length - 2)));
+      docRefs.current.forEach((el, idx) => {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const dist = Math.abs(rect.top - containerTop);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestIdx = idx;
         }
-      }
-    } finally {
-      setDeleting(false);
-    }
+      });
+
+      setActiveIndex(closestIdx);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [isOpen, files.length]);
+
+  const scrollToDoc = (idx: number) => {
+    setActiveIndex(idx);
+    docRefs.current[idx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const handlePrevDoc = useCallback(() => {
-    if (files.length <= 1) return;
-    setActiveIndex((prev) => (prev > 0 ? prev - 1 : files.length - 1));
-    setMultiplier(1);
-  }, [files.length]);
-
-  const handleNextDoc = useCallback(() => {
-    if (files.length <= 1) return;
-    setActiveIndex((prev) => (prev < files.length - 1 ? prev + 1 : 0));
-    setMultiplier(1);
-  }, [files.length]);
-
-  // Keyboard navigation: Escape to close, Arrows to navigate documents, 1-5 for zoom multipliers
+  // Keyboard navigation: Escape to close, 1-5 for zoom multipliers
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
-      } else if (e.key === 'ArrowLeft' && files.length > 1) {
-        handlePrevDoc();
-      } else if (e.key === 'ArrowRight' && files.length > 1) {
-        handleNextDoc();
       } else if (['1', '2', '3', '4', '5'].includes(e.key)) {
         setMultiplier(parseInt(e.key, 10));
       } else if (e.key === '+' || e.key === '=') {
@@ -166,101 +458,104 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, files.length, handlePrevDoc, handleNextDoc, onClose]);
+  }, [isOpen, onClose]);
 
-  if (!isOpen || !current) return null;
+  if (!isOpen || files.length === 0) return null;
+
+  const currentFile = files[activeIndex] || files[0];
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={title || fileName}
-      className={`fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs transition-all ${
-        isFullScreen ? 'p-0' : ''
+      aria-label={title || currentFile?.name || 'Document Preview'}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xs transition-all ${
+        isFullScreen ? 'p-0' : 'p-0 sm:p-3 md:p-4'
       }`}
     >
       <div
-        className={`bg-slate-900 rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-700/80 transition-all ${
-          isFullScreen ? 'w-full h-full rounded-none' : 'w-full max-w-6xl h-[92vh]'
+        className={`bg-slate-950 flex flex-col overflow-hidden border border-slate-800 transition-all ${
+          isFullScreen
+            ? 'w-full h-full rounded-none'
+            : 'w-full h-[100dvh] sm:h-[94vh] sm:max-w-6xl sm:rounded-2xl shadow-2xl'
         }`}
       >
         {/* Top Header Bar */}
-        <div className="bg-slate-900 border-b border-slate-800 text-white px-3 sm:px-5 py-3 flex items-center justify-between gap-3 shrink-0">
-          {/* File Information & Icon */}
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div className="bg-slate-900 border-b border-slate-800 text-white px-3 sm:px-5 py-2.5 sm:py-3 flex items-center justify-between gap-2.5 shrink-0">
+          {/* Header Title & Document Count */}
+          <div className="flex items-center gap-2 min-w-0">
             <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
                 approvalNo
                   ? 'bg-emerald-600/30 text-emerald-400 border-emerald-500/40'
-                  : isPdf
-                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
                   : 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
               }`}
             >
-              {approvalNo ? (
-                <FileCheck className="w-4 h-4" />
-              ) : isPdf ? (
-                <FileText className="w-4 h-4" />
-              ) : (
-                <ImageIcon className="w-4 h-4" />
-              )}
+              {approvalNo ? <FileCheck className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
             </div>
 
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-xs sm:text-sm font-bold text-slate-100 truncate" title={fileName}>
-                  {fileName}
+                <h3 className="text-xs sm:text-sm font-bold text-slate-100 truncate" title={currentFile?.name}>
+                  {title || currentFile?.name}
                 </h3>
                 {approvalNo && (
-                  <span className="text-[10px] font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-700 px-1.5 py-0.5 rounded-md shrink-0">
+                  <span className="text-[10px] font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-700 px-1.5 py-0.2 rounded shrink-0">
                     {approvalNo}
-                  </span>
-                )}
-                {current.badge && (
-                  <span className="text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 px-1.5 py-0.5 rounded-md shrink-0">
-                    {current.badge}
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                {current.sizeBytes && <span>{formatFileSize(current.sizeBytes)}</span>}
-                {current.pageCount && <span>• {current.pageCount} pg</span>}
-                <span>
-                  {approvalNo
-                    ? '• Official Stamped Packet'
-                    : '• Original Review Document'}
-                </span>
-                {files.length > 1 && (
+                {files.length > 1 ? (
                   <span className="text-indigo-400 font-semibold">
-                    ({activeIndex + 1} of {files.length})
+                    Document {activeIndex + 1} of {files.length} • Scroll down for all
                   </span>
+                ) : (
+                  <span>Official Document Preview</span>
                 )}
               </div>
             </div>
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Top Multiplier Zoom Buttons (1x, 2x, 3x, 4x, 5x) */}
-            <div className="hidden sm:flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5">
-              <span className="text-[10px] font-bold text-slate-400 px-1.5 hidden md:inline">
-                Zoom:
-              </span>
-              {[1, 2, 3, 4, 5].map((m) => (
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Zoom Multipliers */}
+            <div className="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5">
+              <button
+                type="button"
+                onClick={() => setMultiplier((m) => Math.max(1, m - 0.5))}
+                disabled={multiplier <= 1}
+                className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40"
+                title="Zoom Out (-)"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+
+              {[1, 2, 3].map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => setMultiplier(m)}
-                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold font-mono transition-colors cursor-pointer ${
+                  className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold font-mono transition-colors cursor-pointer ${
                     multiplier === m
                       ? 'bg-indigo-600 text-white shadow-xs'
                       : 'text-slate-300 hover:text-white hover:bg-slate-700'
                   }`}
-                  title={`Zoom ${m}x`}
                 >
                   {m}x
                 </button>
               ))}
+
+              <button
+                type="button"
+                onClick={() => setMultiplier((m) => Math.min(5, m + 0.5))}
+                disabled={multiplier >= 5}
+                className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40"
+                title="Zoom In (+)"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+
               {multiplier > 1 && (
                 <button
                   type="button"
@@ -273,73 +568,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               )}
             </div>
 
-            {/* Prev / Next Document navigation buttons (if multiple) */}
-            {files.length > 1 && (
-              <div className="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80">
-                <button
-                  type="button"
-                  onClick={handlePrevDoc}
-                  className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors"
-                  title="Previous document (Left Arrow)"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleNextDoc}
-                  className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors"
-                  title="Next document (Right Arrow)"
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {/* Open in New Window */}
-            {resolvedUrl && (
-              <a
-                href={resolvedUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors"
-                title="Open document in new browser tab"
-              >
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden md:inline">New Tab</span>
-              </a>
-            )}
-
-            {/* Direct Download */}
-            <button
-              type="button"
-              onClick={handleDownload}
-              disabled={downloading || (!resolvedUrl && !current.storagePath)}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
-              title="Download file"
-            >
-              {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">Download</span>
-            </button>
-
-            {/* Delete Attachment Button */}
-            {(onDeleteFile || canDelete) && (
-              <button
-                type="button"
-                onClick={handleDeleteDoc}
-                disabled={deleting}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
-                title="Delete this attachment"
-              >
-                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                <span className="hidden sm:inline">{deleting ? 'Deleting…' : 'Delete'}</span>
-              </button>
-            )}
-
-            {/* Full Screen Toggle */}
+            {/* Fullscreen Button */}
             <button
               type="button"
               onClick={() => setIsFullScreen((f) => !f)}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer hidden sm:inline-flex"
               title={isFullScreen ? 'Exit full screen' : 'Full screen'}
             >
               {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -349,18 +582,21 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/70 hover:text-rose-200 hover:border-rose-800 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/70 hover:text-rose-200 hover:border-rose-800 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
               title="Close preview (Esc)"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
               <span className="hidden sm:inline">Close</span>
             </button>
           </div>
         </div>
 
-        {/* Multi-Document Tab Bar (when multiple files attached) */}
+        {/* Multi-Document Jump Bar (when multiple files attached) */}
         {files.length > 1 && (
           <div className="bg-slate-950 border-b border-slate-800 px-3 py-1.5 flex items-center gap-1.5 overflow-x-auto shrink-0 scrollbar-none">
+            <span className="text-[10px] uppercase font-bold text-slate-500 mr-1 hidden sm:inline shrink-0">
+              Jump to Doc:
+            </span>
             {files.map((file, idx) => {
               const active = idx === activeIndex;
               const fIsPdf =
@@ -370,19 +606,16 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 <button
                   key={file.id || `${file.name}-${idx}`}
                   type="button"
-                  onClick={() => {
-                    setActiveIndex(idx);
-                    setMultiplier(1);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer ${
+                  onClick={() => scrollToDoc(idx)}
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                     active
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-800'
+                      ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
+                      : 'bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800'
                   }`}
                 >
                   {fIsPdf ? <FileText className="w-3.5 h-3.5 shrink-0" /> : <ImageIcon className="w-3.5 h-3.5 shrink-0" />}
                   <span>Doc #{idx + 1}</span>
-                  <span className={`text-[10px] font-mono truncate max-w-[130px] ${active ? 'text-indigo-200' : 'text-slate-400'}`}>
+                  <span className={`text-[10px] font-mono truncate max-w-[100px] sm:max-w-[140px] ${active ? 'text-indigo-200' : 'text-slate-400'}`}>
                     {file.name}
                   </span>
                 </button>
@@ -391,139 +624,57 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           </div>
         )}
 
-        {/* Scrollable Preview Canvas:
-            Dually scrollable with vertical scrollbar on the right AND horizontal scrollbar at the bottom!
-            Uses .preview-scrollbars with overflow-x: scroll and overflow-y: scroll.
-            When multiplier > 1, moving mouse glides document automatically according to cursor position. */}
+        {/* Scrollable Continuous Preview Stream */}
         <div
-          ref={canvasRef}
-          onMouseMove={handleMouseMove}
-          className="preview-scrollbars flex-1 w-full bg-slate-950 p-2 sm:p-4 select-none relative overflow-x-auto overflow-y-auto"
+          ref={scrollContainerRef}
+          onMouseMove={multiplier > 1 && mouseFollowEnabled ? handleMouseMove : undefined}
+          className="preview-scrollbars flex-1 w-full bg-slate-950 p-2 sm:p-4 select-none overflow-x-auto overflow-y-auto relative"
+          style={{ WebkitOverflowScrolling: 'touch' }}
         >
-          {signed.loading ? (
-            <div className="h-full min-h-[400px] flex flex-col items-center justify-center gap-3 text-slate-400">
-              <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-              <p className="text-xs font-semibold">Loading document preview…</p>
-            </div>
-          ) : !resolvedUrl && !current.storagePath ? (
-            <div className="h-full min-h-[400px] flex flex-col items-center justify-center p-6 text-center text-slate-400">
-              <FileText className="w-10 h-10 text-slate-600 mb-2" />
-              <p className="text-xs font-semibold text-slate-300">Preview not available</p>
-              <p className="text-[11px] text-slate-500 max-w-sm mt-1">
-                This file does not have a preview URL. Use the Download button above to view it.
-              </p>
-            </div>
-          ) : resolvedUrl && isPdf ? (
-            /* PDF Document Canvas with horizontal + vertical scroll container */
-            <div
-              style={{
-                minWidth: `${Math.max(820, multiplier * 880)}px`,
-                width: `${multiplier * 100}%`,
-                height: multiplier > 1 ? `${multiplier * 100}%` : '100%',
-                minHeight: `${Math.max(740, multiplier * 700)}px`,
-              }}
-              className="relative mx-auto flex flex-col items-stretch transition-all duration-150"
-            >
-              <iframe
-                src={`${resolvedUrl}#toolbar=1&navpanes=0`}
-                title={fileName}
-                className="w-full h-full min-h-[740px] border-0 rounded-xl shadow-2xl bg-white"
-              />
-              {/* Transparent overlay over iframe to capture smooth mouse panning when zoomed in */}
-              {multiplier > 1 && mouseFollowEnabled && (
-                <div
-                  className="absolute inset-0 z-10 cursor-move bg-transparent"
-                  onMouseMove={handleMouseMove}
-                  title="Mouse Follow is active: move your mouse to glide through the zoomed document"
-                />
-              )}
-            </div>
-          ) : resolvedUrl && isImage ? (
-            /* Image Canvas with horizontal + vertical scroll container */
-            <div
-              style={{
-                minWidth: `${Math.max(600, multiplier * 750)}px`,
-                width: `${multiplier * 100}%`,
-                minHeight: '100%',
-              }}
-              className="relative mx-auto flex items-center justify-center p-2 transition-all duration-150"
-              onMouseMove={handleMouseMove}
-            >
-              <img
-                src={resolvedUrl}
-                alt={fileName}
-                style={{
-                  width: `${multiplier * 100}%`,
-                  maxWidth: 'none',
-                }}
-                className="rounded-xl shadow-2xl bg-white object-contain border border-slate-800"
-              />
-            </div>
-          ) : resolvedUrl ? (
-            /* General Document Fallback Canvas */
-            <div
-              style={{
-                minWidth: `${Math.max(760, multiplier * 850)}px`,
-                width: `${multiplier * 100}%`,
-                height: multiplier > 1 ? `${multiplier * 100}%` : '100%',
-                minHeight: `${Math.max(680, multiplier * 640)}px`,
-              }}
-              className="relative mx-auto flex flex-col items-stretch"
-            >
-              <iframe
-                src={resolvedUrl}
-                title={fileName}
-                className="w-full h-full min-h-[680px] border-0 rounded-xl shadow-2xl bg-white"
-              />
-              {multiplier > 1 && mouseFollowEnabled && (
-                <div
-                  className="absolute inset-0 z-10 cursor-move bg-transparent"
-                  onMouseMove={handleMouseMove}
-                />
-              )}
-            </div>
-          ) : (
-            <div className="h-full min-h-[400px] flex flex-col items-center justify-center p-6 text-center space-y-3">
-              <p className="text-xs text-rose-400 font-semibold">{signed.error || 'Failed to generate preview URL'}</p>
-              <button
-                type="button"
-                onClick={handleDownload}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md cursor-pointer"
-              >
-                Download Document Directly
-              </button>
-            </div>
-          )}
-
-          {/* Floating Transparent Zoom Multiplier Controls & Mouse Follow Toggle */}
-          {resolvedUrl && (
-            <ZoomMultiplierControls
+          {files.map((file, idx) => (
+            <SingleDocViewer
+              key={file.id || `${file.name}-${idx}`}
+              file={file}
+              index={idx}
+              total={files.length}
               multiplier={multiplier}
-              onSelectMultiplier={setMultiplier}
-              mouseFollowEnabled={mouseFollowEnabled}
-              onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
+              containerWidth={containerWidth}
+              isBackendConnected={isBackendConnected}
+              onDeleteFile={onDeleteFile}
+              canDelete={canDelete}
+              approvalNo={approvalNo}
+              docRef={(el) => {
+                docRefs.current[idx] = el;
+              }}
             />
-          )}
+          ))}
+
+          {/* Floating Zoom Controls for Desktop */}
+          <ZoomMultiplierControls
+            multiplier={multiplier}
+            onSelectMultiplier={setMultiplier}
+            mouseFollowEnabled={mouseFollowEnabled}
+            onToggleMouseFollow={() => setMouseFollowEnabled((f) => !f)}
+          />
         </div>
 
         {/* Bottom Helper Bar */}
-        <div className="bg-slate-900 border-t border-slate-800 px-4 py-2 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
-          <div className="flex items-center gap-3">
-            <span>Scroll bars available (horizontal &amp; vertical).</span>
-            {multiplier > 1 ? (
-              <span className="text-indigo-400 font-bold flex items-center gap-1.5">
-                <span>Zoom {multiplier}x</span>
-                {mouseFollowEnabled && (
-                  <span className="text-emerald-400 font-normal">
-                    • Mouse follow active (cursor pans document)
-                  </span>
-                )}
+        <div className="bg-slate-900 border-t border-slate-800 px-3 sm:px-4 py-1.5 sm:py-2 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
+          <div className="flex items-center gap-2 truncate">
+            {files.length > 1 ? (
+              <span className="text-slate-300 font-medium">
+                Continuous Scroll Active • Showing all {files.length} documents
               </span>
             ) : (
-              <span className="text-slate-500">Select 2x, 3x, 4x to zoom with mouse-follow</span>
+              <span>All pages rendered for continuous vertical scrolling.</span>
+            )}
+            {multiplier > 1 && (
+              <span className="text-indigo-400 font-bold ml-2">
+                Zoom {multiplier}x
+              </span>
             )}
           </div>
-          <div className="hidden sm:flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-2 shrink-0">
             <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px] border border-slate-700">Esc</kbd>
             <span>to exit</span>
           </div>
