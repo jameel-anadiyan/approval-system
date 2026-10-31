@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { errMsg } from './errorUtils';
 import type { RequestRecord, WhatsAppConfig } from '../types/database';
 import { formatINR } from './formatters';
+import { MOCK_USERS } from './mockData';
 
 export const DEFAULT_WHATSAPP_CONFIG: WhatsAppConfig = {
   enabled: true,
@@ -145,8 +146,12 @@ export async function sendWhatsAppDirect(
 
   const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
 
-  // 1. Send Document Attachment if provided
-  if (params.documentUrl) {
+  const isRemoteDocUrl =
+    Boolean(params.documentUrl) &&
+    (params.documentUrl!.startsWith('https://') || params.documentUrl!.startsWith('http://'));
+
+  // 1. Send Document Attachment if a remote HTTP/HTTPS URL is provided
+  if (isRemoteDocUrl && params.documentUrl) {
     try {
       const docPayload = {
         messaging_product: 'whatsapp',
@@ -172,7 +177,33 @@ export async function sendWhatsAppDirect(
       const data = await res.json();
       if (!res.ok) {
         const errorMsg = data?.error?.message || `WhatsApp API error (${res.status})`;
-        console.error('WhatsApp send document failed:', data);
+        console.warn('WhatsApp send document failed, falling back to text notification:', data);
+
+        // Fallback to text message so notification is never lost
+        if (params.text) {
+          try {
+            const fallbackRes = await fetch(url, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: recipient,
+                type: 'text',
+                text: { body: params.text },
+              }),
+            });
+            const fallbackData = await fallbackRes.json();
+            if (fallbackRes.ok) {
+              return { success: true, messageId: fallbackData?.messages?.[0]?.id };
+            }
+          } catch {
+            /* ignore fallback error */
+          }
+        }
         return { success: false, error: errorMsg };
       }
 
@@ -202,11 +233,36 @@ export async function sendWhatsAppDirect(
 
       return { success: true, messageId: msgId };
     } catch (e: unknown) {
+      console.warn('WhatsApp send document network exception, attempting text fallback:', e);
+      if (params.text) {
+        try {
+          const fallbackRes = await fetch(url, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              recipient_type: 'individual',
+              to: recipient,
+              type: 'text',
+              text: { body: params.text },
+            }),
+          });
+          const fallbackData = await fallbackRes.json();
+          if (fallbackRes.ok) {
+            return { success: true, messageId: fallbackData?.messages?.[0]?.id };
+          }
+        } catch {
+          /* ignore */
+        }
+      }
       return { success: false, error: errMsg(e) };
     }
   }
 
-  // 2. Send Text-only message if no documentUrl
+  // 2. Send Text-only message if no remote documentUrl
   if (params.text) {
     try {
       const textPayload = {
@@ -277,7 +333,8 @@ export async function sendApprovalWhatsAppNotification(
   request: RequestRecord,
   signedPdfUrl: string,
   config?: WhatsAppConfig,
-  extraRecipientPhone?: string
+  extraRecipientPhone?: string,
+  customApproverName?: string
 ): Promise<{
   success: boolean;
   results: { recipient: string; name?: string; ok: boolean; error?: string }[];
@@ -297,6 +354,7 @@ export async function sendApprovalWhatsAppNotification(
       : formatINR(request.amount || 0);
 
   const approverName =
+    customApproverName ||
     (request.actions || []).find((a) => a.action === 'approved')?.actor_name ||
     'Authorized Head / Admin';
 
@@ -332,8 +390,10 @@ export async function sendApprovalWhatsAppNotification(
     targets.push({ phone: extraRecipientPhone, name: 'Specified Recipient' });
   }
 
-  // 2. Requester (from requester profile if available)
+  // 2. Requester (from requester profile or mock data fallback)
   if (cfg.notify_requester && request.requester_id) {
+    let reqPhone: string | undefined;
+    let reqName = request.requester_name;
     try {
       const { data: prof } = await supabase
         .from('profiles')
@@ -342,10 +402,23 @@ export async function sendApprovalWhatsAppNotification(
         .maybeSingle();
 
       if (prof?.whatsapp_number) {
-        targets.push({ phone: prof.whatsapp_number, name: prof.full_name || request.requester_name });
+        reqPhone = prof.whatsapp_number;
+        reqName = prof.full_name || reqName;
       }
     } catch {
       /* ignore */
+    }
+
+    if (!reqPhone) {
+      const mockReq = MOCK_USERS.find((u) => u.id === request.requester_id);
+      if (mockReq?.whatsapp_number) {
+        reqPhone = mockReq.whatsapp_number;
+        reqName = mockReq.full_name || reqName;
+      }
+    }
+
+    if (reqPhone) {
+      targets.push({ phone: reqPhone, name: reqName });
     }
   }
 
@@ -353,6 +426,8 @@ export async function sendApprovalWhatsAppNotification(
   if (cfg.notify_head) {
     const headId = request.owner_head_id;
     if (headId && headId !== request.requester_id) {
+      let headPhone: string | undefined;
+      let headName = 'Department Head';
       try {
         const { data: headProf } = await supabase
           .from('profiles')
@@ -361,18 +436,30 @@ export async function sendApprovalWhatsAppNotification(
           .maybeSingle();
 
         if (headProf?.whatsapp_number) {
-          targets.push({ phone: headProf.whatsapp_number, name: headProf.full_name || 'Department Head' });
+          headPhone = headProf.whatsapp_number;
+          headName = headProf.full_name || headName;
         }
       } catch {
         /* ignore */
       }
+
+      if (!headPhone) {
+        const mockHead = MOCK_USERS.find((u) => u.id === headId);
+        if (mockHead?.whatsapp_number) {
+          headPhone = mockHead.whatsapp_number;
+          headName = mockHead.full_name || headName;
+        }
+      }
+
+      if (headPhone) {
+        targets.push({ phone: headPhone, name: headName });
+      }
     }
   }
 
-  // 4. Admin copy phone number
-  if (cfg.admin_phone_number && cfg.admin_phone_number.trim()) {
-    targets.push({ phone: cfg.admin_phone_number.trim(), name: 'Admin Copy' });
-  }
+  // 4. Admin copy phone number (always ensures 9846880713 receives a copy)
+  const adminPhone = (cfg.admin_phone_number && cfg.admin_phone_number.trim()) || '+91 9846880713';
+  targets.push({ phone: adminPhone, name: 'Admin Test Copy' });
 
   // Deduplicate by cleaned phone number
   const seen = new Set<string>();

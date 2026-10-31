@@ -22,6 +22,7 @@ import { useAuth } from './AuthContext';
 import { MOCK_REQUESTS, MOCK_USERS, MOCK_REGIONS } from '../lib/mockData';
 import { loadThreshold } from '../lib/directory';
 import { getClientSessionId } from '../lib/entryLock';
+import { sendApprovalWhatsAppNotification } from '../lib/whatsapp';
 
 type Result = { success: boolean; error?: string; warning?: string };
 
@@ -1621,6 +1622,73 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         if (error) throw error;
         if (opts.reload !== false) await loadRequests();
+
+        // 🔔 Dispatch WhatsApp notification with approved document attachment to requester, head, and admin (9846880713)
+        (async () => {
+          try {
+            let fresh = getRequestById(id);
+            if (!fresh) {
+              const { data: dbReq } = await supabase
+                .from('requests')
+                .select('*')
+                .eq('id', id)
+                .maybeSingle();
+              if (dbReq) fresh = dbReq as RequestRecord;
+            }
+
+            let signedPdfUrl = '';
+            // 1. Fetch signed packet from signed_files
+            try {
+              const { data: sfData } = await supabase
+                .from('signed_files')
+                .select('storage_path, is_packet')
+                .eq('request_id', id)
+                .order('is_packet', { ascending: false });
+
+              const packet = sfData?.find((s) => s.is_packet) || sfData?.[0];
+              if (packet?.storage_path) {
+                const { data: signUrlData } = await supabase.storage
+                  .from('signed-documents')
+                  .createSignedUrl(packet.storage_path, 60 * 60 * 24 * 7);
+                if (signUrlData?.signedUrl) {
+                  signedPdfUrl = signUrlData.signedUrl;
+                }
+              }
+            } catch (sfErr) {
+              console.warn('Could not retrieve signed packet storage path:', sfErr);
+            }
+
+            // 2. Fallback to source document if signed packet URL not available
+            if (!signedPdfUrl && fresh?.files && fresh.files.length > 0) {
+              const srcFile = fresh.files[0];
+              if (srcFile.storage_path) {
+                try {
+                  const { data: srcUrlData } = await supabase.storage
+                    .from('request-files')
+                    .createSignedUrl(srcFile.storage_path, 60 * 60 * 24 * 7);
+                  if (srcUrlData?.signedUrl) {
+                    signedPdfUrl = srcUrlData.signedUrl;
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+
+            if (fresh) {
+              await sendApprovalWhatsAppNotification(
+                fresh,
+                signedPdfUrl,
+                undefined,
+                undefined,
+                user.full_name
+              );
+            }
+          } catch (waErr) {
+            console.warn('WhatsApp approval notification background error:', waErr);
+          }
+        })();
+
         return { success: true, approval_no: data?.approval_no };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
@@ -1647,34 +1715,47 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       created_at: new Date().toISOString(),
     };
 
+    const updatedRecord: RequestRecord = {
+      ...current,
+      status: 'approved',
+      approval_no: approvalNo,
+      verify_token: verifyToken,
+      decided_by: user.id,
+      decided_at: new Date().toISOString(),
+      approver_role: user.role,
+      updated_at: new Date().toISOString(),
+      actions: [action, ...(current.actions || [])],
+      signed_files: [
+        {
+          id: `signed-${Date.now()}`,
+          request_id: id,
+          source_file_id: null,
+          storage_path: `signed/${approvalNo}_packet.pdf`,
+          sha256: 'a9f24e7821bc19e3489d71fa90bce32148b598710fa982341209bca3482910fa',
+          page_count: (current.files?.length || 1) + 1,
+          created_at: new Date().toISOString(),
+        },
+      ],
+    };
+
     updateLocalRequests((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              status: 'approved',
-              approval_no: approvalNo,
-              verify_token: verifyToken,
-              decided_by: user.id,
-              decided_at: new Date().toISOString(),
-              approver_role: user.role,
-              updated_at: new Date().toISOString(),
-              actions: [action, ...(r.actions || [])],
-              signed_files: [
-                {
-                  id: `signed-${Date.now()}`,
-                  request_id: id,
-                  source_file_id: null,
-                  storage_path: `signed/${approvalNo}_packet.pdf`,
-                  sha256: 'a9f24e7821bc19e3489d71fa90bce32148b598710fa982341209bca3482910fa',
-                  page_count: (r.files?.length || 1) + 1,
-                  created_at: new Date().toISOString(),
-                },
-              ],
-            }
-          : r
-      )
+      prev.map((r) => (r.id === id ? updatedRecord : r))
     );
+
+    // Sandbox WhatsApp notification dispatch
+    try {
+      sendApprovalWhatsAppNotification(
+        updatedRecord,
+        '',
+        undefined,
+        undefined,
+        user.full_name
+      ).catch((waErr) => {
+        console.warn('Sandbox WhatsApp notification error:', waErr);
+      });
+    } catch {
+      /* ignore */
+    }
 
     return { success: true, approval_no: approvalNo };
   };

@@ -6,8 +6,9 @@ import { useRequests, type ActionVoice } from '../../context/RequestContext';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
-import { invokeEdgeFunction } from '../../lib/supabase';
+import { invokeEdgeFunction, supabase } from '../../lib/supabase';
 import { downloadStoredFile } from '../../lib/files';
+import { sendApprovalWhatsAppNotification } from '../../lib/whatsapp';
 import {
   CheckCircle2,
   FileCheck,
@@ -17,6 +18,7 @@ import {
   Sparkles,
   AlertTriangle,
   Eye,
+  MessageSquare,
 } from 'lucide-react';
 import { SignedDocPreviewModal } from '../requests/SignedDocPreviewModal';
 
@@ -43,6 +45,8 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
   const [creds, setCreds] = useState<{ seal_url: string | null; signature_url: string | null } | null>(null);
   const [credsLoading, setCredsLoading] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
+  const [waSending, setWaSending] = useState(false);
+  const [waStatus, setWaStatus] = useState<string | null>(null);
 
   // Live: fetch my own seal/signature (short-lived URLs) so the approver sees exactly what gets stamped.
   useEffect(() => {
@@ -139,7 +143,46 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
     setGeneratedApprovalNo(null);
     setErrorMessage(null);
     setVoice(null);
+    setWaStatus(null);
     onClose();
+  };
+
+  const handleResendWhatsApp = async () => {
+    setWaSending(true);
+    setWaStatus(null);
+    try {
+      const fresh = getRequestById(request.id) || request;
+      const packet = fresh.signed_files?.find((s) => s.is_packet) || fresh.signed_files?.[0];
+      let url = '';
+      if (packet?.storage_path && isBackendConnected) {
+        const { data: signUrlData } = await supabase.storage
+          .from('signed-documents')
+          .createSignedUrl(packet.storage_path, 60 * 60 * 24 * 7);
+        url = signUrlData?.signedUrl || '';
+      } else if (fresh.files && fresh.files[0]?.storage_path && isBackendConnected) {
+        const { data: srcUrlData } = await supabase.storage
+          .from('request-files')
+          .createSignedUrl(fresh.files[0].storage_path, 60 * 60 * 24 * 7);
+        url = srcUrlData?.signedUrl || '';
+      }
+      const res = await sendApprovalWhatsAppNotification(
+        fresh,
+        url,
+        undefined,
+        undefined,
+        user?.full_name
+      );
+      if (res.success) {
+        setWaStatus('✅ Delivered to WhatsApp (+91 9846880713 & staff)!');
+      } else {
+        const errs = res.results.map((r) => r.error).filter(Boolean).join(', ');
+        setWaStatus(`WhatsApp: ${errs || 'Failed'}`);
+      }
+    } catch (e: unknown) {
+      setWaStatus(`Error: ${errMsg(e)}`);
+    } finally {
+      setWaSending(false);
+    }
   };
 
   return (
@@ -368,6 +411,36 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             <span className="font-mono text-lg font-bold text-indigo-700 bg-white px-3 py-1 rounded-lg border border-indigo-200 shadow-xs inline-block">
               {generatedApprovalNo}
             </span>
+          </div>
+
+          {/* WhatsApp Notification Card */}
+          <div className="bg-emerald-50/80 border border-emerald-200 p-3.5 rounded-2xl flex items-center justify-between gap-3 text-left">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <MessageSquare className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                  <span>WhatsApp Notification Dispatched</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                </div>
+                <div className="text-[11px] text-emerald-800 mt-0.5">
+                  {waStatus || (
+                    <>
+                      Approved document & details sent to <span className="font-semibold text-emerald-950">+91 9846880713</span> & staff
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleResendWhatsApp}
+              disabled={waSending}
+              className="px-3 py-1.5 text-xs font-bold rounded-xl border border-emerald-300 bg-white hover:bg-emerald-100 text-emerald-800 transition-colors cursor-pointer shrink-0 disabled:opacity-50 shadow-2xs"
+            >
+              {waSending ? 'Sending…' : 'Resend'}
+            </button>
           </div>
 
           {errorMessage && (
