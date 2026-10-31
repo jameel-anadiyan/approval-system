@@ -211,9 +211,12 @@ Deno.serve(handle(async (req) => {
       const disbursement_type = role === "disbursement"
         ? (["entry_only", "payment_only", "stock_transfer_monitor", "entry_approver"].includes(body.disbursement_type) ? body.disbursement_type : "entry_only")
         : null;
+      const whatsapp_number = typeof body.whatsapp_number === "string" && body.whatsapp_number.trim()
+        ? body.whatsapp_number.trim()
+        : null;
       const { error: pErr } = await admin.from("profiles").insert({
         id: created.user.id, username, full_name, designation, role, department_id, shop_id, allowed_types,
-        regional_head_id, region_id, disbursement_type, must_change_password: true, created_by: me.id,
+        regional_head_id, region_id, disbursement_type, whatsapp_number, must_change_password: true, created_by: me.id,
       });
       if (pErr) {
         await admin.auth.admin.deleteUser(created.user.id);
@@ -292,12 +295,18 @@ Deno.serve(handle(async (req) => {
           username = u;
         }
       }
-      const { error: pErr } = await admin.from("profiles").update({
+      const updateData: Record<string, unknown> = {
         username, full_name, designation, updated_at: new Date().toISOString()
-      }).eq("id", userId);
+      };
+      if (body.whatsapp_number !== undefined) {
+        updateData.whatsapp_number = typeof body.whatsapp_number === "string" && body.whatsapp_number.trim()
+          ? body.whatsapp_number.trim()
+          : null;
+      }
+      const { error: pErr } = await admin.from("profiles").update(updateData).eq("id", userId);
       if (pErr) throw new HttpError(400, "profile_error", pErr.message);
-      await audit(admin, me, "user_updated", "user", userId, { username, full_name, designation });
-      return json({ ok: true, username, full_name, designation });
+      await audit(admin, me, "user_updated", "user", userId, { username, full_name, designation, whatsapp_number: updateData.whatsapp_number });
+      return json({ ok: true, username, full_name, designation, whatsapp_number: updateData.whatsapp_number });
     }
 
     case "delete": {

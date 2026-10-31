@@ -48,6 +48,7 @@ import { SignedDocPreviewModal } from '../../components/requests/SignedDocPrevie
 import { BillMissingBanner } from '../../components/requests/BillMissingBanner';
 import { MarkBillMissingModal } from '../../components/portals/MarkBillMissingModal';
 import { downloadStoredFile } from '../../lib/files';
+import { sendApprovalWhatsAppNotification } from '../../lib/whatsapp';
 import {
   ArrowLeft,
   Send,
@@ -84,6 +85,7 @@ import {
   Paperclip,
   FileWarning,
   PauseCircle,
+  MessageSquare,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -325,6 +327,7 @@ export const RequestDetailPage: React.FC = () => {
   );
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
   const [isEditBankModalOpen, setIsEditBankModalOpen] = useState<boolean>(false);
+  const [sendingWaDoc, setSendingWaDoc] = useState(false);
 
   const isFirstPaymentReleased = Boolean(
     Number(request.paid_amount || 0) > 0 ||
@@ -1401,20 +1404,56 @@ export const RequestDetailPage: React.FC = () => {
 
                     <div className="flex items-center gap-2 flex-wrap">
                       {signedPacket && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setPreviewSignedDoc({
-                              path: signedPacket.storage_path,
-                              name: signedPacket.file_name || `${request.approval_no}_packet.pdf`,
-                              approvalNo: request.approval_no,
-                            })
-                          }
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition-colors cursor-pointer shadow-2xs"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-emerald-700" />
-                          <span>Preview Approved Doc</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewSignedDoc({
+                                path: signedPacket.storage_path,
+                                name: signedPacket.file_name || `${request.approval_no}_packet.pdf`,
+                                approvalNo: request.approval_no,
+                              })
+                            }
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>Preview Approved Doc</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={sendingWaDoc}
+                            onClick={async () => {
+                              if (!signedPacket.storage_path) return;
+                              setSendingWaDoc(true);
+                              try {
+                                const { data: signedData } = await supabase.storage
+                                  .from('signed-documents')
+                                  .createSignedUrl(signedPacket.storage_path, 60 * 60 * 24 * 7);
+
+                                const url = signedData?.signedUrl;
+                                if (!url) throw new Error('Could not generate document link');
+
+                                const res = await sendApprovalWhatsAppNotification(request, url);
+                                if (res.success) {
+                                  setBanner({ ok: true, text: `✅ Approved document and message sent to WhatsApp!` });
+                                } else {
+                                  const errDetail = res.results.map((r) => r.error).filter(Boolean).join(', ');
+                                  setBanner({ ok: false, text: `WhatsApp delivery failed: ${errDetail || 'No WhatsApp number found for staff.'}` });
+                                }
+                              } catch (e: unknown) {
+                                setBanner({ ok: false, text: `WhatsApp delivery error: ${errMsg(e)}` });
+                              } finally {
+                                setSendingWaDoc(false);
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-400 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                            title="Send official approved document packet to WhatsApp"
+                          >
+                            {sendingWaDoc ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquare className="w-3.5 h-3.5" />}
+                            <span>Send to WhatsApp</span>
+                          </button>
+                        </>
                       )}
 
                       {canAddDisbursementEntry && request.status === 'approved' && remainingUnentered > 0 && !isPendingDisbursementClarification && (

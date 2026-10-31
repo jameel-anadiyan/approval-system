@@ -354,7 +354,182 @@ Deno.serve(handle(async (req) => {
     });
     if (fErr) throw new Error(fErr.message);
 
-    return json({ approval_no: b.approval_no, files: records.length, pages: packet.pageCount });
+    // ------------------------------------------------------------------------
+    // Automatic WhatsApp Cloud API Dispatch
+    // ------------------------------------------------------------------------
+    const whatsappResults: { recipient: string; ok: boolean; error?: string }[] = [];
+    try {
+      // 1. Get 7-day signed download URL for the packet PDF
+      const { data: signUrlData } = await admin.storage
+        .from("signed-documents")
+        .createSignedUrl(packetPath, 60 * 60 * 24 * 7);
+
+      const packetDownloadUrl = signUrlData?.signedUrl;
+
+      // 2. Fetch WhatsApp settings
+      const { data: settingRow } = await admin
+        .from("app_settings")
+        .select("value")
+        .eq("key", "whatsapp_config")
+        .maybeSingle();
+
+      const defaultCfg = {
+        enabled: true,
+        access_token: "EAAzRU40ZBcyoBS1Uyk7UgqBlRIvb407NufgvmPdZBmZCjGsZAiDBervAm9MGZAhkVyou64W2lDt64ZByltVjcRVwvdkndcEPsUZAi0DvoISgKKbRUEZCQZABpLslfpvcrM1fE19UXaVyZCEhaz2ebIZAvuWGpvQG2KZBJNfrksm5vRN44PCuRpco8riA6NnSan6uUgZDZD",
+        phone_number_id: "1391767714024374",
+        notify_requester: true,
+        notify_head: true,
+        admin_phone_number: "",
+      };
+
+      // deno-lint-ignore no-explicit-any
+      const cfg = { ...defaultCfg, ...((settingRow?.value as any) ?? {}) };
+
+      if (cfg.enabled && packetDownloadUrl && cfg.access_token && cfg.phone_number_id) {
+        // Collect recipients
+        const recipients: { phone: string; name?: string }[] = [];
+
+        // Requester WhatsApp
+        if (cfg.notify_requester && r.requester_id) {
+          const { data: reqProf } = await admin
+            .from("profiles")
+            .select("full_name, whatsapp_number, default_head_id")
+            .eq("id", r.requester_id)
+            .maybeSingle();
+
+          if (reqProf?.whatsapp_number) {
+            recipients.push({ phone: reqProf.whatsapp_number, name: reqProf.full_name || r.requester_name });
+          }
+
+          // Head WhatsApp
+          if (cfg.notify_head && reqProf?.default_head_id) {
+            const { data: headProf } = await admin
+              .from("profiles")
+              .select("full_name, whatsapp_number")
+              .eq("id", reqProf.default_head_id)
+              .maybeSingle();
+            if (headProf?.whatsapp_number) {
+              recipients.push({ phone: headProf.whatsapp_number, name: headProf.full_name || "Department Head" });
+            }
+          }
+        }
+
+        // Owner Head (if different)
+        if (cfg.notify_head && r.owner_head_id && !recipients.some((x) => x.name?.includes("Head"))) {
+          const { data: ownerProf } = await admin
+            .from("profiles")
+            .select("full_name, whatsapp_number")
+            .eq("id", r.owner_head_id)
+            .maybeSingle();
+          if (ownerProf?.whatsapp_number) {
+            recipients.push({ phone: ownerProf.whatsapp_number, name: ownerProf.full_name || "Head" });
+          }
+        }
+
+        // Admin notification copy
+        if (cfg.admin_phone_number && cfg.admin_phone_number.trim()) {
+          recipients.push({ phone: cfg.admin_phone_number.trim(), name: "Admin Notification" });
+        }
+
+        const cleanPhone = (p: string) => {
+          const d = p.replace(/\D/g, "");
+          return d.length === 10 ? `91${d}` : d.startsWith("0") && d.length === 11 ? `91${d.slice(1)}` : d;
+        };
+
+        const seenPhones = new Set<string>();
+        const uniqueRecipients = recipients.filter((x) => {
+          const c = cleanPhone(x.phone);
+          if (!c || c.length < 10 || seenPhones.has(c)) return false;
+          seenPhones.add(c);
+          return true;
+        });
+
+        const caption = `✅ *Your approval has been approved!*\nRequest No: ${r.request_no}\nApproval No: ${b.approval_no}\nAmount: ${ctx.amount}`;
+        const messageBody =
+          `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
+          `Dear *${r.requester_name || "Staff Member"}*,\n\n` +
+          `Your approval request has been officially approved and sealed.\n\n` +
+          `📋 *Request No:* ${r.request_no}\n` +
+          `🎉 *Approval No:* ${b.approval_no}\n` +
+          `📝 *Subject:* ${r.title || "—"}\n` +
+          `🏢 *Outlet / Shop:* ${r.shop_name || "—"}\n` +
+          `💰 *Amount:* ${ctx.amount}\n` +
+          `✍️ *Approved by:* ${approverObj.full_name}\n` +
+          `📅 *Approved on:* ${ctx.dateTime}\n\n` +
+          `📄 *The official signed approval document packet is attached above.*`;
+
+        const waUrl = `https://graph.facebook.com/v21.0/${cfg.phone_number_id}/messages`;
+
+        for (const target of uniqueRecipients) {
+          const targetPhone = cleanPhone(target.phone);
+          try {
+            // Send document attachment
+            const res = await fetch(waUrl, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfg.access_token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: targetPhone,
+                type: "document",
+                document: {
+                  link: packetDownloadUrl,
+                  caption,
+                  filename: `${b.approval_no}_Approved_Document.pdf`,
+                },
+              }),
+            });
+
+            const resJson = await res.json();
+            const isOk = res.ok;
+            const metaId = resJson?.messages?.[0]?.id;
+            const errStr = !isOk ? (resJson?.error?.message || `HTTP ${res.status}`) : undefined;
+
+            whatsappResults.push({ recipient: targetPhone, ok: isOk, error: errStr });
+
+            // Follow-up text body
+            if (isOk) {
+              await fetch(waUrl, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${cfg.access_token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  messaging_product: "whatsapp",
+                  recipient_type: "individual",
+                  to: targetPhone,
+                  type: "text",
+                  text: { body: messageBody },
+                }),
+              }).catch(() => {});
+            }
+
+            // Log to whatsapp_logs table
+            await admin.from("whatsapp_logs").insert({
+              request_id: requestId,
+              recipient_phone: targetPhone,
+              recipient_name: target.name || null,
+              message_type: "document",
+              status: isOk ? "sent" : "failed",
+              meta_message_id: metaId || null,
+              error_message: errStr || null,
+              details: { approval_no: b.approval_no, request_no: r.request_no },
+            }).catch(() => {});
+          } catch (waErr) {
+            console.error("WhatsApp dispatch error for " + targetPhone, waErr);
+            whatsappResults.push({ recipient: targetPhone, ok: false, error: String(waErr) });
+          }
+        }
+      }
+    } catch (waOverallErr) {
+      console.error("WhatsApp notification dispatch failed:", waOverallErr);
+    }
+
+    return json({ approval_no: b.approval_no, files: records.length, pages: packet.pageCount, whatsapp_sent: whatsappResults });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("Signing failed:", msg);

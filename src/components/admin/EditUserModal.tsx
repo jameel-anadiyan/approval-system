@@ -7,11 +7,12 @@ import { errMsg } from '../../lib/errorUtils';
 interface EditUserModalProps {
   isOpen: boolean;
   onClose: () => void;
-  user: Pick<Profile, 'id' | 'full_name' | 'username' | 'designation'>;
+  user: Pick<Profile, 'id' | 'full_name' | 'username' | 'designation'> & { whatsapp_number?: string | null };
   onSave: (data: {
     full_name: string;
     username: string;
     designation?: string | null;
+    whatsapp_number?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
   title?: string;
   description?: string;
@@ -23,11 +24,12 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
   user,
   onSave,
   title = 'Edit User',
-  description = 'Update full name, username, and designation.',
+  description = 'Update full name, username, designation, and WhatsApp number.',
 }) => {
   const [fullName, setFullName] = useState(user.full_name || '');
   const [username, setUsername] = useState(user.username || '');
   const [designation, setDesignation] = useState(user.designation || '');
+  const [whatsappNumber, setWhatsappNumber] = useState(user.whatsapp_number || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,8 +37,9 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
     setFullName(user.full_name || '');
     setUsername(user.username || '');
     setDesignation(user.designation || '');
+    setWhatsappNumber(user.whatsapp_number || '');
     setError(null);
-  }, [user.id, user.full_name, user.username, user.designation]);
+  }, [user.id, user.full_name, user.username, user.designation, user.whatsapp_number]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +63,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
         full_name: fName,
         username: uName,
         designation: designation.trim() || null,
+        whatsapp_number: whatsappNumber.trim() || null,
       });
       if (!res.success) {
         setError(res.error || 'Failed to update user details.');
@@ -133,6 +137,24 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
             placeholder="e.g. Senior Store Manager, Accounts Officer"
             className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-medium"
           />
+        </div>
+
+        <div>
+          <label htmlFor="edit-whatsapp" className="block text-xs font-bold text-slate-700 mb-1">
+            WhatsApp Number
+          </label>
+          <input
+            id="edit-whatsapp"
+            type="tel"
+            maxLength={25}
+            value={whatsappNumber}
+            onChange={(e) => setWhatsappNumber(e.target.value)}
+            placeholder="e.g. +91 98765 43210 or 9876543210"
+            className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-mono"
+          />
+          <p className="text-[11px] text-slate-400 mt-1">
+            Official approved documents and approval messages will be delivered to this WhatsApp number.
+          </p>
         </div>
 
         <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">

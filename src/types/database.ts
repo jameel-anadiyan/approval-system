@@ -236,6 +236,21 @@ export interface Profile {
   mandatory_head_consultation?: boolean;
   mandatory_consultation_head_id?: string | null;
   mandatory_consultation_head_name?: string | null;
+  /** WhatsApp mobile number with country code (e.g. +91 98765 43210 or 919876543210) */
+  whatsapp_number?: string | null;
+}
+
+export interface WhatsAppConfig {
+  enabled: boolean;
+  access_token: string;
+  phone_number_id: string;
+  waba_id?: string;
+  app_id?: string;
+  business_id?: string;
+  display_phone_number?: string;
+  notify_requester: boolean;
+  notify_head: boolean;
+  admin_phone_number?: string;
 }
 
 export interface ConnectedEntryAccount {

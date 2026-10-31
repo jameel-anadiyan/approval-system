@@ -44,6 +44,8 @@ export interface NewUserInput {
   mandatory_consultation_head_id?: string | null;
   /** Entry / Payment account: people who share this login, each with their own 4-digit passkey */
   account_persons?: AccountPersonInput[];
+  /** WhatsApp mobile number with country code */
+  whatsapp_number?: string | null;
 }
 
 export interface AccountPersonInput {
@@ -324,6 +326,14 @@ export function useDirectory() {
         }
       }
 
+      // Ensure whatsapp_number is persisted directly to profiles
+      if (input.whatsapp_number && data?.id) {
+        await supabase
+          .from('profiles')
+          .update({ whatsapp_number: input.whatsapp_number.trim(), updated_at: new Date().toISOString() })
+          .eq('id', data.id);
+      }
+
       let personError: string | null = null;
       if (input.role === 'disbursement' && input.disbursement_type && data?.id) {
         await supabase.rpc('set_user_disbursement_type', {
@@ -397,6 +407,7 @@ export function useDirectory() {
       region_id: input.region_id ?? null, region,
       allowed_types: input.allowed_types ?? ['general'],
       photo_path: input.photo || null,
+      whatsapp_number: input.whatsapp_number || null,
       disbursement_type: input.role === 'disbursement' ? (input.disbursement_type || 'entry_only') : null,
       payment_dealer_type: input.role === 'disbursement' && input.disbursement_type === 'payment_only' ? (input.payment_dealer_type || 'both') : null,
       connected_entry_accounts: toAccountObjs(input.connected_entry_accounts || [], users),
@@ -913,14 +924,15 @@ export function useDirectory() {
     return { success: true };
   };
 
-  /** Update user name, username and designation */
+  /** Update user name, username, designation and whatsapp number */
   const updateUserDetails = async (
     userId: string,
-    data: { full_name: string; username: string; designation?: string | null }
+    data: { full_name: string; username: string; designation?: string | null; whatsapp_number?: string | null }
   ): Promise<Result> => {
     const cleanFullName = data.full_name.trim();
     const cleanUsername = data.username.trim().toLowerCase();
     const cleanDesignation = data.designation?.trim() || null;
+    const cleanWhatsApp = data.whatsapp_number?.trim() || null;
 
     if (!cleanFullName) {
       return { success: false, error: 'Please enter the full name.' };
@@ -936,6 +948,7 @@ export function useDirectory() {
         p_full_name: cleanFullName,
         p_username: cleanUsername,
         p_designation: cleanDesignation,
+        p_whatsapp_number: cleanWhatsApp,
       });
 
       if (rpcErr) {
@@ -948,6 +961,7 @@ export function useDirectory() {
             full_name: cleanFullName,
             username: cleanUsername,
             designation: cleanDesignation,
+            whatsapp_number: cleanWhatsApp,
             updated_at: new Date().toISOString(),
           })
           .eq('id', userId);
@@ -962,6 +976,7 @@ export function useDirectory() {
             full_name: cleanFullName,
             username: cleanUsername,
             designation: cleanDesignation,
+            whatsapp_number: cleanWhatsApp,
           });
 
           if (fnErr) {
@@ -982,6 +997,7 @@ export function useDirectory() {
               full_name: cleanFullName,
               username: cleanUsername,
               designation: cleanDesignation,
+              whatsapp_number: cleanWhatsApp,
               updated_at: new Date().toISOString(),
             }
             : u
@@ -996,6 +1012,7 @@ export function useDirectory() {
           full_name: cleanFullName,
           username: cleanUsername,
           designation: cleanDesignation,
+          whatsapp_number: cleanWhatsApp,
         };
         window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: synced }));
       }

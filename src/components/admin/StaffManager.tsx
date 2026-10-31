@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck, MessageSquare } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
+import { cleanWhatsAppNumber, formatWhatsAppDisplay } from '../../lib/whatsapp';
 import { DISBURSEMENT_TYPE_LABELS, ROLE_BADGES, ROLE_LABELS, TYPE_LABELS } from '../../lib/formatters';
 import type { AppRole, DisbursementAccountType, Profile } from '../../types/database';
 import { UserModal } from './UserModal';
@@ -417,9 +418,33 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         </button>
                       )}
                     </div>
-                    <span className="text-xs text-slate-500 font-mono block truncate">
-                      @{u.username}{u.designation ? ` • ${u.designation}` : ''}
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                      <span className="text-xs text-slate-500 font-mono">
+                        @{u.username}{u.designation ? ` • ${u.designation}` : ''}
+                      </span>
+                      {u.whatsapp_number ? (
+                        <a
+                          href={`https://wa.me/${cleanWhatsAppNumber(u.whatsapp_number)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 transition-colors shrink-0"
+                          title="Click to open WhatsApp chat with this user"
+                        >
+                          <MessageSquare className="w-3 h-3 text-emerald-600" />
+                          <span>{formatWhatsAppDisplay(u.whatsapp_number)}</span>
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setEditTarget(u)}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold text-slate-400 border border-dashed border-slate-300 hover:text-emerald-700 hover:border-emerald-400 hover:bg-emerald-50/50 transition-colors shrink-0"
+                          title="Add WhatsApp number for approval notifications"
+                        >
+                          <MessageSquare className="w-2.5 h-2.5" />
+                          <span>+ WhatsApp</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${u.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'

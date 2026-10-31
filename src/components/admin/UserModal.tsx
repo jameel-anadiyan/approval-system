@@ -40,6 +40,7 @@ interface UserModalProps {
     mandatory_head_consultation?: boolean;
     mandatory_consultation_head_id?: string | null;
     account_persons?: AccountPersonInput[];
+    whatsapp_number?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -58,6 +59,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
   const [designation, setDesignation] = useState('');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
   const [role, setRole] = useState<AppRole>(allowedRoles[0] || 'employee');
   const [disbursementType, setDisbursementType] = useState<DisbursementAccountType>('entry_only');
   const [paymentDealerType, setPaymentDealerType] = useState<'cash' | 'bank' | 'both'>('both');
@@ -79,6 +81,7 @@ export const UserModal: React.FC<UserModalProps> = ({
       setMandatoryHeadConsultation(false);
       setMandatoryConsultationHeadId('');
       setAccountPersons([{ name: '', passkey: '' }]);
+      setWhatsappNumber('');
     }
   }, [isOpen, allowedRoles]);
 
@@ -189,6 +192,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         username: cleanUsername,
         full_name: fullName.trim(),
         designation: designation.trim() || undefined,
+        whatsapp_number: whatsappNumber.trim() || undefined,
         role,
         department_id: isDepartmentRequired ? departmentId : null,
         password,
@@ -225,6 +229,7 @@ export const UserModal: React.FC<UserModalProps> = ({
         setUsername('');
         setFullName('');
         setDesignation('');
+        setWhatsappNumber('');
         setShopId('');
         setTypes(['general']);
         setAccountPersons([{ name: '', passkey: '' }]);
@@ -382,6 +387,23 @@ export const UserModal: React.FC<UserModalProps> = ({
               className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
             />
           </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-700 block mb-1">
+            WhatsApp Number
+          </label>
+          <input
+            type="tel"
+            maxLength={25}
+            value={whatsappNumber}
+            onChange={(e) => setWhatsappNumber(e.target.value)}
+            placeholder="e.g. +91 98765 43210 or 9876543210"
+            className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden font-mono"
+          />
+          <span className="text-[10px] text-slate-400 mt-1 block">
+            Approved documents and approval messages will be delivered to this WhatsApp number automatically.
+          </span>
         </div>
 
         {isDepartmentRequired && (
