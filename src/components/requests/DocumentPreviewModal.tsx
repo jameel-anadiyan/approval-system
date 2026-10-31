@@ -364,25 +364,39 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
               </Document>
             ) : (
               /* Fallback if PDF canvas fails (e.g. strict CORS or unsupported compression) */
-              <div className="w-full max-w-4xl p-2 flex flex-col items-center">
+              <div
+                style={{
+                  width: multiplier > 1 ? `${pageWidth}px` : '100%',
+                  maxWidth: multiplier > 1 ? 'none' : '56rem',
+                }}
+                className="w-full max-w-full overflow-x-auto p-2 flex flex-col items-center"
+              >
                 <iframe
                   src={`${resolvedUrl}#toolbar=1&navpanes=0`}
                   title={fileName}
-                  className="w-full h-[600px] sm:h-[800px] rounded-xl border border-slate-800 bg-white shadow-xl"
+                  style={{
+                    width: multiplier > 1 ? `${pageWidth}px` : '100%',
+                    height: multiplier > 1 ? `${Math.round(750 * multiplier)}px` : '750px',
+                  }}
+                  className="rounded-xl border border-slate-800 bg-white shadow-xl"
                 />
               </div>
             )}
           </div>
         ) : isImage && resolvedUrl ? (
-          <div className="w-full flex justify-center p-2">
+          <div className="w-full max-w-full overflow-x-auto overflow-y-auto flex justify-center p-2">
             <img
               src={resolvedUrl}
               alt={fileName}
               style={{
                 width: multiplier > 1 ? `${pageWidth}px` : 'auto',
-                maxWidth: multiplier > 1 ? undefined : '100%',
+                maxWidth: multiplier > 1 ? 'none' : '100%',
+                maxHeight: multiplier > 1 ? 'none' : '85vh',
+                height: multiplier > 1 ? 'auto' : undefined,
               }}
-              className="max-h-[85vh] rounded-xl shadow-2xl object-contain border border-slate-800 mx-auto"
+              className={`rounded-xl shadow-2xl transition-all duration-150 border border-slate-800 mx-auto ${
+                multiplier > 1 ? 'object-contain' : 'max-h-[85vh] object-contain'
+              }`}
             />
           </div>
         ) : (
@@ -448,6 +462,23 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     []
   );
 
+  // Set zoom for all documents (used by top bar controls so clicking 2x in top bar zooms ALL docs!)
+  const setZoomAll = useCallback(
+    (m: number | ((prev: number) => number)) => {
+      setDocMultipliers((prev) => {
+        const cur = prev[activeIndex] ?? 1;
+        const nextVal = typeof m === 'function' ? m(cur) : m;
+        const clamped = Math.max(1, Math.min(5, Math.round(nextVal * 10) / 10));
+        const updated: Record<number, number> = {};
+        files.forEach((_, idx) => {
+          updated[idx] = clamped;
+        });
+        return updated;
+      });
+    },
+    [files, activeIndex]
+  );
+
   // Measure scroll container width accurately for responsive rendering
   useEffect(() => {
     if (!isOpen) return;
@@ -509,23 +540,23 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     docRefs.current[idx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // Keyboard navigation: Escape to close, 1-5 for active document zoom
+  // Keyboard navigation: Escape to close, 1-5 for zoom
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
       } else if (['1', '2', '3', '4', '5'].includes(e.key)) {
-        setDocMultiplier(activeIndex, parseInt(e.key, 10));
+        setZoomAll(parseInt(e.key, 10));
       } else if (e.key === '+' || e.key === '=') {
-        setDocMultiplier(activeIndex, (m) => Math.min(5, m + 0.5));
+        setZoomAll((m) => Math.min(5, m + 0.5));
       } else if (e.key === '-') {
-        setDocMultiplier(activeIndex, (m) => Math.max(1, m - 0.5));
+        setZoomAll((m) => Math.max(1, m - 0.5));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, activeIndex, setDocMultiplier]);
+  }, [isOpen, onClose, setZoomAll]);
 
   if (!isOpen || files.length === 0) return null;
 
@@ -586,22 +617,20 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
           {/* Action Toolbar */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-            {/* Active Document Zoom Controls */}
+            {/* Main Top Bar Zoom Controls: Zooms all documents together */}
             {(() => {
               const activeMultiplier = getDocMultiplier(activeIndex);
               return (
                 <div className="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5">
-                  {files.length > 1 && (
-                    <span className="text-[10px] font-bold text-indigo-300 px-1.5 hidden md:inline">
-                      Doc #{activeIndex + 1} Zoom:
-                    </span>
-                  )}
+                  <span className="text-[10px] font-bold text-slate-400 px-1.5 hidden md:inline">
+                    Zoom:
+                  </span>
                   <button
                     type="button"
-                    onClick={() => setDocMultiplier(activeIndex, (m) => Math.max(1, Math.round((m - 0.5) * 10) / 10))}
+                    onClick={() => setZoomAll((m) => Math.max(1, Math.round((m - 0.5) * 10) / 10))}
                     disabled={activeMultiplier <= 1}
                     className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40 cursor-pointer"
-                    title={`Zoom Out Doc #${activeIndex + 1} (-)`}
+                    title="Zoom Out All (-)"
                   >
                     <ZoomOut className="w-3.5 h-3.5" />
                   </button>
@@ -610,13 +639,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     <button
                       key={m}
                       type="button"
-                      onClick={() => setDocMultiplier(activeIndex, m)}
+                      onClick={() => setZoomAll(m)}
                       className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold font-mono transition-colors cursor-pointer ${
                         activeMultiplier === m
                           ? 'bg-indigo-600 text-white shadow-xs'
                           : 'text-slate-300 hover:text-white hover:bg-slate-700'
                       }`}
-                      title={`Set Doc #${activeIndex + 1} zoom to ${m}x`}
+                      title={`Zoom all documents to ${m}x`}
                     >
                       {m}x
                     </button>
@@ -624,10 +653,10 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => setDocMultiplier(activeIndex, (m) => Math.min(5, Math.round((m + 0.5) * 10) / 10))}
+                    onClick={() => setZoomAll((m) => Math.min(5, Math.round((m + 0.5) * 10) / 10))}
                     disabled={activeMultiplier >= 5}
                     className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors disabled:opacity-40 cursor-pointer"
-                    title={`Zoom In Doc #${activeIndex + 1} (+)`}
+                    title="Zoom In All (+)"
                   >
                     <ZoomIn className="w-3.5 h-3.5" />
                   </button>
@@ -635,9 +664,9 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   {activeMultiplier > 1 && (
                     <button
                       type="button"
-                      onClick={() => setDocMultiplier(activeIndex, 1)}
+                      onClick={() => setZoomAll(1)}
                       className="p-1 hover:bg-slate-700 text-amber-400 rounded transition-colors ml-0.5 cursor-pointer"
-                      title={`Reset Doc #${activeIndex + 1} to 1x`}
+                      title="Reset all documents to 1x"
                     >
                       <RotateCcw className="w-3 h-3" />
                     </button>
