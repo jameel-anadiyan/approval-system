@@ -1,15 +1,30 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_LABELS, ROLE_BADGES, formatISTDate } from '../../lib/formatters';
-import { User, KeyRound, Building2, ShieldCheck, Check, LogOut, ShieldAlert, Camera, Pencil } from 'lucide-react';
+import {
+  User,
+  KeyRound,
+  Building2,
+  ShieldCheck,
+  Check,
+  LogOut,
+  ShieldAlert,
+  Camera,
+  Pencil,
+  MessageSquare,
+  Phone,
+  Send,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { UserAvatar } from '../../components/common/UserAvatar';
 import { PhotoUploadModal } from '../../components/admin/PhotoUploadModal';
 import { EditUserModal } from '../../components/admin/EditUserModal';
 import { useDirectory } from '../../lib/directory';
+import { sendTestWhatsAppMessage, cleanWhatsAppNumber } from '../../lib/whatsapp';
+import { errMsg } from '../../lib/errorUtils';
 
 export const ProfilePage: React.FC = () => {
-  const { user, role, updatePassword, logout, refreshProfile } = useAuth();
+  const { user, role, updatePassword, updateMyProfile, logout, refreshProfile } = useAuth();
   const dir = useDirectory();
   const navigate = useNavigate();
 
@@ -20,6 +35,59 @@ export const ProfilePage: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // WhatsApp number state & handlers
+  const [waNumberInput, setWaNumberInput] = useState(user?.whatsapp_number || '');
+  const [isSavingWa, setIsSavingWa] = useState(false);
+  const [isTestingWa, setIsTestingWa] = useState(false);
+  const [waMessage, setWaMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  React.useEffect(() => {
+    setWaNumberInput(user?.whatsapp_number || '');
+  }, [user?.whatsapp_number]);
+
+  const handleSaveWhatsApp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWaMessage(null);
+    setIsSavingWa(true);
+    try {
+      const res = await updateMyProfile({ whatsapp_number: waNumberInput.trim() || null });
+      if (res.success) {
+        setWaMessage({ text: 'WhatsApp number saved successfully!', type: 'success' });
+      } else {
+        setWaMessage({ text: res.error || 'Failed to update WhatsApp number.', type: 'error' });
+      }
+    } catch (err: unknown) {
+      setWaMessage({ text: errMsg(err), type: 'error' });
+    } finally {
+      setIsSavingWa(false);
+    }
+  };
+
+  const handleTestWhatsApp = async () => {
+    const phone = waNumberInput.trim() || user?.whatsapp_number;
+    if (!phone) {
+      setWaMessage({ text: 'Please enter a WhatsApp number first.', type: 'error' });
+      return;
+    }
+    setWaMessage(null);
+    setIsTestingWa(true);
+    try {
+      const res = await sendTestWhatsAppMessage(phone);
+      if (res.success) {
+        setWaMessage({
+          text: `Test message successfully sent to ${cleanWhatsAppNumber(phone)}! Please check your WhatsApp.`,
+          type: 'success',
+        });
+      } else {
+        setWaMessage({ text: res.error || 'Failed to send test message.', type: 'error' });
+      }
+    } catch (err: unknown) {
+      setWaMessage({ text: errMsg(err), type: 'error' });
+    } finally {
+      setIsTestingWa(false);
+    }
+  };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,7 +195,7 @@ export const ProfilePage: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-4 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 text-xs">
           <div>
             <span className="text-slate-400 font-medium block">Designation</span>
             <span className="font-semibold text-slate-800 mt-0.5 block">
@@ -142,11 +210,134 @@ export const ProfilePage: React.FC = () => {
             </span>
           </div>
           <div>
+            <span className="text-slate-400 font-medium block">WhatsApp Number</span>
+            <span className="font-semibold text-slate-800 mt-0.5 inline-flex items-center gap-1.5 font-mono">
+              {user?.whatsapp_number ? (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="text-emerald-950 font-bold truncate">{user.whatsapp_number}</span>
+                </>
+              ) : (
+                <a
+                  href="#whatsapp"
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-sans font-semibold underline"
+                >
+                  + Add number
+                </a>
+              )}
+            </span>
+          </div>
+          <div>
             <span className="text-slate-400 font-medium block">Created Date</span>
             <span className="font-semibold text-slate-800 mt-0.5 block">
               {formatISTDate(user?.created_at, false)}
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* WhatsApp Notifications & Number Card */}
+      <div id="whatsapp" className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-200 shrink-0">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold text-slate-900 font-display">
+                  WhatsApp Approval Notifications
+                </h3>
+                {user?.whatsapp_number ? (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Active
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                    Not Configured
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Official approved PDF documents and approval messages will be delivered to this number.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {waMessage && (
+          <div
+            className={`p-3.5 rounded-xl text-xs mb-4 flex items-start gap-2 ${
+              waMessage.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : 'bg-rose-50 text-rose-800 border border-rose-200'
+            }`}
+          >
+            {waMessage.type === 'success' ? (
+              <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : (
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            )}
+            <span>{waMessage.text}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveWhatsApp} className="space-y-4 max-w-lg">
+          <div>
+            <label htmlFor="profile-whatsapp" className="text-xs font-bold text-slate-700 block mb-1">
+              Your Personal WhatsApp Number
+            </label>
+            <div className="relative">
+              <div className="absolute left-3.5 top-3.5 text-emerald-600 flex items-center pointer-events-none">
+                <Phone className="w-4 h-4" />
+              </div>
+              <input
+                id="profile-whatsapp"
+                type="tel"
+                value={waNumberInput}
+                onChange={(e) => setWaNumberInput(e.target.value)}
+                placeholder="e.g. +91 98468 80713 or 9846880713"
+                className="w-full text-sm pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
+              />
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Include country code (e.g. +91 for India) or enter 10 digits.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={isSavingWa}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-200 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>{isSavingWa ? 'Saving…' : 'Save WhatsApp Number'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleTestWhatsApp}
+              disabled={isTestingWa || !waNumberInput.trim()}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-emerald-50/60 hover:bg-emerald-100/60 text-emerald-800 font-semibold text-xs transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <Send className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{isTestingWa ? 'Sending Test…' : 'Send Test WhatsApp'}</span>
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-[11px] text-slate-600 space-y-1.5">
+          <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+            <span>✨ How WhatsApp Notifications Work:</span>
+          </div>
+          <p>
+            • Whenever a request submitted by you is <strong>approved</strong>, the official sealed approval PDF document packet will be delivered directly to your WhatsApp.
+          </p>
+          <p>
+            • Department heads will also receive approved document notifications for requests under their supervision.
+          </p>
         </div>
       </div>
 
@@ -263,11 +454,16 @@ export const ProfilePage: React.FC = () => {
         <EditUserModal
           isOpen
           user={user}
+          title="Edit Profile"
+          description="Update your full name, designation, and WhatsApp notification number."
           onClose={() => setEditModalOpen(false)}
           onSave={async (input) => {
-            const res = await dir.updateUserDetails(user.id, input);
+            const res = await updateMyProfile({
+              full_name: input.full_name,
+              designation: input.designation,
+              whatsapp_number: input.whatsapp_number,
+            });
             if (res.success) {
-              await refreshProfile();
               setMessage({ text: 'Profile details updated successfully!', type: 'success' });
               setEditModalOpen(false);
             }

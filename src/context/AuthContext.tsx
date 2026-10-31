@@ -15,6 +15,11 @@ interface AuthContextType {
   /** Sandbox only: switch demo persona. No-op when connected to Supabase. */
   switchMockRole: (role: AppRole) => void;
   updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  updateMyProfile: (data: {
+    full_name?: string;
+    designation?: string | null;
+    whatsapp_number?: string | null;
+  }) => Promise<{ success: boolean; error?: string }>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -226,6 +231,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true };
   };
 
+  const updateMyProfile = async (data: {
+    full_name?: string;
+    designation?: string | null;
+    whatsapp_number?: string | null;
+  }): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Not logged in' };
+
+    const newFullName = (data.full_name ?? user.full_name).trim();
+    const newDesignation = data.designation !== undefined ? (data.designation?.trim() || null) : user.designation;
+    const newWhatsApp = data.whatsapp_number !== undefined ? (data.whatsapp_number?.trim() || null) : user.whatsapp_number;
+
+    if (!newFullName) {
+      return { success: false, error: 'Full name cannot be empty.' };
+    }
+
+    if (isBackendConnected) {
+      // 1. Try RPC update_user_details
+      const { error: rpcErr } = await supabase.rpc('update_user_details', {
+        p_user_id: user.id,
+        p_full_name: newFullName,
+        p_username: user.username,
+        p_designation: newDesignation,
+        p_whatsapp_number: newWhatsApp,
+      });
+
+      if (rpcErr) {
+        console.warn('RPC update_user_details failed, trying direct profiles table update:', rpcErr);
+        // 2. Direct profiles table update fallback
+        const { error: pErr } = await supabase
+          .from('profiles')
+          .update({
+            full_name: newFullName,
+            designation: newDesignation,
+            whatsapp_number: newWhatsApp,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+
+        if (pErr) {
+          return { success: false, error: pErr.message || 'Failed to update profile details' };
+        }
+      }
+
+      await refreshProfile();
+      return { success: true };
+    }
+
+    // Offline / sandbox mode
+    const updated: Profile = {
+      ...user,
+      full_name: newFullName,
+      designation: newDesignation,
+      whatsapp_number: newWhatsApp,
+      updated_at: new Date().toISOString(),
+    };
+    setSandboxUser(updated);
+    return { success: true };
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -237,6 +301,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         switchMockRole,
         updatePassword,
+        updateMyProfile,
         refreshProfile,
       }}
     >

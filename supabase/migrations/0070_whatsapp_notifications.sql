@@ -8,6 +8,13 @@ alter table public.profiles add column if not exists whatsapp_number text;
 -- Allow authenticated users to update whatsapp_number on profiles through RLS
 grant update (full_name, username, designation, whatsapp_number, updated_at) on public.profiles to authenticated;
 
+-- Allow users to update their own profile directly through RLS
+drop policy if exists "users update own profile" on public.profiles;
+create policy "users update own profile" on public.profiles
+  for update to authenticated
+  using (id = auth.uid())
+  with check (id = auth.uid());
+
 -- 2. Drop existing update_user_details function first to avoid PostgreSQL 42P13 default conflict
 drop function if exists public.update_user_details(uuid, text, text, text);
 drop function if exists public.update_user_details(uuid, text, text, text, text);

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bell, LogOut, KeyRound, CheckCircle2, User, ChevronDown } from 'lucide-react';
+import { Bell, LogOut, KeyRound, CheckCircle2, User, ChevronDown, MessageSquare } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { ROLE_LABELS, ROLE_BADGES, formatRelativeTime } from '../../lib/formatters';
@@ -286,6 +286,14 @@ export const Header: React.FC = () => {
                   >
                     <User className="w-4 h-4 text-slate-400" />
                     <span>My Profile</span>
+                  </Link>
+                  <Link
+                    to="/profile#whatsapp"
+                    onClick={() => setShowUserMenu(false)}
+                    className="flex items-center gap-2.5 px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    <MessageSquare className="w-4 h-4 text-emerald-600" />
+                    <span>WhatsApp Notifications</span>
                   </Link>
                   <Link
                     to="/profile#password"
