@@ -39,7 +39,7 @@ import { canViewDiscountReport } from '../../lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTransferReport';
 import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest, canUserViewBillMissingRequest } from '../../lib/workflow';
 import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
-import { entryPayable, entryOutstanding } from '../../types/database';
+import { entryPayable, entryOutstanding, entryAvailable } from '../../types/database';
 import { isEntryCheckingUser } from '../../lib/formatters';
 import { FileWarning } from 'lucide-react';
 
@@ -103,12 +103,25 @@ export const Navigation: React.FC = () => {
 
   const isEntryOnlyUser = role === 'disbursement' && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
   const isPaymentOnlyUser = role === 'disbursement' && user?.disbursement_type === 'payment_only';
+
+  const disbNewEntryCount = requests.filter((r) => {
+    if (r.status !== 'approved' || r.request_type === 'discount' || r.request_type === 'non_cash' || r.request_type === 'stock_transfer') {
+      return false;
+    }
+    if (isEntryOnlyUser) {
+      if (r.assigned_entry_user_id && r.assigned_entry_user_id !== user?.id) return false;
+      return entryAvailable(r) > 0;
+    }
+    return entryAvailable(r) > 0;
+  }).length;
+
   const disbAwaitingCount = requests.filter((r) => {
     if (r.status !== 'approved' || r.request_type === 'discount' || r.request_type === 'non_cash' || r.request_type === 'stock_transfer') {
       return false;
     }
     if (isEntryOnlyUser) {
-      return !r.assigned_entry_user_id || r.assigned_entry_user_id === user?.id;
+      if (r.assigned_entry_user_id && r.assigned_entry_user_id !== user?.id) return false;
+      return entryAvailable(r) <= 0;
     }
     if (isPaymentOnlyUser) {
       // Payment accounts only receive verified payable entries associated with this cashier
@@ -287,12 +300,15 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Search', path: '/disbursement', icon: Search },
         billMissingNavItem,
-        { label: 'Awaiting Pay', path: '/disbursement/awaiting', icon: Clock, badge: disbAwaitingCount },
+        isEntryOnlyUser
+          ? { label: 'New Entry Wait', path: '/disbursement', icon: Clock, badge: disbNewEntryCount }
+          : { label: 'Awaiting Pay', path: '/disbursement/awaiting', icon: Clock, badge: disbAwaitingCount },
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
       ];
       moreNavItems = [
         { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
+        ...(isEntryOnlyUser ? [{ label: 'Awaiting Pay', path: '/disbursement/awaiting', icon: Wallet, badge: disbAwaitingCount }] : []),
         { label: 'Paid History', path: '/disbursement/paid', icon: CheckCircle },
         { label: 'Verify Scan', path: '/disbursement/verify', icon: ShieldCheck },
         ...stockReportItem,
@@ -317,6 +333,7 @@ export const Navigation: React.FC = () => {
                 item.path === '/head' ||
                 item.path === '/clerk' ||
                 item.path === '/disbursement' ||
+                item.path === '/disbursement/new-entry' ||
                 item.path === '/stock-transfers' ||
                 item.path === '/my' ||
                 item.path === '/regional' ||
@@ -398,6 +415,7 @@ export const Navigation: React.FC = () => {
                 item.path === '/head' ||
                 item.path === '/clerk' ||
                 item.path === '/disbursement' ||
+                item.path === '/disbursement/new-entry' ||
                 item.path === '/stock-transfers' ||
                 item.path === '/my' ||
                 item.path === '/regional' ||

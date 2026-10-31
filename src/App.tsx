@@ -295,6 +295,7 @@ export const App: React.FC = () => {
                 {/* Disbursement routes */}
                 <Route element={<RequirePaymentDisbursement />}>
                   <Route path="disbursement" element={<DisbursementPage />} />
+                  <Route path="disbursement/new-entry" element={<DisbursementPage />} />
                   <Route path="disbursement/awaiting" element={<DisbursementPage />} />
                   <Route path="disbursement/paid" element={<DisbursementPage />} />
                   <Route path="disbursement/verify" element={<DisbursementVerifyPage />} />

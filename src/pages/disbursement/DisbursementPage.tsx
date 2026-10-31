@@ -61,9 +61,12 @@ export const DisbursementPage: React.FC = () => {
   const canAddEntry = isEntryOnly || isAdmin;
   const canPay = isPaymentOnly || isAdmin;
 
-  const [activeTab, setActiveTab] = useState<'awaiting' | 'clarification' | 'bill_missing' | 'rejected' | 'paid'>(
-    location.pathname.endsWith('/paid') ? 'paid' : 'awaiting'
-  );
+  const [activeTab, setActiveTab] = useState<'new_entry' | 'awaiting' | 'clarification' | 'bill_missing' | 'rejected' | 'paid'>(() => {
+    if (location.pathname.endsWith('/paid')) return 'paid';
+    if (location.pathname.endsWith('/awaiting')) return 'awaiting';
+    if (location.pathname.endsWith('/new-entry')) return 'new_entry';
+    return isEntryOnly ? 'new_entry' : 'awaiting';
+  });
   const [payTarget, setPayTarget] = useState<{ request: RequestRecord; entry?: DisbursementEntry | null } | null>(null);
   const [entryModalTarget, setEntryModalTarget] = useState<RequestRecord | null>(null);
   const [editEntryTarget, setEditEntryTarget] = useState<{ request: RequestRecord; entry: DisbursementEntry } | null>(null);
@@ -98,9 +101,19 @@ export const DisbursementPage: React.FC = () => {
     );
   };
 
+  const hasSetDefaultTab = React.useRef(false);
   useEffect(() => {
-    setActiveTab(location.pathname.endsWith('/paid') ? 'paid' : 'awaiting');
-  }, [location.pathname]);
+    if (location.pathname.endsWith('/paid')) {
+      setActiveTab('paid');
+    } else if (location.pathname.endsWith('/awaiting')) {
+      setActiveTab('awaiting');
+    } else if (location.pathname.endsWith('/new-entry')) {
+      setActiveTab('new_entry');
+    } else if (!hasSetDefaultTab.current) {
+      setActiveTab(isEntryOnly ? 'new_entry' : 'awaiting');
+      hasSetDefaultTab.current = true;
+    }
+  }, [location.pathname, isEntryOnly]);
 
   const handleDownload = async (req: RequestRecord) => {
     setNotice(null);
@@ -118,14 +131,21 @@ export const DisbursementPage: React.FC = () => {
     ? payable.filter((r) => !r.assigned_entry_user_id || r.assigned_entry_user_id === user?.id)
     : payable;
 
-  // Awaiting payment: status === 'approved'
+  // Approved in scope
+  const approvedInScope = entryFilteredPayable.filter((r) => r.status === 'approved');
+
+  // New Entry Wait: ONLY requests where a new entry is needed to proceed (entryAvailable > 0).
+  // Requests waiting for payment are NOT in this.
+  const newEntryWaitQueue = isPaymentOnly ? [] : approvedInScope.filter((r) => entryAvailable(r) > 0);
+
+  // Awaiting Payment: approved requests where all entries have been created (entryAvailable <= 0) and are waiting for cashier payout.
   // For Payment-Only Cashiers: ONLY show requests that have at least one verified (approved) entry ready to be paid by THIS cashier!
-  const awaitingQueue = isPaymentOnly
+  const awaitingPaymentQueue = isPaymentOnly
     ? payable.filter((r) => canPaymentUserViewAwaitingRequest(user, r, dir.users))
-    : entryFilteredPayable.filter((r) => r.status === 'approved');
+    : approvedInScope.filter((r) => entryAvailable(r) <= 0);
 
   // Under Clarification: approved but waiting for Head's response
-  const underClarificationQueue = awaitingQueue.filter((r) =>
+  const underClarificationQueue = approvedInScope.filter((r) =>
     (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
   );
 
@@ -146,8 +166,10 @@ export const DisbursementPage: React.FC = () => {
     : entryFilteredPayable.filter((r) => r.status === 'paid');
 
   const currentList =
-    activeTab === 'awaiting'
-      ? awaitingQueue
+    activeTab === 'new_entry'
+      ? newEntryWaitQueue
+      : activeTab === 'awaiting'
+      ? awaitingPaymentQueue
       : activeTab === 'clarification'
       ? underClarificationQueue
       : activeTab === 'bill_missing'
@@ -157,11 +179,12 @@ export const DisbursementPage: React.FC = () => {
       : [];
 
   const { filters, setFilters, result: filtered } = useRequestFilters(currentList, {
-    sort: (activeTab === 'awaiting' || activeTab === 'bill_missing') ? 'oldest' : 'newest',
+    sort: (activeTab === 'new_entry' || activeTab === 'awaiting' || activeTab === 'bill_missing') ? 'oldest' : 'newest',
   });
   const search = filters.q;
-  const partialCount = awaitingQueue.filter((r) => paymentSummary(r).partial).length;
-  const awaitingBalance = awaitingQueue.reduce((s, r) => {
+  const partialCount = awaitingPaymentQueue.filter((r) => paymentSummary(r).partial).length;
+  const newEntryAvailableBalance = newEntryWaitQueue.reduce((s, r) => s + entryAvailable(r), 0);
+  const awaitingBalance = awaitingPaymentQueue.reduce((s, r) => {
     if (isPaymentOnly) {
       const myEntries = (r.disbursement_entries || []).filter(
         (e) => e.status === 'approved' && isPaymentUserAllowedForEntry(user, e, r, dir.users).allowed
@@ -300,16 +323,57 @@ export const DisbursementPage: React.FC = () => {
         <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-800">{notice}</div>
       )}
 
-      {awaitingQueue.length > 0 && (
+      {/* KPI Stats Banner */}
+      {activeTab === 'new_entry' && newEntryWaitQueue.length > 0 && (
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-2xl bg-white border border-slate-200 p-4">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Balance to pay</span>
-            <span className="text-lg sm:text-xl font-extrabold font-display text-slate-900">{formatINR(awaitingBalance)}</span>
+          <div className="rounded-2xl bg-white border border-teal-200 p-4 shadow-2xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 block">
+              Unentered Balance Needed
+            </span>
+            <span className="text-lg sm:text-xl font-extrabold font-display text-teal-950">
+              {formatINR(newEntryAvailableBalance)}
+            </span>
+            <span className="text-[11px] text-slate-500 block mt-0.5">
+              Available for new disbursement entries
+            </span>
           </div>
-          <div className="rounded-2xl bg-white border border-amber-200 p-4">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">Partially paid</span>
-            <span className="text-lg sm:text-xl font-extrabold font-display text-amber-800">{partialCount}</span>
-            <span className="text-[11px] text-slate-500"> of {awaitingQueue.length} awaiting</span>
+          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-2xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Requests Needing Entry
+            </span>
+            <span className="text-lg sm:text-xl font-extrabold font-display text-slate-900">
+              {newEntryWaitQueue.length}
+            </span>
+            <span className="text-[11px] text-slate-500 block mt-0.5">
+              New entry needed to proceed
+            </span>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'awaiting' && awaitingPaymentQueue.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-2xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+              Balance to pay
+            </span>
+            <span className="text-lg sm:text-xl font-extrabold font-display text-slate-900">
+              {formatINR(awaitingBalance)}
+            </span>
+            <span className="text-[11px] text-slate-500 block mt-0.5">
+              Entries created &amp; awaiting cashier payout
+            </span>
+          </div>
+          <div className="rounded-2xl bg-white border border-amber-200 p-4 shadow-2xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">
+              Partially paid
+            </span>
+            <span className="text-lg sm:text-xl font-extrabold font-display text-amber-800">
+              {partialCount}
+            </span>
+            <span className="text-[11px] text-slate-500 block mt-0.5">
+              of {awaitingPaymentQueue.length} awaiting payment
+            </span>
           </div>
         </div>
       )}
@@ -335,23 +399,48 @@ export const DisbursementPage: React.FC = () => {
             </span>
           )}
         </button>
+
+        {(!isPaymentOnly || isAdmin) && (
+          <button
+            type="button"
+            id="tab-new-entry-wait"
+            onClick={() => setActiveTab('new_entry')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+              activeTab === 'new_entry'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>New Entry Wait</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                activeTab === 'new_entry' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
+              }`}
+            >
+              {newEntryWaitQueue.length}
+            </span>
+          </button>
+        )}
+
         <button
           type="button"
+          id="tab-awaiting"
           onClick={() => setActiveTab('awaiting')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
             activeTab === 'awaiting'
               ? 'bg-teal-600 text-white shadow-xs'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
-          <Clock className="w-3.5 h-3.5" />
+          <Banknote className="w-3.5 h-3.5" />
           <span>Awaiting Payment</span>
           <span
             className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
               activeTab === 'awaiting' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
             }`}
           >
-            {awaitingQueue.length}
+            {awaitingPaymentQueue.length}
           </span>
         </button>
 
@@ -525,6 +614,64 @@ export const DisbursementPage: React.FC = () => {
         )
       ) : (
         <>
+          {/* Inner Queue Switcher for Approved Requests */}
+          {(activeTab === 'new_entry' || activeTab === 'awaiting') && (!isPaymentOnly || isAdmin) && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 border border-slate-200 p-2.5 rounded-2xl">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-slate-700 px-1">Entry &amp; Payment Queue:</span>
+                <div className="inline-flex items-center bg-slate-200/80 p-1 rounded-xl gap-1">
+                  <button
+                    type="button"
+                    id="inner-toggle-new-entry"
+                    onClick={() => setActiveTab('new_entry')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeTab === 'new_entry'
+                        ? 'bg-white text-teal-900 shadow-xs border border-teal-200/60'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5 text-teal-600" />
+                    <span>New Entry Wait</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        activeTab === 'new_entry' ? 'bg-teal-100 text-teal-900' : 'bg-slate-300 text-slate-700'
+                      }`}
+                    >
+                      {newEntryWaitQueue.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="inner-toggle-awaiting"
+                    onClick={() => setActiveTab('awaiting')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeTab === 'awaiting'
+                        ? 'bg-white text-teal-900 shadow-xs border border-teal-200/60'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Banknote className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Awaiting Payment</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        activeTab === 'awaiting' ? 'bg-teal-100 text-teal-900' : 'bg-slate-300 text-slate-700'
+                      }`}
+                    >
+                      {awaitingPaymentQueue.length}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-slate-500 font-medium px-1">
+                {activeTab === 'new_entry'
+                  ? 'Showing only items where a new entry is needed to proceed. Waiting for payment items are not in this.'
+                  : 'Showing approved requests with entries already created waiting for payment.'}
+              </div>
+            </div>
+          )}
+
           <RequestFilters value={filters} onChange={setFilters} source={currentList} resultCount={filtered.length} />
 
           {/* Results */}
@@ -534,8 +681,10 @@ export const DisbursementPage: React.FC = () => {
               title={
                 search
                   ? 'No matching vouchers'
+                  : activeTab === 'new_entry'
+                  ? 'No New Entries Needed!'
                   : activeTab === 'awaiting'
-                  ? 'All Payments Disbursed!'
+                  ? 'No Requests Waiting for Payment'
                   : activeTab === 'clarification'
                   ? 'No Requests Under Clarification'
                   : activeTab === 'bill_missing'
@@ -545,6 +694,8 @@ export const DisbursementPage: React.FC = () => {
               description={
                 search
                   ? 'Try searching with an exact approval number.'
+                  : activeTab === 'new_entry'
+                  ? 'All approved requests have their disbursement entries created! No requests currently waiting for a new entry.'
                   : activeTab === 'awaiting'
                   ? 'No approved requests currently waiting for payment settlement.'
                   : activeTab === 'clarification'
