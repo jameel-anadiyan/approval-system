@@ -8,7 +8,14 @@ export const TargetHeadField: React.FC<{
   onChange: (headId: string) => void;
   userId?: string;
   disabled?: boolean;
-}> = ({ value, onChange, userId, disabled }) => {
+  /** Optional currently assigned Head on an existing/returned request so it remains selectable even if assigned by a Regional Head */
+  currentHead?: {
+    head_id: string;
+    head_name: string;
+    department_id: string;
+    department_name: string;
+  } | null;
+}> = ({ value, onChange, userId, disabled, currentHead }) => {
   const { getUserTargetHeads } = useRequests();
   const [heads, setHeads] = useState<UserTargetHead[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -34,7 +41,12 @@ export const TargetHeadField: React.FC<{
     };
   }, [getUserTargetHeads, userId]);
 
-  if (!loaded || heads.length <= 1) return null;
+  const displayHeads: UserTargetHead[] =
+    currentHead?.head_id && !heads.some((h) => h.head_id === currentHead.head_id)
+      ? [{ ...currentHead, is_default: false }, ...heads]
+      : heads;
+
+  if (!loaded || displayHeads.length <= 1) return null;
 
   return (
     <div className="bg-sky-50/60 border border-sky-200/80 rounded-xl p-4 space-y-2">
@@ -49,7 +61,7 @@ export const TargetHeadField: React.FC<{
         disabled={disabled}
         className="w-full text-base sm:text-sm p-3 rounded-xl border border-slate-200 bg-white focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-hidden font-medium"
       >
-        {heads.map((h) => (
+        {displayHeads.map((h) => (
           <option key={h.head_id} value={h.head_id}>
             {h.head_name} ({h.department_name}){h.is_default ? ' — Main Head' : ''}
           </option>

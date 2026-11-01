@@ -313,6 +313,19 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         {type !== 'exhibition' && user?.role !== 'head' && (
           <TargetHeadField
             value={targetHeadId}
+            currentHead={
+              request.owner_head_id
+                ? {
+                    head_id: request.owner_head_id,
+                    head_name: request.owner_head_name || 'Assigned Head',
+                    department_id: request.department_id,
+                    department_name:
+                      request.department?.name ||
+                      dir.departments.find((d) => d.id === request.department_id)?.name ||
+                      'Department',
+                  }
+                : null
+            }
             onChange={(newHeadId) => {
               if (newHeadId !== targetHeadId) {
                 setTargetHeadId(newHeadId);

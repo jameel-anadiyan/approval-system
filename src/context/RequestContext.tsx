@@ -136,8 +136,14 @@ interface RequestContextType {
   headChangeRoute: (id: string, newRoute: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   assignDisbursementEntryUser: (requestId: string, entryUserId: string) => Promise<{ success: boolean; error?: string }>;
   forwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
-  /** Regional Head forwards an employee's request to the clerk (no approval). */
-  regionalForwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<Result>;
+  /** Regional Head forwards an employee's request to the clerk (no approval), optionally redirecting to an Admin-allowed Department Head. */
+  regionalForwardRequest: (
+    id: string,
+    remarks?: string,
+    voice?: ActionVoice | null,
+    targetHeadId?: string | null,
+    categoryId?: string | null
+  ) => Promise<Result>;
   /** Work categories the current user can pick, and whether one is required. */
   loadCategoryOptions: (targetHeadId?: string | null) => Promise<CategoryOptions>;
   /** Heads available for a user to submit requests to */
@@ -1891,16 +1897,102 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  const regionalForwardRequest = async (id: string, remarks?: string, voice?: ActionVoice | null): Promise<Result> => {
+  const regionalForwardRequest = async (
+    id: string,
+    remarks?: string,
+    voice?: ActionVoice | null,
+    targetHeadId?: string | null,
+    categoryId?: string | null
+  ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
-    if (!isBackendConnected) return { success: false, error: 'Regional Head forwarding needs the live backend' };
+    const currentReq = getRequestById(id);
+    const cleanRemarks = remarks?.trim() || null;
+    const cleanTargetHeadId = targetHeadId?.trim() || null;
+    const cleanCategoryId = categoryId?.trim() || null;
+    const headChanged = Boolean(
+      cleanTargetHeadId &&
+        currentReq?.request_type !== 'exhibition' &&
+        cleanTargetHeadId !== (currentReq?.owner_head_id || null)
+    );
+
+    if (!isBackendConnected) {
+      if (!currentReq) return { success: false, error: 'Request not found' };
+      const chosenHead = cleanTargetHeadId
+        ? MOCK_USERS.find((u) => u.id === cleanTargetHeadId && u.role === 'head')
+        : null;
+      const now = new Date().toISOString();
+      const actionNote =
+        headChanged && chosenHead
+          ? cleanRemarks
+            ? `[Directed to ${chosenHead.full_name}] ${cleanRemarks}`
+            : `Directed to ${chosenHead.full_name}`
+          : cleanRemarks;
+      setRequests((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                status: 'submitted',
+                owner_head_id: headChanged && chosenHead ? chosenHead.id : r.owner_head_id,
+                owner_head_name: headChanged && chosenHead ? chosenHead.full_name : r.owner_head_name,
+                department_id:
+                  headChanged && chosenHead?.department_id ? chosenHead.department_id : r.department_id,
+                category_id: cleanCategoryId !== null ? cleanCategoryId : headChanged ? null : r.category_id,
+                regional_forwarded_at: now,
+                updated_at: now,
+                actions: [
+                  {
+                    id: `act-${Date.now()}`,
+                    request_id: id,
+                    actor_id: user.id,
+                    actor_name: user.full_name,
+                    actor_role: user.role,
+                    action: 'regional_forwarded',
+                    from_status: r.status,
+                    to_status: 'submitted',
+                    remarks: actionNote,
+                    visible_to_requester: true,
+                    created_at: now,
+                  },
+                  ...(r.actions || []),
+                ],
+              }
+            : r
+        )
+      );
+      return { success: true };
+    }
+
     try {
       await uploadActionVoice(id, voice);
       const { error } = await supabase.rpc('regional_forward_request', {
         p_request_id: id,
-        p_remarks: remarks?.trim() || null,
+        p_remarks: cleanRemarks,
+        p_target_head_id: cleanTargetHeadId,
+        p_category_id: cleanCategoryId,
       });
-      if (error) throw error;
+      if (error) {
+        const isMissingNewSignature =
+          error.code === 'PGRST202' ||
+          (error.message && error.message.includes('regional_forward_request'));
+        if (isMissingNewSignature) {
+          if (!headChanged) {
+            const { error: fallbackErr } = await supabase.rpc('regional_forward_request', {
+              p_request_id: id,
+              p_remarks: cleanRemarks,
+            });
+            if (fallbackErr) throw fallbackErr;
+            await loadRequests();
+            return { success: true };
+          }
+          return {
+            success: false,
+            error:
+              'Database update required to redirect to another Department Head: please run supabase/manual/apply_0073_regional_forward_target_head.sql in Supabase SQL Editor.',
+          };
+        }
+        throw error;
+      }
       await loadRequests();
       return { success: true };
     } catch (err: unknown) {
@@ -1923,12 +2015,98 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const getUserTargetHeads = useCallback(
     async (userId?: string): Promise<UserTargetHead[]> => {
-      if (!isBackendConnected || !user) return [];
-      const { data, error } = await supabase.rpc('get_user_target_heads', {
-        p_user_id: userId || null,
-      });
-      if (error || !data) return [];
-      return data as UserTargetHead[];
+      const targetUid = userId || user?.id;
+      if (!targetUid || !user) return [];
+      if (isBackendConnected) {
+        const { data, error } = await supabase.rpc('get_user_target_heads', {
+          p_user_id: userId || null,
+        });
+        if (!error && Array.isArray(data) && data.length > 0) {
+          return data as UserTargetHead[];
+        }
+        // Fallback: query user_heads + profiles directly if RPC returned empty
+        const [{ data: uhRows }, { data: profRow }] = await Promise.all([
+          supabase.from('user_heads').select('head_id, is_default').eq('user_id', targetUid),
+          supabase.from('profiles').select('default_head_id, department_id').eq('id', targetUid).maybeSingle(),
+        ]);
+        const headIds = new Set<string>(
+          ((uhRows || []) as Array<{ head_id?: string | null }>)
+            .map((r) => r.head_id || '')
+            .filter(Boolean)
+        );
+        if (profRow?.default_head_id) headIds.add(profRow.default_head_id);
+        let headProfiles: Array<{
+          id: string;
+          full_name: string;
+          department_id: string | null;
+          department?: { name?: string } | Array<{ name?: string }> | null;
+        }> = [];
+        if (headIds.size > 0) {
+          const { data: hp } = await supabase
+            .from('profiles')
+            .select('id, full_name, department_id, department:departments(name)')
+            .in('id', Array.from(headIds))
+            .eq('role', 'head')
+            .eq('is_active', true);
+          headProfiles = (hp || []) as typeof headProfiles;
+        } else if (profRow?.department_id) {
+          const { data: hp } = await supabase
+            .from('profiles')
+            .select('id, full_name, department_id, department:departments(name)')
+            .eq('department_id', profRow.department_id)
+            .eq('role', 'head')
+            .eq('is_active', true);
+          headProfiles = (hp || []) as typeof headProfiles;
+        }
+        const defaultSet = new Set<string>(
+          ((uhRows || []) as Array<{ head_id?: string | null; is_default?: boolean }>)
+            .filter((r) => r.is_default && r.head_id)
+            .map((r) => r.head_id as string)
+        );
+        if (profRow?.default_head_id) defaultSet.add(profRow.default_head_id);
+        return headProfiles
+          .map((h) => {
+            const deptRel = Array.isArray(h.department) ? h.department[0] : h.department;
+            return {
+              head_id: h.id,
+              head_name: h.full_name,
+              department_id: h.department_id || '',
+              department_name: deptRel?.name || 'Department',
+              is_default: defaultSet.has(h.id) || headProfiles.length === 1,
+            };
+          })
+          .sort((a, b) =>
+            a.is_default === b.is_default ? a.head_name.localeCompare(b.head_name) : a.is_default ? -1 : 1
+          );
+      }
+
+      const targetUser = (
+        targetUid === user.id ? user : MOCK_USERS.find((u) => u.id === targetUid)
+      ) as Profile | undefined;
+      if (!targetUser) return [];
+      const uhList = targetUser.user_heads || [];
+      const candidateIds = new Set<string>(uhList.map((u) => u.head_id));
+      if (targetUser.default_head_id) candidateIds.add(targetUser.default_head_id);
+      const mockHeads = MOCK_USERS.filter(
+        (u) =>
+          u.role === 'head' &&
+          u.is_active &&
+          (candidateIds.size > 0 ? candidateIds.has(u.id) : u.department_id === targetUser.department_id)
+      );
+      return mockHeads
+        .map((h) => ({
+          head_id: h.id,
+          head_name: h.full_name,
+          department_id: h.department_id || '',
+          department_name: h.department?.name || 'Department',
+          is_default:
+            uhList.some((uh) => uh.head_id === h.id && uh.is_default) ||
+            targetUser.default_head_id === h.id ||
+            mockHeads.length === 1,
+        }))
+        .sort((a, b) =>
+          a.is_default === b.is_default ? a.head_name.localeCompare(b.head_name) : a.is_default ? -1 : 1
+        );
     },
     [isBackendConnected, user]
   );

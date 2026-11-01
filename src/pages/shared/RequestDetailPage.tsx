@@ -2683,7 +2683,20 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onForward={(rm, v) => orThrow(regionalForwardRequest(request.id, rm, v), 'Forwarded to the clerk.')}
+          onForward={(rm, v, sel) =>
+            orThrow(
+              regionalForwardRequest(
+                request.id,
+                rm,
+                v,
+                sel?.targetHeadId ?? null,
+                sel?.categoryId ?? null
+              ),
+              sel?.headChanged && sel?.targetHeadName
+                ? `Forwarded to clerk under ${sel.targetHeadName}.`
+                : 'Forwarded to the clerk.'
+            )
+          }
         />
       )}
 
