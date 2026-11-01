@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { formatINR, formatISTDate, getTodayIST, toISTDateKey } from '../../lib/formatters';
+import { formatINR, formatISTDate, getExhibitionShopName, getTodayIST, toISTDateKey } from '../../lib/formatters';
 import { extractEventDate } from '../../lib/exhibitionQuota';
 import {
   AlertTriangle,
@@ -119,7 +119,8 @@ export const HeadExhibitionWaitlistPage: React.FC = () => {
         const requesterMatch = (r.requester_name || '').toLowerCase().includes(q);
         const venueMatch = (r.details?.venue || '').toLowerCase().includes(q);
         const regionMatch = (r.region_name || '').toLowerCase().includes(q);
-        if (!titleMatch && !eventNameMatch && !requesterMatch && !venueMatch && !regionMatch) {
+        const shopMatch = getExhibitionShopName(r).toLowerCase().includes(q);
+        if (!titleMatch && !eventNameMatch && !requesterMatch && !venueMatch && !regionMatch && !shopMatch) {
           return false;
         }
       }
@@ -414,9 +415,13 @@ export const HeadExhibitionWaitlistPage: React.FC = () => {
                         {r.details?.event_name || r.title}
                       </h3>
                       <div className="flex flex-wrap items-center gap-y-1.5 gap-x-4 text-xs text-slate-600">
+                        <span className="inline-flex items-center gap-1">
+                          <Store className="w-3.5 h-3.5 text-slate-400" />
+                          Shop: <strong className="text-slate-800">{getExhibitionShopName(r)}</strong>
+                        </span>
                         {r.details?.venue && (
                           <span className="inline-flex items-center gap-1">
-                            <Store className="w-3.5 h-3.5 text-slate-400" />
+                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
                             {r.details.venue}
                           </span>
                         )}

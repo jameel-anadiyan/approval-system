@@ -1,6 +1,6 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
-import { formatINR, formatISTDate, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
+import { formatINR, formatISTDate, getExhibitionShopName, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
 import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
@@ -247,6 +247,7 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
           <CalendarDays className="w-4 h-4 text-brand-600" /> Exhibition / event sponsorship
         </h3>
         <Section title="Event details">
+          <Row label="Conducting shop" value={getExhibitionShopName(request)} wide />
           <Row label="Event name" value={d.event_name} wide />
           <Row label="Organiser contact" value={d.organiser_contact} wide />
           <Row label="Venue" value={d.venue} />

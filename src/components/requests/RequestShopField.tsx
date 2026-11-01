@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Store, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { useDirectory } from '../../lib/directory';
 import type { RequestShopOption, RequestType } from '../../types/database';
 
 /** Request types where the requester tags the request with a shop. */
@@ -63,6 +64,65 @@ export function useRequestShops(): RequestShopsState {
     mustPick: associated && options.length > 1,
     autoShop: associated && options.length === 1 ? options[0] : null,
   };
+}
+
+/**
+ * Resolves the Conducting Shop dropdown list for the Exhibition form ("1 Event details"):
+ * - Employee: strictly their assigned shop list
+ * - Regional Head: strictly the list of shops under this Regional Head
+ * - Clerk / Head / Admin: active shops list
+ */
+export function useExhibitionShops(existingState?: RequestShopsState): {
+  options: RequestShopOption[];
+  loading: boolean;
+} {
+  const { user } = useAuth();
+  const dir = useDirectory();
+  const internalState = useRequestShops();
+  const state = existingState ?? internalState;
+
+  const options = useMemo<RequestShopOption[]>(() => {
+    if (!user) return [];
+    const activeProfile = dir.users.find((u) => u.id === user.id) || user;
+
+    if (user.role === 'employee') {
+      const assoc = state.options.filter((o) => o.associated);
+      if (assoc.length > 0) return assoc;
+      const empShopId = activeProfile.shop_id || user.shop_id;
+      const fromDir = empShopId ? dir.shops.find((s) => s.id === empShopId) : null;
+      if (fromDir) {
+        return [{ id: fromDir.id, name: fromDir.name, code: fromDir.code, associated: true }];
+      }
+      if (user.shop) {
+        return [{ id: user.shop.id, name: user.shop.name, code: user.shop.code, associated: true }];
+      }
+      return [];
+    }
+
+    if (user.role === 'regional_head') {
+      const assoc = state.options.filter((o) => o.associated);
+      if (assoc.length > 0) return assoc;
+      const rhShopIds = new Set(
+        (activeProfile.rh_shops || user.rh_shops || []).map((r) => r.shop_id)
+      );
+      if (activeProfile.shop_id) rhShopIds.add(activeProfile.shop_id);
+      if (rhShopIds.size > 0) {
+        return dir.shops
+          .filter((s) => rhShopIds.has(s.id) && s.is_active)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((s) => ({ id: s.id, name: s.name, code: s.code, associated: true }));
+      }
+      return [];
+    }
+
+    if (state.options.length > 0) return state.options;
+    return dir.shops
+      .filter((s) => s.is_active)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((s) => ({ id: s.id, name: s.name, code: s.code, associated: false }));
+  }, [user, dir.users, dir.shops, state.options]);
+
+  return { options, loading: state.loading };
 }
 
 interface RequestShopFieldProps {

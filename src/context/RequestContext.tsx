@@ -330,9 +330,20 @@ const normalize = (rows: RequestRecord[], headsByDept: Record<string, Partial<Pr
     const bankAccountHolderName = r.bank_account_holder_name || d.bank_account_holder_name || null;
     const bankVerified = Boolean(r.bank_verified ?? d.bank_verified ?? false);
     const bankVerificationMessage = r.bank_verification_message || d.bank_verification_message || null;
+    const isExhibition = r.request_type === 'exhibition';
+    const exhShopName =
+      typeof d.conducting_shop_name === 'string' && d.conducting_shop_name.trim()
+        ? d.conducting_shop_name.trim()
+        : 'Not Assigned';
+    const exhShopId =
+      typeof d.conducting_shop_id === 'string' && d.conducting_shop_id.trim()
+        ? d.conducting_shop_id.trim()
+        : r.shop_id ?? null;
 
     const obj: RequestRecord = {
       ...r,
+      shop_id: isExhibition ? exhShopId : r.shop_id,
+      shop_name: isExhibition ? exhShopName : r.shop_name,
       status: currentStatus,
       decided_by: decidedBy,
       decided_at: decidedAt,
@@ -725,6 +736,31 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           } catch (bErr) {
             console.warn('Bank fields update notice:', bErr);
           }
+
+          if (type === 'exhibition') {
+            const condShopId = (data.details as any)?.conducting_shop_id || null;
+            const condShopName = (data.details as any)?.conducting_shop_name || null;
+            if (condShopId || condShopName) {
+              try {
+                const { data: curRow } = await supabase
+                  .from('requests')
+                  .select('details')
+                  .eq('id', requestId)
+                  .maybeSingle();
+                const mergedExhDetails = {
+                  ...((curRow?.details as Record<string, any>) || (data.details as Record<string, any>) || {}),
+                  conducting_shop_id: condShopId,
+                  conducting_shop_name: condShopName,
+                };
+                await supabase
+                  .from('requests')
+                  .update({ details: mergedExhDetails })
+                  .eq('id', requestId);
+              } catch (exhShopErr) {
+                console.warn('Exhibition conducting shop persist notice:', exhShopErr);
+              }
+            }
+          }
         }
 
         await uploadFiles(requestId, data.files || []);
@@ -785,7 +821,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       amount: data.amount,
       request_type: type,
       details: data.details ?? null,
-      shop_name: (data.details as { shop_name?: string | null } | null)?.shop_name ?? user.shop?.name ?? null,
+      shop_id:
+        type === 'exhibition'
+          ? (data.details as { conducting_shop_id?: string | null } | null)?.conducting_shop_id ?? null
+          : (data.details as { shop_id?: string | null } | null)?.shop_id ?? user.shop_id ?? null,
+      shop_name:
+        type === 'exhibition'
+          ? ((data.details as { conducting_shop_name?: string | null } | null)?.conducting_shop_name?.trim() || 'Not Assigned')
+          : (data.details as { shop_name?: string | null } | null)?.shop_name ?? user.shop?.name ?? null,
       disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? null) as DisbursementMode,
       enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
       bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
@@ -909,6 +952,29 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
           } catch {}
         }
+
+        if ('conducting_shop_id' in data.details || 'conducting_shop_name' in data.details) {
+          const condShopId = (data.details as any).conducting_shop_id || null;
+          const condShopName = (data.details as any).conducting_shop_name || null;
+          try {
+            const { data: curRow } = await supabase
+              .from('requests')
+              .select('details')
+              .eq('id', id)
+              .maybeSingle();
+            const mergedExhDetails = {
+              ...((curRow?.details as Record<string, any>) || (data.details as Record<string, any>) || {}),
+              conducting_shop_id: condShopId,
+              conducting_shop_name: condShopName,
+            };
+            await supabase
+              .from('requests')
+              .update({ details: mergedExhDetails })
+              .eq('id', id);
+          } catch (exhShopErr) {
+            console.warn('Exhibition conducting shop update notice:', exhShopErr);
+          }
+        }
       }
       await loadRequests();
       return { success: true };
@@ -920,8 +986,25 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const regId = data.details && 'region_id' in data.details ? (data.details as any).region_id : r.region_id;
         const regName = data.details && 'region_name' in data.details ? (data.details as any).region_name : r.region_name;
         const bd = (data.details || {}) as any;
+        const nextType = r.request_type;
+        const nextShopId =
+          nextType === 'exhibition' && data.details
+            ? bd.conducting_shop_id || null
+            : bd.shop_id !== undefined
+            ? bd.shop_id || null
+            : r.shop_id;
+        const nextShopName =
+          nextType === 'exhibition' && data.details
+            ? (typeof bd.conducting_shop_name === 'string' && bd.conducting_shop_name.trim()
+                ? bd.conducting_shop_name.trim()
+                : 'Not Assigned')
+            : bd.shop_name !== undefined
+            ? bd.shop_name
+            : r.shop_name;
         return {
           ...r,
+          shop_id: nextShopId,
+          shop_name: nextShopName,
           title: data.title,
           amount: data.amount,
           notes: data.notes || null,

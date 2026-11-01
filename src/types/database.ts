@@ -69,6 +69,8 @@ export type ExhibitionProvide =
   | 'stage_announcements' | 'social_media' | 'other';
 
 export interface ExhibitionDetails {
+  conducting_shop_id?: string | null;
+  conducting_shop_name?: string | null;
   event_name: string;
   organiser_contact?: string | null;
   venue: string;

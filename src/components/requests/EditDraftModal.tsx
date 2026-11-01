@@ -25,7 +25,7 @@ import { TargetHeadField } from './TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
-import { RequestShopField, useRequestShops, needsShopPick } from './RequestShopField';
+import { RequestShopField, useRequestShops, useExhibitionShops, needsShopPick } from './RequestShopField';
 import { DisbursementModeSelector } from './DisbursementModeSelector';
 
 interface EditDraftModalProps {
@@ -94,6 +94,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
   const shopState = useRequestShops();
+  const exhibitionShopState = useExhibitionShops(shopState);
   const pickShop = needsShopPick(type);
   const [shopId, setShopId] = useState<string>(request.shop_id ?? '');
   const [shopName, setShopName] = useState<string>(request.shop_name ?? '');
@@ -235,7 +236,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     }
     const v =
       type === 'discount' ? validateDiscount(discount)
-      : type === 'exhibition' ? validateExhibition(exhibition)
+      : type === 'exhibition' ? validateExhibition(exhibition, { requireShop: exhibitionShopState.options.length > 0 })
       : type === 'stock_transfer' ? validateStockTransfer(stockTransfer)
       : isAsset ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined))
       : null;
@@ -373,7 +374,16 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         )}
         {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
         {type === 'non_cash' && <NonCashFields value={nonCash} onChange={setNonCash} disabled={busy} />}
-        {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
+        {type === 'exhibition' && (
+          <ExhibitionFields
+            value={exhibition}
+            onChange={setExhibition}
+            quotaStatus={exhibitionQuota}
+            shopOptions={exhibitionShopState.options}
+            shopsLoading={exhibitionShopState.loading}
+            disabled={busy}
+          />
+        )}
         {type === 'stock_transfer' && (
           <StockTransferFields
             value={stockTransfer}

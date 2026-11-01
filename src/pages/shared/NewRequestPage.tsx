@@ -26,7 +26,7 @@ import { WorkCategoryField, useCategoryOptions } from '../../components/requests
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useDirectory, fetchActiveEntryOfficers } from '../../lib/directory';
-import { RequestShopField, useRequestShops, needsShopPick } from '../../components/requests/RequestShopField';
+import { RequestShopField, useRequestShops, useExhibitionShops, needsShopPick } from '../../components/requests/RequestShopField';
 import { DisbursementModeSelector } from '../../components/requests/DisbursementModeSelector';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
@@ -96,6 +96,7 @@ export const NewRequestPage: React.FC = () => {
   const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState('');
   const shopState = useRequestShops();
+  const exhibitionShopState = useExhibitionShops(shopState);
   const [shopId, setShopId] = useState('');
   const [shopName, setShopName] = useState('');
   const pickShop = needsShopPick(type);
@@ -140,6 +141,18 @@ export const NewRequestPage: React.FC = () => {
       setShopName(shopState.autoShop.name);
     }
   }, [shopState.autoShop?.id]);
+
+  // Pre-select when the user has a single exhibition shop in their list
+  useEffect(() => {
+    if (exhibitionShopState.options.length === 1) {
+      const single = exhibitionShopState.options[0];
+      setExhibition((prev) =>
+        prev.conducting_shop_id
+          ? prev
+          : { ...prev, conducting_shop_id: single.id, conducting_shop_name: single.name }
+      );
+    }
+  }, [exhibitionShopState.options]);
 
   const shopChoice = () => (shopId ? { shop_id: shopId, shop_name: shopName || null } : {});
 
@@ -281,7 +294,9 @@ export const NewRequestPage: React.FC = () => {
       return null;
     }
     if (type === 'exhibition') {
-      return validateExhibition(exhibition);
+      return validateExhibition(exhibition, {
+        requireShop: exhibitionShopState.options.length > 0,
+      });
     }
     return null;
   };
@@ -630,7 +645,16 @@ export const NewRequestPage: React.FC = () => {
           )}
 
           {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
-          {type === 'exhibition' && <ExhibitionFields value={exhibition} onChange={setExhibition} quotaStatus={exhibitionQuota} />}
+          {type === 'exhibition' && (
+            <ExhibitionFields
+              value={exhibition}
+              onChange={setExhibition}
+              quotaStatus={exhibitionQuota}
+              shopOptions={exhibitionShopState.options}
+              shopsLoading={exhibitionShopState.loading}
+              disabled={isSubmitting || isSavingDraft}
+            />
+          )}
           {isAsset && <AssetFields value={asset} onChange={setAsset} />}
 
           {isHighValue && (

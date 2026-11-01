@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { useDirectory } from '../../lib/directory';
-import { formatINR } from '../../lib/formatters';
+import { formatINR, getExhibitionShopName } from '../../lib/formatters';
 import { extractEventDate } from '../../lib/exhibitionQuota';
 import {
   CalendarDays,
@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Calendar as CalendarIcon,
   ExternalLink,
+  Store,
 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { RequestRecord } from '../../types/database';
@@ -385,21 +386,25 @@ export const ExhibitionCalendarPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Day Events preview */}
+                {/* Day Events preview — show Conducting Shop name (or "Not Assigned") on colored tiles */}
                 <div className="mt-1.5 space-y-1 flex-1 overflow-hidden">
-                  {standardEvents.slice(0, 2).map((ev) => (
-                    <div
-                      key={ev.id}
-                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold truncate ${
-                        isFilledColor
-                          ? 'bg-black/25 text-white border border-white/20 backdrop-blur-xs'
-                          : 'bg-indigo-50 text-indigo-900 border border-indigo-200'
-                      }`}
-                      title={`${ev.details?.event_name || ev.title} (${ev.requester_name})`}
-                    >
-                      {ev.details?.event_name || ev.title}
-                    </div>
-                  ))}
+                  {standardEvents.slice(0, 2).map((ev) => {
+                    const tileShopName = getExhibitionShopName(ev);
+                    const eventLabel = ev.details?.event_name || ev.title;
+                    return (
+                      <div
+                        key={ev.id}
+                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold truncate ${
+                          isFilledColor
+                            ? 'bg-black/25 text-white border border-white/20 backdrop-blur-xs'
+                            : 'bg-indigo-50 text-indigo-900 border border-indigo-200'
+                        }`}
+                        title={`${tileShopName} — ${eventLabel} (${ev.requester_name})`}
+                      >
+                        {tileShopName}
+                      </div>
+                    );
+                  })}
 
                   {/* Special Request Waitlist Pill */}
                   {waitlistEvents.length > 0 && (
@@ -409,10 +414,16 @@ export const ExhibitionCalendarPage: React.FC = () => {
                           ? 'bg-violet-900/90 text-white border border-violet-400 shadow-2xs'
                           : 'bg-violet-100 text-violet-950 border border-violet-300'
                       }`}
-                      title={`${waitlistCount} Special Waitlist Request(s)`}
+                      title={waitlistEvents
+                        .map((w) => `${getExhibitionShopName(w)} — ${w.details?.event_name || w.title}`)
+                        .join(' | ')}
                     >
                       <span className="w-2 h-2 rounded-full bg-violet-300 shrink-0" />
-                      <span>{waitlistCount} Waitlist</span>
+                      <span className="truncate">
+                        {waitlistCount === 1
+                          ? `WL: ${getExhibitionShopName(waitlistEvents[0])}`
+                          : `${waitlistCount} Waitlist`}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -515,6 +526,12 @@ export const ExhibitionCalendarPage: React.FC = () => {
                         </div>
 
                         <div className="mt-1 text-xs text-slate-600 space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <Store className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>
+                              Shop: <strong>{getExhibitionShopName(r)}</strong>
+                            </span>
+                          </div>
                           {r.details?.venue && (
                             <div>Venue: <strong>{r.details.venue}</strong></div>
                           )}

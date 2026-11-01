@@ -85,14 +85,18 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
   if (r.request_type === "exhibition") {
     const provides = (Array.isArray(d.provides) ? d.provides : []).map((p: string) => PROVIDES[p] ?? p);
     if (d.provides_other) provides.push(`Other: ${d.provides_other}`);
+    const exhShop = typeof d.conducting_shop_name === "string" && d.conducting_shop_name.trim()
+      ? d.conducting_shop_name.trim()
+      : "Not Assigned";
     return {
       subtitle: "EVENT SPONSORSHIP & PROMOTION APPROVAL FORM",
       sections: [
         { title: "Request", rows: [
           ["Request No", txt(r.request_no)], ["Date", submitted],
-          ["Requested by", txt(r.requester_name)], ["Outlet", txt(r.shop_name)],
+          ["Requested by", txt(r.requester_name)], ["Outlet", exhShop],
         ] },
         { title: "1  Event details", rows: [
+          ["Conducting Shop", exhShop],
           ["Event Name", txt(d.event_name)], ["Organiser & Contact", txt(d.organiser_contact)],
           ["Venue", txt(d.venue)], ["Event Date(s) & Time", txt(d.event_dates)],
           ["Expected Footfall", txt(d.expected_footfall)], ["Stall Size & Location", txt(d.stall_size_location)],
@@ -328,7 +332,9 @@ Deno.serve(handle(async (req) => {
         ["Type", TYPE_LABEL[r.request_type] ?? "General"],
         ["Amount", r.request_type === "stock_transfer" ? `Total MRP: ${inr(Number(r.amount))} (Stock Transfer)` : r.request_type === "non_cash" ? "Non-Cash (No payment)" : inr(Number(r.amount))],
         ["Department", r.department ?? "—"],
-        ["Shop", r.shop_name ?? "—"],
+        ["Shop", r.request_type === "exhibition"
+          ? ((typeof r.details?.conducting_shop_name === "string" && r.details.conducting_shop_name.trim()) ? r.details.conducting_shop_name.trim() : "Not Assigned")
+          : (r.shop_name ?? "—")],
         ["Requested by", r.requester_name],
         ["Submitted", r.submitted_at ? ist(r.submitted_at) : "—"],
         ["Route", r.route === "A" ? "A — Admin approval" : "B — Head approval"],

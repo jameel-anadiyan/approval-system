@@ -2,9 +2,9 @@
 // New Request page and the Edit Draft modal. Values are kept as strings while
 // typing and converted to RequestDetails with toDiscountDetails / toExhibitionDetails.
 import React from 'react';
-import { RequestDetails, ExhibitionProvide, RequestShopChoice } from '../../types/database';
+import { RequestDetails, ExhibitionProvide, RequestShopChoice, RequestShopOption } from '../../types/database';
 import { formatINR, PROVIDE_LABELS } from '../../lib/formatters';
-import { Percent, CalendarDays, Megaphone, Target, IndianRupee, AlertOctagon, CheckCircle2, AlertTriangle, Clock, FileCheck } from 'lucide-react';
+import { Percent, CalendarDays, Megaphone, Target, IndianRupee, AlertOctagon, CheckCircle2, AlertTriangle, Clock, FileCheck, Store } from 'lucide-react';
 import { GstSelector } from './GstSelector';
 import type { ExhibitionQuotaStatus } from '../../lib/exhibitionQuota';
 
@@ -152,6 +152,8 @@ export const DiscountFields: React.FC<{ value: DiscountForm; onChange: (v: Disco
 // ───────────────────────── Exhibition ─────────────────────────
 
 export interface ExhibitionForm {
+  conducting_shop_id: string;
+  conducting_shop_name: string;
   event_name: string;
   organiser_contact: string;
   venue: string;
@@ -182,6 +184,7 @@ export interface ExhibitionForm {
 }
 
 export const emptyExhibition: ExhibitionForm = {
+  conducting_shop_id: '', conducting_shop_name: '',
   event_name: '', organiser_contact: '', venue: '', event_dates: '', event_start: '', event_end: '',
   expected_footfall: '', stall_size_location: '',
   amount_excl_gst: '', payment_mode_due: '', organiser_gstin: '',
@@ -194,6 +197,8 @@ export const emptyExhibition: ExhibitionForm = {
 
 export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm => ({
   ...emptyExhibition,
+  conducting_shop_id: str(d?.conducting_shop_id),
+  conducting_shop_name: str(d?.conducting_shop_name),
   event_name: str(d?.event_name), organiser_contact: str(d?.organiser_contact), venue: str(d?.venue),
   event_dates: str(d?.event_dates), event_start: str(d?.event_start), event_end: str(d?.event_end),
   expected_footfall: str(d?.expected_footfall),
@@ -221,7 +226,13 @@ export function exhibitionCalc(f: ExhibitionForm) {
   return { excl, pct, gst, total, suggestedBudget, budget };
 }
 
-export function validateExhibition(f: ExhibitionForm): string | null {
+export function validateExhibition(
+  f: ExhibitionForm,
+  opts: { requireShop?: boolean } = {}
+): string | null {
+  if (opts.requireShop !== false && !f.conducting_shop_id.trim()) {
+    return 'Select the shop conducting this exhibition / event.';
+  }
   if (!f.event_name.trim()) return 'Event name is required.';
   if (!f.venue.trim()) return 'Venue is required.';
   if (!f.event_start) return 'Pick the event start date & time.';
@@ -236,7 +247,13 @@ export function validateExhibition(f: ExhibitionForm): string | null {
 export const toExhibitionDetails = (f: ExhibitionForm): RequestDetails => {
   const c = exhibitionCalc(f);
   const opt = (s: string) => (s.trim() ? num(s) : null);
+  const shopId = f.conducting_shop_id.trim() || null;
+  const shopName = f.conducting_shop_name.trim() || null;
   return {
+    conducting_shop_id: shopId,
+    conducting_shop_name: shopName,
+    shop_id: shopId,
+    shop_name: shopName,
     event_name: f.event_name.trim(), organiser_contact: f.organiser_contact.trim() || null, venue: f.venue.trim(),
     event_dates: f.event_start ? formatEventWindow(f.event_start, f.event_end) : f.event_dates.trim(),
     event_start: f.event_start || null, event_end: f.event_end || null,
@@ -273,12 +290,16 @@ export const ExhibitionFields: React.FC<{
   value: ExhibitionForm;
   onChange: (v: ExhibitionForm) => void;
   quotaStatus?: ExhibitionQuotaStatus | null;
-}> = ({ value, onChange, quotaStatus }) => {
+  shopOptions?: RequestShopOption[];
+  shopsLoading?: boolean;
+  disabled?: boolean;
+}> = ({ value, onChange, quotaStatus, shopOptions = [], shopsLoading = false, disabled = false }) => {
   const set = (k: keyof ExhibitionForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     onChange({ ...value, [k]: e.target.value });
   const c = exhibitionCalc(value);
   const toggle = (p: ExhibitionProvide) =>
     onChange({ ...value, provides: value.provides.includes(p) ? value.provides.filter((x) => x !== p) : [...value.provides, p] });
+  const knownShop = shopOptions.some((s) => s.id === value.conducting_shop_id);
 
   const field = (k: keyof ExhibitionForm, label: string, opts: { required?: boolean; type?: string; placeholder?: string; full?: boolean } = {}) => (
     <div className={opts.full ? 'sm:col-span-2' : ''}>
@@ -294,6 +315,7 @@ export const ExhibitionFields: React.FC<{
         value={value[k] as string}
         onChange={set(k)}
         placeholder={opts.placeholder}
+        disabled={disabled}
         className={inputCls}
       />
     </div>
@@ -302,6 +324,43 @@ export const ExhibitionFields: React.FC<{
   return (
     <div className="space-y-4">
       <Section n="1" title="Event details" icon={<CalendarDays className="w-3.5 h-3.5 text-amber-300" />}>
+        <div className="sm:col-span-2">
+          <label htmlFor="exh-conducting_shop" className={`${labelCls} flex items-center gap-1.5`}>
+            <Store className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Shop Conducting Exhibition / Event <span className="text-rose-500">*</span></span>
+          </label>
+          <select
+            id="exh-conducting_shop"
+            value={value.conducting_shop_id}
+            disabled={disabled || shopsLoading}
+            onChange={(e) => {
+              const id = e.target.value;
+              const found = shopOptions.find((s) => s.id === id);
+              onChange({
+                ...value,
+                conducting_shop_id: id,
+                conducting_shop_name: found ? found.name : '',
+              });
+            }}
+            className={`${inputCls} font-semibold`}
+          >
+            <option value="">
+              {shopsLoading
+                ? 'Loading your shop list…'
+                : shopOptions.length === 0
+                ? 'No shops assigned to your account'
+                : '-- Select Shop Conducting Exhibition / Event --'}
+            </option>
+            {!knownShop && value.conducting_shop_id && value.conducting_shop_name && (
+              <option value={value.conducting_shop_id}>{value.conducting_shop_name}</option>
+            )}
+            {shopOptions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}{s.code ? ` (${s.code})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
         {field('event_name', 'Event Name', { required: true })}
         {field('organiser_contact', 'Organiser & Contact')}
         {field('venue', 'Venue', { required: true })}

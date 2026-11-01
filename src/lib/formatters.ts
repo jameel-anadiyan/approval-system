@@ -352,3 +352,14 @@ export const PROVIDE_LABELS: Record<string, string> = {
   social_media: 'Social media mentions',
   other: 'Other',
 };
+
+/**
+ * Returns the conducting shop name for an Exhibition request, or "Not Assigned"
+ * for existing exhibitions created before the conducting shop field was added.
+ */
+export function getExhibitionShopName(r: {
+  details?: { conducting_shop_name?: string | null } | null;
+}): string {
+  const name = r.details?.conducting_shop_name?.trim();
+  return name || 'Not Assigned';
+}
