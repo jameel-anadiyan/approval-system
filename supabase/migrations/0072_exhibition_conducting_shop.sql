@@ -418,11 +418,25 @@ declare
   v_shop_name text;
   v_clean_details jsonb;
   v_bank_details jsonb;
+  v_can_edit boolean := false;
 begin
   me := public._me();
   select * into r from public.requests where id = p_request_id for update;
-  if r.id is null or r.requester_id <> me.id then raise exception 'Not found'; end if;
-  if r.status not in ('draft','returned') then raise exception 'This request can no longer be edited'; end if;
+  if r.id is null then raise exception 'Request not found'; end if;
+
+  if r.requester_id = me.id and r.status in ('draft', 'returned') then
+    v_can_edit := true;
+  elsif r.status = 'returned' and (
+    me.role = 'admin'
+    or (me.role in ('head', 'clerk') and (r.department_id = me.department_id or r.owner_head_id = me.id))
+    or (me.role = 'regional_head' and (r.regional_head_id = me.id or r.department_id = me.department_id))
+  ) then
+    v_can_edit := true;
+  end if;
+
+  if not v_can_edit then
+    raise exception 'You do not have permission to edit this request';
+  end if;
 
   v_clean_details := case when p_details is null then null else p_details - 'shop_id' - 'shop_name' end;
 
@@ -446,12 +460,18 @@ begin
     v_shop_id := public._resolve_request_shop(me, p_details);
     select name into v_shop_name from public.shops where id = v_shop_id;
   elsif r.request_type = 'exhibition' and p_details is not null and (p_details ? 'conducting_shop_id' or p_details ? 'shop_id') then
-    v_shop_id := public._resolve_request_shop(
-      me,
-      jsonb_build_object('shop_id', coalesce(nullif(p_details->>'conducting_shop_id', ''), p_details->>'shop_id'))
-    );
+    if me.role in ('admin', 'head', 'clerk') or me.id <> r.requester_id then
+      if coalesce(nullif(p_details->>'conducting_shop_id', ''), p_details->>'shop_id') ~ '^[0-9a-fA-F-]{36}$' then
+        v_shop_id := (coalesce(nullif(p_details->>'conducting_shop_id', ''), p_details->>'shop_id'))::uuid;
+      end if;
+    else
+      v_shop_id := public._resolve_request_shop(
+        me,
+        jsonb_build_object('shop_id', coalesce(nullif(p_details->>'conducting_shop_id', ''), p_details->>'shop_id'))
+      );
+    end if;
     select name into v_shop_name from public.shops where id = v_shop_id;
-    if v_shop_id is not null then
+    if v_shop_id is not null and v_shop_name is not null then
       v := jsonb_set(
         v,
         '{details}',
@@ -511,4 +531,62 @@ end $function$;
 revoke execute on function public.update_typed_draft(uuid, text, numeric, text, jsonb) from public, anon;
 grant execute on function public.update_typed_draft(uuid, text, numeric, text, jsonb) to authenticated;
 
+-- 4. RPC to assign or update Conducting Shop on any existing Exhibition request
+create or replace function public.update_exhibition_conducting_shop(
+  p_request_id uuid,
+  p_shop_id uuid,
+  p_shop_name text default null
+)
+returns jsonb language plpgsql security definer set search_path to '' as $function$
+declare
+  me public.profiles;
+  r public.requests;
+  s public.shops;
+  v_can_edit boolean := false;
+begin
+  me := public._me();
+  select * into r from public.requests where id = p_request_id for update;
+  if r.id is null then
+    return jsonb_build_object('success', false, 'error', 'Request not found');
+  end if;
+  if r.request_type <> 'exhibition' then
+    return jsonb_build_object('success', false, 'error', 'Only exhibition requests have a conducting shop');
+  end if;
+  if r.status in ('rejected', 'withdrawn', 'cancelled') then
+    return jsonb_build_object('success', false, 'error', 'Cannot modify a finalized request');
+  end if;
+
+  if me.role in ('admin', 'head', 'clerk', 'regional_head') then
+    v_can_edit := true;
+  elsif r.requester_id = me.id then
+    v_can_edit := true;
+  end if;
+
+  if not v_can_edit then
+    return jsonb_build_object('success', false, 'error', 'You do not have permission to update this exhibition shop');
+  end if;
+
+  select * into s from public.shops where id = p_shop_id;
+  if s.id is null then
+    return jsonb_build_object('success', false, 'error', 'Selected shop not found');
+  end if;
+
+  update public.requests
+  set
+    shop_id = s.id,
+    shop_name = s.name,
+    details = coalesce(details, '{}'::jsonb) || jsonb_build_object(
+      'conducting_shop_id', s.id::text,
+      'conducting_shop_name', s.name
+    ),
+    updated_at = now()
+  where id = r.id;
+
+  return jsonb_build_object('success', true, 'shop_id', s.id, 'shop_name', s.name);
+end $function$;
+
+revoke execute on function public.update_exhibition_conducting_shop(uuid, uuid, text) from public, anon;
+grant execute on function public.update_exhibition_conducting_shop(uuid, uuid, text) to authenticated;
+
 notify pgrst, 'reload schema';
+

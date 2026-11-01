@@ -7,6 +7,7 @@ import { DocumentViewer } from '../../components/requests/DocumentViewer';
 import { SignedDocuments, VoiceNoteItem } from '../../components/requests/SignedDocuments';
 import { EditDraftModal } from '../../components/requests/EditDraftModal';
 import { EditBankDetailsModal } from '../../components/requests/EditBankDetailsModal';
+import { EditExhibitionShopModal } from '../../components/requests/EditExhibitionShopModal';
 import { RequestTimeline } from '../../components/requests/RequestTimeline';
 import { RequestDetailsPanel } from '../../components/requests/RequestDetailsPanel';
 import { QuotationsPanel } from '../../components/requests/AssetQuotations';
@@ -179,6 +180,7 @@ export const RequestDetailPage: React.FC = () => {
   );
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
   const [isEditBankModalOpen, setIsEditBankModalOpen] = useState<boolean>(false);
+  const [isEditExhibitionShopOpen, setIsEditExhibitionShopOpen] = useState<boolean>(false);
   const [sendingWaDoc, setSendingWaDoc] = useState(false);
 
   const handleDeleteRequestPermanently = async () => {
@@ -424,6 +426,16 @@ export const RequestDetailPage: React.FC = () => {
   const editable =
     (request.status === 'draft' && isOwner) ||
     (request.status === 'returned' && canEditReturned);
+  const canEditExhibitionShop =
+    rType === 'exhibition' &&
+    request.status !== 'rejected' &&
+    request.status !== 'withdrawn' &&
+    request.status !== 'cancelled' &&
+    (role === 'admin' ||
+      role === 'head' ||
+      role === 'clerk' ||
+      role === 'regional_head' ||
+      (isOwner && (request.status === 'draft' || request.status === 'returned')));
   const pay = paymentSummary(request);
   const payments = (request.payments || []).filter((p) => {
     if (!isPaymentOnly) return true;
@@ -968,12 +980,37 @@ export const RequestDetailPage: React.FC = () => {
                 </div>
               </div>
               {request.shop_name && (
-                <div className="col-span-2">
-                  <span className="text-slate-400 font-medium block">Shop</span>
-                  <span className="font-bold text-slate-800 mt-0.5 flex items-center gap-1">
-                    <Store className="w-3.5 h-3.5 text-slate-400" />
-                    {request.shop_name}
-                  </span>
+                <div className="col-span-2 flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-slate-400 font-medium block">Shop</span>
+                    <span className="font-bold text-slate-800 mt-0.5 flex items-center gap-1.5">
+                      <Store className="w-3.5 h-3.5 text-slate-400" />
+                      <span
+                        className={
+                          rType === 'exhibition' && request.shop_name === 'Not Assigned'
+                            ? 'px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200 text-xs'
+                            : ''
+                        }
+                      >
+                        {request.shop_name}
+                      </span>
+                    </span>
+                  </div>
+                  {canEditExhibitionShop && (
+                    <button
+                      type="button"
+                      id="summary-edit-exhibition-shop-btn"
+                      onClick={() => setIsEditExhibitionShopOpen(true)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer ${
+                        request.shop_name === 'Not Assigned'
+                          ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-2xs'
+                          : 'bg-slate-100 hover:bg-indigo-50 text-indigo-700 border border-slate-200'
+                      }`}
+                    >
+                      <Pencil className="w-3 h-3" />
+                      <span>{request.shop_name === 'Not Assigned' ? 'Assign Shop' : 'Change'}</span>
+                    </button>
+                  )}
                 </div>
               )}
               {request.regional_head_name && (
@@ -1024,7 +1061,12 @@ export const RequestDetailPage: React.FC = () => {
             )}
           </div>
 
-          <RequestDetailsPanel request={request} />
+          <RequestDetailsPanel
+            request={request}
+            onEditExhibitionShop={
+              canEditExhibitionShop ? () => setIsEditExhibitionShopOpen(true) : undefined
+            }
+          />
 
           {/* Disbursement & Bank Details Card (for all disbursement-associated requests) */}
           {isPaymentNeeded && (
@@ -2546,6 +2588,17 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setIsEditBankModalOpen(false)}
           request={request}
+        />
+      )}
+
+      {isEditExhibitionShopOpen && (
+        <EditExhibitionShopModal
+          isOpen={true}
+          onClose={() => setIsEditExhibitionShopOpen(false)}
+          request={request}
+          onSaved={(shopName) =>
+            setBanner({ ok: true, text: `Conducting shop updated to "${shopName}".` })
+          }
         />
       )}
 

@@ -69,10 +69,13 @@ export function useRequestShops(): RequestShopsState {
 /**
  * Resolves the Conducting Shop dropdown list for the Exhibition form ("1 Event details"):
  * - Employee: strictly their assigned shop list
- * - Regional Head: strictly the list of shops under this Regional Head
- * - Clerk / Head / Admin: active shops list
+ * - Regional Head: strictly the list of shops under this Regional Head (plus requester's shop if reviewing an employee's request)
+ * - Clerk / Head / Admin: active shops list (with requester's assigned shops prioritized first when editing an existing request)
  */
-export function useExhibitionShops(existingState?: RequestShopsState): {
+export function useExhibitionShops(
+  existingState?: RequestShopsState,
+  requesterId?: string | null
+): {
   options: RequestShopOption[];
   loading: boolean;
 } {
@@ -84,6 +87,7 @@ export function useExhibitionShops(existingState?: RequestShopsState): {
   const options = useMemo<RequestShopOption[]>(() => {
     if (!user) return [];
     const activeProfile = dir.users.find((u) => u.id === user.id) || user;
+    const requesterProfile = requesterId ? dir.users.find((u) => u.id === requesterId) : null;
 
     if (user.role === 'employee') {
       const assoc = state.options.filter((o) => o.associated);
@@ -101,26 +105,68 @@ export function useExhibitionShops(existingState?: RequestShopsState): {
 
     if (user.role === 'regional_head') {
       const assoc = state.options.filter((o) => o.associated);
-      if (assoc.length > 0) return assoc;
-      const rhShopIds = new Set(
-        (activeProfile.rh_shops || user.rh_shops || []).map((r) => r.shop_id)
-      );
-      if (activeProfile.shop_id) rhShopIds.add(activeProfile.shop_id);
-      if (rhShopIds.size > 0) {
-        return dir.shops
-          .filter((s) => rhShopIds.has(s.id) && s.is_active)
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map((s) => ({ id: s.id, name: s.name, code: s.code, associated: true }));
+      const baseList: RequestShopOption[] =
+        assoc.length > 0
+          ? [...assoc]
+          : (() => {
+              const rhShopIds = new Set(
+                (activeProfile.rh_shops || user.rh_shops || []).map((r) => r.shop_id)
+              );
+              if (activeProfile.shop_id) rhShopIds.add(activeProfile.shop_id);
+              return dir.shops
+                .filter((s) => rhShopIds.has(s.id) && s.is_active)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((s) => ({ id: s.id, name: s.name, code: s.code, associated: true }));
+            })();
+
+      // If Regional Head is editing an existing request raised by someone whose shop isn't in baseList, include it
+      if (requesterProfile) {
+        const extraIds = new Set<string>();
+        if (requesterProfile.shop_id) extraIds.add(requesterProfile.shop_id);
+        (requesterProfile.rh_shops || []).forEach((rs) => extraIds.add(rs.shop_id));
+        extraIds.forEach((sid) => {
+          if (!baseList.some((b) => b.id === sid)) {
+            const s = dir.shops.find((sh) => sh.id === sid && sh.is_active);
+            if (s) baseList.push({ id: s.id, name: s.name, code: s.code, associated: true });
+          }
+        });
       }
-      return [];
+      return baseList;
     }
 
-    if (state.options.length > 0) return state.options;
-    return dir.shops
+    // Clerk / Head / Admin: all active shops (prioritize requester's assigned shops at top if editing someone else's request)
+    const rawList: RequestShopOption[] =
+      state.options.length > 0
+        ? state.options
+        : dir.shops
+            .filter((s) => s.is_active)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((s) => ({ id: s.id, name: s.name, code: s.code, associated: false }));
+
+    // Ensure all active directory shops are included even if my_request_shops only returned a subset for a Head/Clerk with shop_id
+    const mergedMap = new Map<string, RequestShopOption>();
+    rawList.forEach((o) => mergedMap.set(o.id, o));
+    dir.shops
       .filter((s) => s.is_active)
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((s) => ({ id: s.id, name: s.name, code: s.code, associated: false }));
-  }, [user, dir.users, dir.shops, state.options]);
+      .forEach((s) => {
+        if (!mergedMap.has(s.id)) {
+          mergedMap.set(s.id, { id: s.id, name: s.name, code: s.code, associated: false });
+        }
+      });
+
+    const requesterShopIds = new Set<string>();
+    if (requesterProfile) {
+      if (requesterProfile.shop_id) requesterShopIds.add(requesterProfile.shop_id);
+      (requesterProfile.rh_shops || []).forEach((rs) => requesterShopIds.add(rs.shop_id));
+    }
+
+    return Array.from(mergedMap.values()).sort((a, b) => {
+      const aReq = requesterShopIds.has(a.id) ? 0 : 1;
+      const bReq = requesterShopIds.has(b.id) ? 0 : 1;
+      if (aReq !== bReq) return aReq - bReq;
+      return a.name.localeCompare(b.name);
+    });
+  }, [user, requesterId, dir.users, dir.shops, state.options]);
 
   return { options, loading: state.loading };
 }

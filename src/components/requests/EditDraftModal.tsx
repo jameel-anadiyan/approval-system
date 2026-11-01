@@ -94,7 +94,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
   const shopState = useRequestShops();
-  const exhibitionShopState = useExhibitionShops(shopState);
+  const exhibitionShopState = useExhibitionShops(shopState, request.requester_id);
   const pickShop = needsShopPick(type);
   const [shopId, setShopId] = useState<string>(request.shop_id ?? '');
   const [shopName, setShopName] = useState<string>(request.shop_name ?? '');
@@ -241,7 +241,14 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       : isAsset ? (!asset.asset_name.trim() ? 'Enter the asset name.' : validateQuotes(quotes, true, type === 'asset_below_20k' ? 1 : 2, type === 'asset_below_20k' ? 20000 : undefined))
       : null;
     if (v) return setError(v);
-    if (user?.role !== 'head' && categoryOptions.required && !categoryOptions.categories.some((c) => c.id === categoryId)) {
+    if (
+      type !== 'exhibition' &&
+      user?.role !== 'head' &&
+      user?.role !== 'admin' &&
+      user?.role !== 'clerk' &&
+      categoryOptions.required &&
+      !categoryOptions.categories.some((c) => c.id === categoryId)
+    ) {
       return setError('Please select the work category.');
     }
     if (pickShop && shopState.mustPick && !effectiveShopId) {
@@ -250,13 +257,21 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     saveLockRef.current = true;
     setBusy(true);
     try {
+      const categoryChanged = (categoryId || null) !== (request.category_id || null);
+      const targetHeadChanged = (targetHeadId || null) !== (request.owner_head_id || null);
       const upd = await updateDraft(request.id, {
         title: title.trim(),
         amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal : amount),
         notes: notes.trim() || undefined,
         details: getDetails(),
-        category_id: user?.role !== 'head' && categoryOptions.required ? categoryId || null : undefined,
-        target_head_id: type === 'exhibition' || user?.role === 'head' ? null : (targetHeadId || undefined),
+        category_id:
+          type !== 'exhibition' && user?.role !== 'head' && categoryChanged
+            ? categoryId || null
+            : undefined,
+        target_head_id:
+          type === 'exhibition' || user?.role === 'head' || !targetHeadChanged
+            ? null
+            : targetHeadId || undefined,
       });
       if (!upd.success) throw new Error(upd.error);
       if (isAsset) {

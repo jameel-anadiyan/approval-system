@@ -121,6 +121,11 @@ interface RequestContextType {
     id: string,
     bankData: BankAccountDetails
   ) => Promise<Result>;
+  updateExhibitionShop: (
+    id: string,
+    shopId: string,
+    shopName: string
+  ) => Promise<Result>;
   addFiles: (id: string, files: RequestFile[]) => Promise<Result>;
   removeFile: (requestId: string, fileId: string) => Promise<Result>;
   deleteDraft: (id: string) => Promise<Result>;
@@ -886,6 +891,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     if (isBackendConnected) {
+      let existingRow: {
+        id: string;
+        requester_id: string;
+        status: string;
+        request_type: string;
+        details: Record<string, any> | null;
+      } | null = null;
+
       const { error } = await supabase.rpc('update_typed_draft', {
         p_request_id: id,
         p_title: data.title,
@@ -893,13 +906,61 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_notes: data.notes || null,
         p_details: data.details ?? null,
       });
-      if (error) return { success: false, error: error.message };
+
+      if (error) {
+        // When Admin / Head / Clerk / Regional Head edits a returned/existing request raised by someone else,
+        // legacy `update_typed_draft` checks `r.requester_id <> me.id` and raises `'Not found'`.
+        // Fall back to direct authorized update of `details` + `updated_at` when the request exists.
+        const { data: fetchedRow } = await supabase
+          .from('requests')
+          .select('id, requester_id, status, request_type, details')
+          .eq('id', id)
+          .maybeSingle();
+
+        existingRow = (fetchedRow as any) || null;
+        const isAuthorizedEditor =
+          Boolean(existingRow) &&
+          (['admin', 'head', 'clerk', 'regional_head'].includes(user.role) ||
+            (existingRow!.requester_id === user.id &&
+              ['draft', 'returned'].includes(existingRow!.status)));
+
+        if (existingRow && isAuthorizedEditor) {
+          const cleanIncoming = { ...((data.details as Record<string, any>) || {}) };
+          if (existingRow.request_type !== 'exhibition') {
+            delete cleanIncoming.shop_id;
+            delete cleanIncoming.shop_name;
+          }
+          const mergedFallbackDetails: Record<string, any> = {
+            ...(existingRow.details || {}),
+            ...cleanIncoming,
+          };
+          const { data: fallbackUpd, error: fallbackErr } = await supabase
+            .from('requests')
+            .update({
+              details: mergedFallbackDetails,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', id)
+            .select('id')
+            .maybeSingle();
+
+          if (fallbackErr || !fallbackUpd) {
+            return {
+              success: false,
+              error: fallbackErr?.message || error.message,
+            };
+          }
+        } else {
+          return { success: false, error: error.message };
+        }
+      }
+
       if (data.target_head_id) {
         const { error: headErr } = await supabase.rpc('set_request_target_head', {
           p_request_id: id,
           p_head_id: data.target_head_id,
         });
-        if (headErr) {
+        if (headErr && !headErr.message?.toLowerCase().includes('not found')) {
           await loadRequests();
           return { success: false, error: headErr.message };
         }
@@ -909,7 +970,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_request_id: id,
           p_category_id: data.category_id || null,
         });
-        if (catErr) {
+        if (catErr && !catErr.message?.toLowerCase().includes('not found')) {
           await loadRequests();
           return { success: false, error: catErr.message };
         }
@@ -969,7 +1030,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             };
             await supabase
               .from('requests')
-              .update({ details: mergedExhDetails })
+              .update({
+                details: mergedExhDetails,
+                updated_at: new Date().toISOString(),
+              })
               .eq('id', id);
           } catch (exhShopErr) {
             console.warn('Exhibition conducting shop update notice:', exhShopErr);
@@ -1122,6 +1186,115 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             ...(r.details || {}),
             ...payload,
           },
+        };
+      })
+    );
+    return { success: true };
+  };
+
+  const updateExhibitionShop = async (
+    id: string,
+    shopId: string,
+    shopName: string
+  ): Promise<Result> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    const cleanShopId = shopId.trim();
+    const cleanShopName = shopName.trim();
+    if (!cleanShopId || !cleanShopName) {
+      return { success: false, error: 'Please select a shop.' };
+    }
+
+    if (isBackendConnected) {
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc(
+          'update_exhibition_conducting_shop',
+          {
+            p_request_id: id,
+            p_shop_id: cleanShopId,
+            p_shop_name: cleanShopName,
+          }
+        );
+
+        if (rpcErr || (rpcRes as any)?.success === false) {
+          // Direct authorized update to `requests.details` + `updated_at` (works immediately via live RLS)
+          const { data: curRow, error: fetchErr } = await supabase
+            .from('requests')
+            .select('id, details')
+            .eq('id', id)
+            .maybeSingle();
+
+          if (fetchErr || !curRow) {
+            return {
+              success: false,
+              error: fetchErr?.message || (rpcRes as any)?.error || 'Request could not be loaded.',
+            };
+          }
+
+          const mergedDetails = {
+            ...((curRow.details as Record<string, any>) || {}),
+            conducting_shop_id: cleanShopId,
+            conducting_shop_name: cleanShopName,
+          };
+
+          const { data: updRow, error: directErr } = await supabase
+            .from('requests')
+            .update({
+              details: mergedDetails,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', id)
+            .select('id')
+            .maybeSingle();
+
+          if (directErr || !updRow) {
+            return {
+              success: false,
+              error:
+                directErr?.message ||
+                (rpcRes as any)?.error ||
+                'You do not have permission to update the shop on this exhibition request.',
+            };
+          }
+        }
+
+        // Optimistically update local state immediately so UI & calendar reflect right away
+        setRequests((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? {
+                  ...r,
+                  shop_id: cleanShopId,
+                  shop_name: cleanShopName,
+                  details: {
+                    ...(r.details || {}),
+                    conducting_shop_id: cleanShopId,
+                    conducting_shop_name: cleanShopName,
+                  },
+                }
+              : r
+          )
+        );
+
+        await loadRequests(true);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: errMsg(err) };
+      }
+    }
+
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        return {
+          ...r,
+          shop_id: cleanShopId,
+          shop_name: cleanShopName,
+          details: {
+            ...(r.details || {}),
+            conducting_shop_id: cleanShopId,
+            conducting_shop_name: cleanShopName,
+          },
+          updated_at: new Date().toISOString(),
         };
       })
     );
@@ -3992,6 +4165,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         createDraft,
         updateDraft,
         updateRequestBankDetails,
+        updateExhibitionShop,
         addFiles,
         removeFile,
         deleteDraft,

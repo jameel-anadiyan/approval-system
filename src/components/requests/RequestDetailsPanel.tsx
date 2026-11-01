@@ -1,7 +1,7 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
 import { formatINR, formatISTDate, getExhibitionShopName, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
-import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck } from 'lucide-react';
+import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -21,7 +21,10 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 const money = (n?: number | null) => (n === undefined || n === null ? undefined : formatINR(Number(n)));
 
 /** Read-only view of the type-specific form (Discount / Exhibition). Renders nothing for General. */
-export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ request }) => {
+export const RequestDetailsPanel: React.FC<{
+  request: RequestRecord;
+  onEditExhibitionShop?: () => void;
+}> = ({ request, onEditExhibitionShop }) => {
   const t = typeOf(request);
   const d = request.details || {};
   if (t === 'general') {
@@ -241,13 +244,40 @@ export const RequestDetailsPanel: React.FC<{ request: RequestRecord }> = ({ requ
 
   if (t === 'exhibition') {
     const provides = (d.provides || []).map((p) => (p === 'other' && d.provides_other ? `Other: ${d.provides_other}` : PROVIDE_LABELS[p] || p));
+    const exhShopName = getExhibitionShopName(request);
+    const isNotAssigned = exhShopName === 'Not Assigned';
     return (
       <div className="bg-white rounded-2xl border border-brand-200 p-5 sm:p-6 shadow-xs divide-y divide-slate-100">
         <h3 className="text-sm font-bold text-slate-900 font-display pb-3 flex items-center gap-2">
           <CalendarDays className="w-4 h-4 text-brand-600" /> Exhibition / event sponsorship
         </h3>
         <Section title="Event details">
-          <Row label="Conducting shop" value={getExhibitionShopName(request)} wide />
+          <div className="col-span-2 flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+            <div className="min-w-0">
+              <span className="text-slate-400 font-medium block text-[11px]">Conducting shop</span>
+              <span className="font-bold mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <Store className={`w-3.5 h-3.5 shrink-0 ${isNotAssigned ? 'text-amber-600' : 'text-indigo-600'}`} />
+                <span className={isNotAssigned ? 'text-amber-800 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md text-xs' : 'text-slate-900 text-xs sm:text-sm'}>
+                  {exhShopName}
+                </span>
+              </span>
+            </div>
+            {onEditExhibitionShop && (
+              <button
+                type="button"
+                id="edit-exhibition-shop-btn"
+                onClick={onEditExhibitionShop}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer ${
+                  isNotAssigned
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-2xs'
+                    : 'bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200'
+                }`}
+              >
+                <Pencil className="w-3 h-3" />
+                <span>{isNotAssigned ? 'Assign Shop' : 'Change Shop'}</span>
+              </button>
+            )}
+          </div>
           <Row label="Event name" value={d.event_name} wide />
           <Row label="Organiser contact" value={d.organiser_contact} wide />
           <Row label="Venue" value={d.venue} />
