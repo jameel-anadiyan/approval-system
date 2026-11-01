@@ -45,6 +45,32 @@ export function formatISTDate(dateString: string | Date | null | undefined, incl
   }
 }
 
+/** Returns the YYYY-MM-DD calendar date in IST (Asia/Kolkata) for a Date or ISO timestamp. */
+export function toISTDateKey(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return '';
+  try {
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(d);
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const day = parts.find((p) => p.type === 'day')?.value;
+    return y && m && day ? `${y}-${m}-${day}` : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Returns today's calendar date in IST (Asia/Kolkata) as YYYY-MM-DD. */
+export function getTodayIST(): string {
+  return toISTDateKey(new Date());
+}
+
 export function formatRelativeTime(dateString: string | Date | null | undefined): string {
   if (!dateString) return '';
   try {

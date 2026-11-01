@@ -2,12 +2,13 @@ import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { formatINR, formatISTDate } from '../../lib/formatters';
+import { formatINR, formatISTDate, getTodayIST, toISTDateKey } from '../../lib/formatters';
 import { extractEventDate } from '../../lib/exhibitionQuota';
 import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  Calendar,
   CalendarDays,
   MapPin,
   User,
@@ -18,6 +19,7 @@ import {
   Clock,
   Sparkles,
   Search,
+  X,
 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 
@@ -28,6 +30,8 @@ export const HeadExhibitionWaitlistPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'all'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [regionFilter, setRegionFilter] = useState<string>('all');
+  const [approvedFromDate, setApprovedFromDate] = useState<string>('');
+  const [approvedToDate, setApprovedToDate] = useState<string>('');
 
   // Decision Modal state
   const [activeModal, setActiveModal] = useState<{
@@ -60,6 +64,30 @@ export const HeadExhibitionWaitlistPage: React.FC = () => {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [allWaitlistRequests]);
 
+  const todayIST = getTodayIST();
+  const isApprovedTodayOnly = approvedFromDate === todayIST && approvedToDate === todayIST;
+
+  const approvedTodayCount = useMemo(
+    () =>
+      allWaitlistRequests.filter(
+        (r) =>
+          Boolean(r.waitlist_approved_at) &&
+          toISTDateKey(r.waitlist_approved_at || r.decided_at || r.updated_at || r.created_at) === todayIST
+      ).length,
+    [allWaitlistRequests, todayIST]
+  );
+
+  const toggleApprovedTodayOnly = () => {
+    const today = getTodayIST();
+    if (approvedFromDate === today && approvedToDate === today) {
+      setApprovedFromDate('');
+      setApprovedToDate('');
+    } else {
+      setApprovedFromDate(today);
+      setApprovedToDate(today);
+    }
+  };
+
   // Filtered requests
   const filteredRequests = useMemo(() => {
     return allWaitlistRequests.filter((r) => {
@@ -68,6 +96,14 @@ export const HeadExhibitionWaitlistPage: React.FC = () => {
         if (r.waitlist_approved_at || r.status === 'rejected' || r.status === 'withdrawn') return false;
       } else if (statusFilter === 'approved') {
         if (!r.waitlist_approved_at) return false;
+        if (approvedFromDate || approvedToDate) {
+          const approvedKey = toISTDateKey(
+            r.waitlist_approved_at || r.decided_at || r.updated_at || r.created_at
+          );
+          if (!approvedKey) return false;
+          if (approvedFromDate && approvedKey < approvedFromDate) return false;
+          if (approvedToDate && approvedKey > approvedToDate) return false;
+        }
       }
 
       // Region filter
@@ -90,7 +126,7 @@ export const HeadExhibitionWaitlistPage: React.FC = () => {
 
       return true;
     });
-  }, [allWaitlistRequests, statusFilter, regionFilter, searchQuery]);
+  }, [allWaitlistRequests, statusFilter, approvedFromDate, approvedToDate, regionFilter, searchQuery]);
 
   const pendingCount = useMemo(() => {
     return allWaitlistRequests.filter((r) => !r.waitlist_approved_at && r.status !== 'rejected' && r.status !== 'withdrawn').length;
@@ -226,6 +262,88 @@ export const HeadExhibitionWaitlistPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Date-to-Date & Today Only Row on Approved Tab */}
+      {statusFilter === 'approved' && (
+        <div className="bg-white rounded-2xl p-3 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              id="waitlist-approved-today-only-btn"
+              onClick={toggleApprovedTodayOnly}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                isApprovedTodayOnly
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-200'
+                  : 'bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Today Only</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  isApprovedTodayOnly ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
+                }`}
+              >
+                {approvedTodayCount}
+              </span>
+            </button>
+
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">From</span>
+                <input
+                  type="date"
+                  id="waitlist-approved-from-date"
+                  value={approvedFromDate}
+                  max={approvedToDate || undefined}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setApprovedFromDate(val);
+                    if (approvedToDate && val && val > approvedToDate) {
+                      setApprovedToDate(val);
+                    }
+                  }}
+                  className="bg-transparent text-xs font-semibold text-slate-800 outline-hidden cursor-pointer"
+                />
+              </label>
+
+              <span className="text-slate-400 text-xs font-bold hidden sm:inline">→</span>
+
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">To</span>
+                <input
+                  type="date"
+                  id="waitlist-approved-to-date"
+                  value={approvedToDate}
+                  min={approvedFromDate || undefined}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setApprovedToDate(val);
+                    if (approvedFromDate && val && val < approvedFromDate) {
+                      setApprovedFromDate(val);
+                    }
+                  }}
+                  className="bg-transparent text-xs font-semibold text-slate-800 outline-hidden cursor-pointer"
+                />
+              </label>
+            </div>
+          </div>
+
+          {(approvedFromDate || approvedToDate) && (
+            <button
+              type="button"
+              onClick={() => {
+                setApprovedFromDate('');
+                setApprovedToDate('');
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors self-start sm:self-auto cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear Dates</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Requests List */}
       {filteredRequests.length === 0 ? (

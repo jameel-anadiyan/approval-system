@@ -1,9 +1,17 @@
 import React, { useId, useMemo, useState } from 'react';
 import type { RequestRecord, RequestStatus, RequestType } from '../../types/database';
-import { REQUEST_TYPES, TYPE_LABELS, STATUS_META, typeOf } from '../../lib/formatters';
-import { Search, SlidersHorizontal, ArrowDownUp, X } from 'lucide-react';
+import {
+  getTodayIST,
+  REQUEST_TYPES,
+  STATUS_META,
+  toISTDateKey,
+  TYPE_LABELS,
+  typeOf,
+} from '../../lib/formatters';
+import { Search, SlidersHorizontal, ArrowDownUp, Calendar, X } from 'lucide-react';
 
 export type SortKey = 'newest' | 'oldest' | 'amount_desc' | 'amount_asc';
+export type FilterDateField = 'submitted' | 'approved';
 
 export interface FilterState {
   q: string;
@@ -31,14 +39,24 @@ export const EMPTY_FILTERS: FilterState = {
   entryOfficer: 'all',
 };
 
-const when = (r: RequestRecord) => new Date(r.submitted_at || r.created_at).getTime();
+const rawDateOf = (r: RequestRecord, dateField: FilterDateField): string =>
+  dateField === 'approved'
+    ? r.decided_at || r.updated_at || r.created_at
+    : r.submitted_at || r.created_at;
 
 /** Pure filter + sort used by every listing page. */
-export function applyFilters(list: RequestRecord[], f: FilterState): RequestRecord[] {
+export function applyFilters(
+  list: RequestRecord[],
+  f: FilterState,
+  dateField: FilterDateField = 'submitted'
+): RequestRecord[] {
   const q = f.q.trim().toLowerCase();
   const emp = f.employee.trim().toLowerCase();
-  const fromTs = f.from ? new Date(`${f.from}T00:00:00+05:30`).getTime() : null;
-  const toTs = f.to ? new Date(`${f.to}T23:59:59.999+05:30`).getTime() : null;
+  const effectiveDateField: FilterDateField =
+    dateField === 'approved' || f.status === 'approved' || f.status === 'paid'
+      ? 'approved'
+      : 'submitted';
+  const when = (r: RequestRecord) => new Date(rawDateOf(r, effectiveDateField)).getTime();
 
   const out = list.filter((r) => {
     if (q) {
@@ -61,9 +79,12 @@ export function applyFilters(list: RequestRecord[], f: FilterState): RequestReco
       );
       if (!matchAssignedId && !matchAssignedName && !matchEntryCreator) return false;
     }
-    const t = when(r);
-    if (fromTs !== null && t < fromTs) return false;
-    if (toTs !== null && t > toTs) return false;
+    if (f.from || f.to) {
+      const dateKey = toISTDateKey(rawDateOf(r, effectiveDateField));
+      if (!dateKey) return false;
+      if (f.from && dateKey < f.from) return false;
+      if (f.to && dateKey > f.to) return false;
+    }
     return true;
   });
 
@@ -76,9 +97,13 @@ export function applyFilters(list: RequestRecord[], f: FilterState): RequestReco
   return out.sort(cmp[f.sort]);
 }
 
-export function useRequestFilters(list: RequestRecord[], initial: Partial<FilterState> = {}) {
+export function useRequestFilters(
+  list: RequestRecord[],
+  initial: Partial<FilterState> = {},
+  dateField: FilterDateField = 'submitted'
+) {
   const [filters, setFilters] = useState<FilterState>({ ...EMPTY_FILTERS, ...initial });
-  const result = useMemo(() => applyFilters(list, filters), [list, filters]);
+  const result = useMemo(() => applyFilters(list, filters, dateField), [list, filters, dateField]);
   return { filters, setFilters, result };
 }
 
@@ -92,6 +117,8 @@ interface RequestFiltersProps {
   departments?: { id: string; name: string; code: string }[];
   showEmployee?: boolean;
   resultCount?: number;
+  dateField?: FilterDateField;
+  inlineDateFilter?: boolean;
 }
 
 const inputCls =
@@ -107,9 +134,46 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
   departments,
   showEmployee = true,
   resultCount,
+  dateField = 'submitted',
+  inlineDateFilter = false,
 }) => {
   const [open, setOpen] = useState(false);
   const set = <K extends keyof FilterState>(k: K, v: FilterState[K]) => onChange({ ...value, [k]: v });
+
+  const effectiveDateField: FilterDateField =
+    dateField === 'approved' || value.status === 'approved' || value.status === 'paid'
+      ? 'approved'
+      : 'submitted';
+  const showInlineDates =
+    inlineDateFilter || value.status === 'approved' || value.status === 'paid';
+  const todayIST = getTodayIST();
+  const isTodayOnly = value.from === todayIST && value.to === todayIST;
+
+  const todayCount = useMemo(() => {
+    return source.filter((r) => {
+      if (value.status !== 'all' && r.status !== value.status) return false;
+      return toISTDateKey(rawDateOf(r, effectiveDateField)) === todayIST;
+    }).length;
+  }, [source, value.status, effectiveDateField, todayIST]);
+
+  const toggleTodayOnly = () => {
+    const today = getTodayIST();
+    if (value.from === today && value.to === today) {
+      onChange({ ...value, from: '', to: '' });
+    } else {
+      onChange({ ...value, from: today, to: today });
+    }
+  };
+
+  const handleFromChange = (fromVal: string) => {
+    const nextTo = value.to && fromVal && fromVal > value.to ? fromVal : value.to;
+    onChange({ ...value, from: fromVal, to: nextTo });
+  };
+
+  const handleToChange = (toVal: string) => {
+    const nextFrom = value.from && toVal && toVal < value.from ? toVal : value.from;
+    onChange({ ...value, from: nextFrom, to: toVal });
+  };
 
   const shops = useMemo(
     () => Array.from(new Set(source.map((r) => r.shop_name).filter((s): s is string => !!s))).sort(),
@@ -200,6 +264,59 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
         </div>
       </div>
 
+      {showInlineDates && (
+        <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            id="filter-inline-today-only"
+            onClick={toggleTodayOnly}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+              isTodayOnly
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-200'
+                : 'bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Today Only</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                isTodayOnly ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
+              }`}
+            >
+              {todayCount}
+            </span>
+          </button>
+
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">From</span>
+              <input
+                type="date"
+                id="filter-inline-from"
+                value={value.from}
+                max={value.to || undefined}
+                onChange={(e) => handleFromChange(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 outline-hidden cursor-pointer"
+              />
+            </label>
+
+            <span className="text-slate-400 text-xs font-bold hidden sm:inline">→</span>
+
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">To</span>
+              <input
+                type="date"
+                id="filter-inline-to"
+                value={value.to}
+                min={value.from || undefined}
+                onChange={(e) => handleToChange(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 outline-hidden cursor-pointer"
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
       {open && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -279,12 +396,37 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
             </label>
           )}
           <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            From date
-            <input id="filter-from" type="date" value={value.from} onChange={(e) => set('from', e.target.value)} className={`${inputCls} mt-1`} />
+            <span className="flex items-center justify-between">
+              <span>From date</span>
+              <button
+                type="button"
+                onClick={toggleTodayOnly}
+                className={`text-[10px] font-bold normal-case px-1.5 py-0.2 rounded cursor-pointer ${
+                  isTodayOnly ? 'bg-emerald-600 text-white' : 'text-emerald-700 hover:underline'
+                }`}
+              >
+                Today Only
+              </button>
+            </span>
+            <input
+              id="filter-from"
+              type="date"
+              value={value.from}
+              max={value.to || undefined}
+              onChange={(e) => handleFromChange(e.target.value)}
+              className={`${inputCls} mt-1`}
+            />
           </label>
           <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
             To date
-            <input id="filter-to" type="date" value={value.to} onChange={(e) => set('to', e.target.value)} className={`${inputCls} mt-1`} />
+            <input
+              id="filter-to"
+              type="date"
+              value={value.to}
+              min={value.from || undefined}
+              onChange={(e) => handleToChange(e.target.value)}
+              className={`${inputCls} mt-1`}
+            />
           </label>
           {entryOfficers.length > 0 && (
             <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">

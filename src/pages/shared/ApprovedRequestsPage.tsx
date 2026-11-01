@@ -2,10 +2,25 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { formatINR, formatISTDate, TYPE_BADGES, TYPE_LABELS, typeOf } from '../../lib/formatters';
 import {
-  CheckCircle2, Search, Download, Eye, FileText, Building2, Store, Calendar,
-  Filter, ShieldCheck, Banknote, Sparkles, UserCheck
+  formatINR,
+  formatISTDate,
+  getTodayIST,
+  toISTDateKey,
+  TYPE_BADGES,
+  TYPE_LABELS,
+  typeOf,
+} from '../../lib/formatters';
+import {
+  CheckCircle2,
+  Search,
+  Download,
+  Eye,
+  Calendar,
+  ShieldCheck,
+  Banknote,
+  UserCheck,
+  X,
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState';
 import { canUserViewApprovedRequest } from '../../lib/workflow';
@@ -13,7 +28,9 @@ import { useDirectory } from '../../lib/directory';
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { downloadSignedPacket } from '../../lib/files';
-import type { RequestType, RequestRecord } from '../../types/database';
+import type { RequestRecord } from '../../types/database';
+
+type DatePreset = 'all' | 'today' | '7d' | '30d' | '90d' | 'custom';
 
 export const ApprovedRequestsPage: React.FC = () => {
   const { user, role, isBackendConnected } = useAuth();
@@ -23,7 +40,9 @@ export const ApprovedRequestsPage: React.FC = () => {
 
   const [query, setQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string>('all');
-  const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
+  const [dateRange, setDateRange] = useState<DatePreset>('all');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
   const [assignTarget, setAssignTarget] = useState<RequestRecord | null>(null);
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{
     path: string;
@@ -33,6 +52,7 @@ export const ApprovedRequestsPage: React.FC = () => {
 
   const isHeadRole = role === 'head' || role === 'regional_head';
   const canManageEntryAccount = role === 'admin' || role === 'clerk' || isHeadRole;
+  const todayIST = getTodayIST();
 
   // Filter approved or paid requests that the current user has access to based on their role:
   // - Head: only respective head's approvals (approved by this head or by admin for their department/scope)
@@ -42,20 +62,113 @@ export const ApprovedRequestsPage: React.FC = () => {
   // - Admin: all approved
   // - Disbursement (payment_only): only associated approved/paid requests
   const approvedList = useMemo(() => {
-    return requests.filter((r) => canUserViewApprovedRequest(r, user, dir.users));
+    return requests
+      .filter((r) => canUserViewApprovedRequest(r, user, dir.users))
+      .sort(
+        (a, b) =>
+          new Date(b.decided_at || b.updated_at || b.created_at).getTime() -
+          new Date(a.decided_at || a.updated_at || a.created_at).getTime()
+      );
   }, [requests, user, dir.users]);
 
+  const todayCount = useMemo(() => {
+    return approvedList.filter(
+      (r) => toISTDateKey(r.decided_at || r.updated_at || r.created_at) === todayIST
+    ).length;
+  }, [approvedList, todayIST]);
+
+  const handleToggleTodayOnly = () => {
+    if (dateRange === 'today') {
+      setDateRange('all');
+      setFromDate('');
+      setToDate('');
+    } else {
+      const today = getTodayIST();
+      setDateRange('today');
+      setFromDate(today);
+      setToDate(today);
+    }
+  };
+
+  const handlePresetChange = (preset: DatePreset) => {
+    if (preset === 'today') {
+      const today = getTodayIST();
+      setDateRange('today');
+      setFromDate(today);
+      setToDate(today);
+    } else if (preset === 'custom') {
+      setDateRange('custom');
+    } else {
+      setDateRange(preset);
+      setFromDate('');
+      setToDate('');
+    }
+  };
+
+  const handleFromDateChange = (val: string) => {
+    setFromDate(val);
+    const nextTo = toDate && val && val > toDate ? val : toDate;
+    if (nextTo !== toDate) setToDate(nextTo);
+    const today = getTodayIST();
+    if (!val && !nextTo) {
+      setDateRange('all');
+    } else if (val === today && nextTo === today) {
+      setDateRange('today');
+    } else {
+      setDateRange('custom');
+    }
+  };
+
+  const handleToDateChange = (val: string) => {
+    setToDate(val);
+    const nextFrom = fromDate && val && val < fromDate ? val : fromDate;
+    if (nextFrom !== fromDate) setFromDate(nextFrom);
+    const today = getTodayIST();
+    if (!nextFrom && !val) {
+      setDateRange('all');
+    } else if (nextFrom === today && val === today) {
+      setDateRange('today');
+    } else {
+      setDateRange('custom');
+    }
+  };
+
+  const hasActiveFilters =
+    Boolean(query.trim()) ||
+    selectedType !== 'all' ||
+    dateRange !== 'all' ||
+    Boolean(fromDate) ||
+    Boolean(toDate);
+
+  const clearAllFilters = () => {
+    setQuery('');
+    setSelectedType('all');
+    setDateRange('all');
+    setFromDate('');
+    setToDate('');
+  };
+
   const filtered = useMemo(() => {
+    const today = getTodayIST();
     return approvedList.filter((r) => {
       // Type filter
       if (selectedType !== 'all' && typeOf(r) !== selectedType) return false;
 
-      // Date range filter
-      if (dateRange !== 'all') {
-        const d = new Date(r.decided_at || r.updated_at).getTime();
-        const now = Date.now();
+      const approvedTs = r.decided_at || r.updated_at || r.created_at;
+      const approvedDateKey = toISTDateKey(approvedTs);
+
+      // Today Only / Custom From-To Date filter (exact IST calendar day comparison)
+      if (dateRange === 'today') {
+        if (approvedDateKey !== today) return false;
+      } else if (fromDate || toDate) {
+        if (!approvedDateKey) return false;
+        if (fromDate && approvedDateKey < fromDate) return false;
+        if (toDate && approvedDateKey > toDate) return false;
+      } else if (dateRange === '7d' || dateRange === '30d' || dateRange === '90d') {
         const days = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : 90;
-        if (now - d > days * 86400000) return false;
+        const todayMidnightIST = new Date(`${today}T00:00:00+05:30`).getTime();
+        const cutoffKey = toISTDateKey(new Date(todayMidnightIST - (days - 1) * 86400000));
+        if (!approvedDateKey || approvedDateKey < cutoffKey) return false;
       }
 
       // Search query
@@ -73,7 +186,7 @@ export const ApprovedRequestsPage: React.FC = () => {
       }
       return true;
     });
-  }, [approvedList, selectedType, dateRange, query]);
+  }, [approvedList, selectedType, dateRange, fromDate, toDate, query]);
 
   const handleDownloadPacket = async (r: RequestRecord, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -138,7 +251,7 @@ export const ApprovedRequestsPage: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap">
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
@@ -156,15 +269,85 @@ export const ApprovedRequestsPage: React.FC = () => {
 
             <select
               value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as any)}
+              onChange={(e) => handlePresetChange(e.target.value as DatePreset)}
               className="px-3 py-2.5 rounded-xl border border-slate-200 text-xs bg-white focus:border-emerald-500 outline-hidden font-medium text-slate-700 w-full sm:w-auto"
             >
               <option value="all">All Time</option>
+              <option value="today">Today Only</option>
               <option value="7d">Last 7 Days</option>
               <option value="30d">Last 30 Days</option>
               <option value="90d">Last 90 Days</option>
+              {dateRange === 'custom' && <option value="custom">Custom Date Range</option>}
             </select>
           </div>
+        </div>
+
+        {/* Date-to-Date & Today Only Row */}
+        <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              id="approved-today-only-btn"
+              onClick={handleToggleTodayOnly}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                dateRange === 'today'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-200'
+                  : 'bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Today Only</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  dateRange === 'today'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-emerald-200/80 text-emerald-900'
+                }`}
+              >
+                {todayCount}
+              </span>
+            </button>
+
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">From</span>
+                <input
+                  type="date"
+                  id="approved-filter-from-date"
+                  value={fromDate}
+                  max={toDate || undefined}
+                  onChange={(e) => handleFromDateChange(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-slate-800 outline-hidden cursor-pointer"
+                />
+              </label>
+
+              <span className="text-slate-400 text-xs font-bold hidden sm:inline">→</span>
+
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">To</span>
+                <input
+                  type="date"
+                  id="approved-filter-to-date"
+                  value={toDate}
+                  min={fromDate || undefined}
+                  onChange={(e) => handleToDateChange(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-slate-800 outline-hidden cursor-pointer"
+                />
+              </label>
+            </div>
+          </div>
+
+          {hasActiveFilters && (
+            <button
+              type="button"
+              id="approved-clear-filters-btn"
+              onClick={clearAllFilters}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors self-start sm:self-auto cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear Filters</span>
+            </button>
+          )}
         </div>
       </div>
 

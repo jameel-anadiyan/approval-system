@@ -48,7 +48,12 @@ export const MyRequestsPage: React.FC = () => {
   };
 
   const tabRequests = getRequestsForTab(activeTab);
-  const { filters, setFilters, result: filtered } = useRequestFilters(tabRequests);
+  const isApprovedOrPaidTab = activeTab === 'approved' || activeTab === 'paid';
+  const { filters, setFilters, result: filtered } = useRequestFilters(
+    tabRequests,
+    {},
+    isApprovedOrPaidTab ? 'approved' : 'submitted'
+  );
   const searchQuery = filters.q;
 
   const tabs: { key: TabKey; label: string; count: number }[] = [
@@ -129,6 +134,8 @@ export const MyRequestsPage: React.FC = () => {
         source={tabRequests}
         showEmployee={false}
         resultCount={filtered.length}
+        dateField={isApprovedOrPaidTab ? 'approved' : 'submitted'}
+        inlineDateFilter={isApprovedOrPaidTab}
       />
 
       {/* Request Cards Grid */}
