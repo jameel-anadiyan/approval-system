@@ -536,24 +536,6 @@ export const RequestDetailPage: React.FC = () => {
                   Route {request.route}
                 </span>
               )}
-              {canHeadChangeRoute(request, user, threshold) && (
-                <button
-                  type="button"
-                  id="detail-header-change-route-btn"
-                  onClick={() => setModalState('change_route')}
-                  className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
-                  title={
-                    request.status === 'pending_head_approval'
-                      ? 'Change to Route A (moves to To Review so you can forward to Admin)'
-                      : 'Change to Route B (moves to To Approve for direct Head approval)'
-                  }
-                >
-                  <ArrowLeftRight className="w-3 h-3 text-indigo-600" />
-                  <span>
-                    Change to Route {request.status === 'pending_head_approval' ? 'A' : 'B'}
-                  </span>
-                </button>
-              )}
               {request.owner_head_name && (
                 <span
                   id="detail-owner-head-badge"
