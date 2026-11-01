@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
-import { canUserViewBillMissingRequest } from '../../lib/workflow';
+import { canUserViewBillMissingRequest, isOwningDepartmentHead } from '../../lib/workflow';
 import {
   CheckCircle2,
   Clock,
@@ -39,14 +39,21 @@ export const HeadDashboardPage: React.FC = () => {
 
   // Department requests
   const deptRequests = requests.filter(
-    (r) => !user?.department_id || r.department_id === user.department_id
+    (r) =>
+      r.owner_head_id === user?.id ||
+      !user?.department_id ||
+      r.department_id === user.department_id
   );
 
   // Queue 1: To Approve (Route B requests waiting for Head approval)
-  const toApproveQueue = deptRequests.filter((r) => r.status === 'pending_head_approval');
+  const toApproveQueue = requests.filter(
+    (r) => r.status === 'pending_head_approval' && isOwningDepartmentHead(r, user)
+  );
 
   // Queue 2: To Review (Route A requests waiting for Head review)
-  const toReviewQueue = deptRequests.filter((r) => r.status === 'pending_head_review');
+  const toReviewQueue = requests.filter(
+    (r) => r.status === 'pending_head_review' && isOwningDepartmentHead(r, user)
+  );
 
   // Queue 3: Bill Missing strictly associated with this Head
   const billMissingQueue = requests.filter((r) => canUserViewBillMissingRequest(r, user));
@@ -343,7 +350,7 @@ export const HeadDashboardPage: React.FC = () => {
       {/* KPI Cards */}
       <div className={`grid grid-cols-2 ${canViewWaitlist ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} gap-3 sm:gap-4`}>
         <div
-          onClick={() => {}}
+          onClick={() => setSelectedQueue('to_approve')}
           className="bg-white p-4 sm:p-5 rounded-2xl border border-purple-200/90 shadow-xs cursor-pointer hover:border-purple-300 transition-all"
         >
           <div className="flex items-center justify-between text-purple-600 mb-2">
@@ -476,7 +483,7 @@ export const HeadDashboardPage: React.FC = () => {
               </span>
             </h2>
             <span className="text-xs text-slate-400">
-              Sign directly with your official seal & signature
+              Open a request to sign directly or change its route to Route A
             </span>
           </div>
 

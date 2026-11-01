@@ -10,6 +10,7 @@ import {
   Banknote,
   Clock,
   ArrowRight,
+  ArrowLeftRight,
   Users,
   HelpCircle,
 } from 'lucide-react';
@@ -42,6 +43,9 @@ export const RequestTimeline: React.FC<RequestTimelineProps> = ({ actions }) => 
       case 'forwarded':
       case 'regional_forwarded':
         return <CornerDownRight className="w-4 h-4 text-indigo-600" />;
+      case 'route_changed_A':
+      case 'route_changed_B':
+        return <ArrowLeftRight className="w-4 h-4 text-indigo-600" />;
       case 'consultation_requested':
         return <Users className="w-4 h-4 text-purple-600" />;
       case 'consultation_agreed':

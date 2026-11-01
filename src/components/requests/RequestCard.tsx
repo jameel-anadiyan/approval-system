@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RequestRecord, isDisbursementAssociated } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
 import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
+import { canHeadChangeRoute } from '../../lib/workflow';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote, AlertTriangle } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote, AlertTriangle, ArrowLeftRight } from 'lucide-react';
 import { BillMissingBanner } from './BillMissingBanner';
+import { ChangeRouteModal } from '../portals/ChangeRouteModal';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -26,9 +28,11 @@ export const RequestCard: React.FC<RequestCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { threshold, deleteSpecificRequest } = useRequests();
+  const { threshold, deleteSpecificRequest, headChangeRoute } = useRequests();
+  const [showChangeRouteModal, setShowChangeRouteModal] = useState(false);
   const rType = typeOf(request);
   const isHighValue = rType === 'general' && request.amount > threshold;
+  const showHeadChangeRoute = canHeadChangeRoute(request, user, threshold);
 
   const docCount = request.files?.filter((f) => f.kind === 'document').length || 0;
   const hasVoiceNote = request.files?.some((f) => f.kind === 'voice_note');
@@ -249,8 +253,38 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             </span>
           )}
         </div>
-        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all" />
+        <div className="flex items-center gap-2">
+          {showHeadChangeRoute && (
+            <button
+              type="button"
+              id={`card-change-route-${request.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowChangeRouteModal(true);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[11px] transition-colors cursor-pointer"
+            >
+              <ArrowLeftRight className="w-3 h-3 text-indigo-600" />
+              <span>Change Route to {request.status === 'pending_head_approval' ? 'A' : 'B'}</span>
+            </button>
+          )}
+          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all" />
+        </div>
       </div>
+
+      {showChangeRouteModal && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <ChangeRouteModal
+            isOpen={true}
+            onClose={() => setShowChangeRouteModal(false)}
+            request={request}
+            onChangeRoute={async (newRoute, rm, v) => {
+              const res = await headChangeRoute(request.id, newRoute, rm, v);
+              if (!res.success) throw new Error(res.error || 'Failed to change route');
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

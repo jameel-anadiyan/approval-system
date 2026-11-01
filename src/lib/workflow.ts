@@ -20,6 +20,52 @@ export function isMyRegionalRequest(r: RequestRecord, me: Me): boolean {
   return !!me && me.role === 'regional_head' && r.status === 'pending_regional_review' && r.regional_head_id === me.id;
 }
 
+/** True when `me` is the owning Department Head for request `r` (not requester, not a consulted head). */
+export function isOwningDepartmentHead(r: RequestRecord, me: Me): boolean {
+  if (!me || me.role !== 'head') return false;
+  if (r.requester_id === me.id) return false;
+  if ((r.consultations || []).some((c) => c.head_id === me.id)) return false;
+  return Boolean(
+    (r.owner_head_id && r.owner_head_id === me.id) ||
+    (me.department_id && r.department_id === me.department_id)
+  );
+}
+
+/**
+ * Department Head can escalate a Route B request (`pending_head_approval`) to Route A (`pending_head_review`)
+ * so it moves to the To Review tab and can be forwarded to Admin for approval.
+ */
+export function canHeadChangeRouteToA(r: RequestRecord, me: Me): boolean {
+  if (!isOwningDepartmentHead(r, me)) return false;
+  if (r.status !== 'pending_head_approval') return false;
+  return true;
+}
+
+/**
+ * Department Head can switch a Route A request (`pending_head_review`) to Route B (`pending_head_approval`)
+ * only when policy allows direct Head approval (not own/head request, not exhibition, quote selected if asset,
+ * and within the high-value threshold for general/asset requests).
+ */
+export function canHeadChangeRouteToB(r: RequestRecord, me: Me, threshold: number): boolean {
+  if (!isOwningDepartmentHead(r, me)) return false;
+  if (r.status !== 'pending_head_review') return false;
+  if (r.requester_role === 'head') return false;
+  if (r.request_type === 'exhibition') return false;
+  if ((r.request_type === 'asset' || r.request_type === 'asset_below_20k') && !r.selected_quote_id) {
+    return false;
+  }
+  const t = r.request_type ?? 'general';
+  if (t !== 'discount' && t !== 'stock_transfer' && t !== 'non_cash' && Number(r.amount) > threshold) {
+    return false;
+  }
+  return true;
+}
+
+/** True when the Department Head can change the approval route of `r` in either direction. */
+export function canHeadChangeRoute(r: RequestRecord, me: Me, threshold: number): boolean {
+  return canHeadChangeRouteToA(r, me) || canHeadChangeRouteToB(r, me, threshold);
+}
+
 /**
  * Approved requests tab visibility:
  * - Admin: sees all approved requests across all departments/heads

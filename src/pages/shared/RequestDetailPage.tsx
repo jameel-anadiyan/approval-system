@@ -16,7 +16,13 @@ import { ReturnModal } from '../../components/portals/ReturnModal';
 import { RejectModal } from '../../components/portals/RejectModal';
 import { ForwardModal } from '../../components/portals/ForwardModal';
 import { RegionalForwardModal } from '../../components/portals/RegionalForwardModal';
-import { isMyRoutingRequest } from '../../lib/workflow';
+import { ChangeRouteModal } from '../../components/portals/ChangeRouteModal';
+import {
+  isMyRoutingRequest,
+  canHeadChangeRoute,
+  canHeadChangeRouteToA,
+  canHeadChangeRouteToB,
+} from '../../lib/workflow';
 import { supabase } from '../../lib/supabase';
 import { MarkPaidModal } from '../../components/portals/MarkPaidModal';
 import { AddDisbursementEntryModal } from '../../components/portals/AddDisbursementEntryModal';
@@ -51,6 +57,7 @@ import { downloadStoredFile } from '../../lib/files';
 import { sendApprovalWhatsAppNotification } from '../../lib/whatsapp';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Send,
   RotateCcw,
   XCircle,
@@ -101,6 +108,7 @@ export const RequestDetailPage: React.FC = () => {
     withdrawRequest,
     deleteDraft,
     routeRequest,
+    headChangeRoute,
     forwardRequest,
     regionalForwardRequest,
     returnRequest,
@@ -119,6 +127,7 @@ export const RequestDetailPage: React.FC = () => {
 
   const [modalState, setModalState] = useState<
     | 'route'
+    | 'change_route'
     | 'approve'
     | 'return'
     | 'reject'
@@ -143,7 +152,12 @@ export const RequestDetailPage: React.FC = () => {
   const [copiedNo, setCopiedNo] = useState(false);
   const [busy, setBusy] = useState(false);
   const actionLockRef = useRef(false);
-  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(
+  const [banner, setBanner] = useState<{
+    ok: boolean;
+    text: string;
+    actionLabel?: string;
+    onAction?: () => void;
+  } | null>(
     (location.state as { notice?: string } | null)?.notice
       ? { ok: false, text: (location.state as { notice: string }).notice }
       : null
@@ -151,6 +165,21 @@ export const RequestDetailPage: React.FC = () => {
   const [showBillMissingModal, setShowBillMissingModal] = useState(false);
 
   const request = id ? getRequestById(id) : undefined;
+  const isDisbursement = role === 'disbursement';
+  const isStockMonitorUser = isDisbursement && user?.disbursement_type === 'stock_transfer_monitor';
+  const isEntryOnly = isDisbursement && !isStockMonitorUser && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
+  const isPaymentOnly = isDisbursement && user?.disbursement_type === 'payment_only';
+  const reqTypeEarly = request ? typeOf(request) : 'general';
+  const isPaymentNeededEarly = reqTypeEarly !== 'discount' && reqTypeEarly !== 'non_cash' && reqTypeEarly !== 'stock_transfer';
+
+  const dir = useDirectory();
+  const entryLock = useEntryLock(
+    request?.id,
+    isEntryOnly && request?.status === 'approved' && isPaymentNeededEarly
+  );
+  const [previewSignedDoc, setPreviewSignedDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
+  const [isEditBankModalOpen, setIsEditBankModalOpen] = useState<boolean>(false);
+  const [sendingWaDoc, setSendingWaDoc] = useState(false);
 
   const handleDeleteRequestPermanently = async () => {
     if (!request) return;
@@ -311,23 +340,10 @@ export const RequestDetailPage: React.FC = () => {
     request.status !== 'cancelled' &&
     request.status !== 'rejected' &&
     request.status !== 'withdrawn';
-  const isDisbursement = role === 'disbursement';
-  const isStockMonitorUser = isDisbursement && user?.disbursement_type === 'stock_transfer_monitor';
-  const isEntryOnly = isDisbursement && !isStockMonitorUser && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
-  const isPaymentOnly = isDisbursement && user?.disbursement_type === 'payment_only';
   const canAddDisbursementEntry = isEntryOnly || role === 'admin';
   const canDisbursePayment = isPaymentOnly || role === 'admin';
   const isApprovedTransfer = rType === 'stock_transfer' && request.status === 'approved';
   const canCompleteTransfer = isApprovedTransfer && !request.transfer_completed_at && (role === 'admin' || isStockMonitorUser);
-
-  const dir = useDirectory();
-  const entryLock = useEntryLock(
-    request?.id,
-    isEntryOnly && request?.status === 'approved' && isPaymentNeeded
-  );
-  const [previewSignedDoc, setPreviewSignedDoc] = useState<{ path: string; name: string; approvalNo?: string | null } | null>(null);
-  const [isEditBankModalOpen, setIsEditBankModalOpen] = useState<boolean>(false);
-  const [sendingWaDoc, setSendingWaDoc] = useState(false);
 
   const isFirstPaymentReleased = Boolean(
     Number(request.paid_amount || 0) > 0 ||
@@ -520,6 +536,24 @@ export const RequestDetailPage: React.FC = () => {
                   Route {request.route}
                 </span>
               )}
+              {canHeadChangeRoute(request, user, threshold) && (
+                <button
+                  type="button"
+                  id="detail-header-change-route-btn"
+                  onClick={() => setModalState('change_route')}
+                  className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
+                  title={
+                    request.status === 'pending_head_approval'
+                      ? 'Change to Route A (moves to To Review so you can forward to Admin)'
+                      : 'Change to Route B (moves to To Approve for direct Head approval)'
+                  }
+                >
+                  <ArrowLeftRight className="w-3 h-3 text-indigo-600" />
+                  <span>
+                    Change to Route {request.status === 'pending_head_approval' ? 'A' : 'B'}
+                  </span>
+                </button>
+              )}
               {request.owner_head_name && (
                 <span
                   id="detail-owner-head-badge"
@@ -558,6 +592,19 @@ export const RequestDetailPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {canHeadChangeRoute(request, user, threshold) && (
+            <button
+              type="button"
+              id="head-top-change-route-btn"
+              onClick={() => setModalState('change_route')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-200 transition-all shrink-0 cursor-pointer"
+            >
+              <ArrowLeftRight className="w-4 h-4" />
+              <span>
+                Change Route to {request.status === 'pending_head_approval' ? 'A' : 'B'}
+              </span>
+            </button>
+          )}
           {canRequestConsultation && (
             <button
               type="button"
@@ -608,14 +655,25 @@ export const RequestDetailPage: React.FC = () => {
       {banner && (
         <div
           role="status"
-          className={`mb-4 p-3.5 rounded-xl border text-xs flex items-start justify-between gap-3 ${
+          className={`mb-4 p-3.5 rounded-xl border text-xs flex items-center justify-between gap-3 flex-wrap ${
             banner.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
           }`}
         >
           <span>{banner.text}</span>
-          <button type="button" onClick={() => setBanner(null)} className="font-bold opacity-60 hover:opacity-100" aria-label="Dismiss">
-            ×
-          </button>
+          <div className="flex items-center gap-2 ml-auto">
+            {banner.actionLabel && banner.onAction && (
+              <button
+                type="button"
+                onClick={banner.onAction}
+                className="px-3 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] transition-colors cursor-pointer"
+              >
+                {banner.actionLabel}
+              </button>
+            )}
+            <button type="button" onClick={() => setBanner(null)} className="font-bold opacity-60 hover:opacity-100 px-1" aria-label="Dismiss">
+              ×
+            </button>
+          </div>
         </div>
       )}
 
@@ -2147,7 +2205,20 @@ export const RequestDetailPage: React.FC = () => {
                   <span>Return for Correction</span>
                 </button>
 
-                {isAsset ? (
+                {canHeadChangeRouteToB(request, user, threshold) && (
+                  <button
+                    type="button"
+                    id="head-change-route-to-b-btn"
+                    onClick={() => setModalState('change_route')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 font-semibold text-xs transition-colors cursor-pointer"
+                    title="Move this request to To Approve (Route B) for direct Head approval"
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    <span>Change Route to B</span>
+                  </button>
+                )}
+
+                {isAsset && !request.selected_quote_id ? (
                   <span className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 font-semibold text-xs">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>Select the best quotation above</span>
@@ -2191,6 +2262,19 @@ export const RequestDetailPage: React.FC = () => {
                   <XCircle className="w-3.5 h-3.5" />
                   <span>Reject</span>
                 </button>
+
+                {canHeadChangeRouteToA(request, user) && (
+                  <button
+                    type="button"
+                    id="head-change-route-to-a-btn"
+                    onClick={() => setModalState('change_route')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold text-xs shadow-2xs transition-all cursor-pointer"
+                    title="Move this request to To Review (Route A) so it can be reviewed and forwarded to Admin"
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    <span>Change Route to A</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -2488,7 +2572,36 @@ export const RequestDetailPage: React.FC = () => {
           isOpen={true}
           onClose={() => setModalState(null)}
           request={request}
-          onRoute={(rt, rm, v) => orThrow(routeRequest(request.id, rt, rm, v), `Routed via Route ${rt}.`)}
+          onRoute={(rt, rm, v, entryUserId) =>
+            orThrow(routeRequest(request.id, rt, rm, v, entryUserId), `Routed via Route ${rt}.`)
+          }
+        />
+      )}
+
+      {modalState === 'change_route' && (
+        <ChangeRouteModal
+          isOpen={true}
+          onClose={() => setModalState(null)}
+          request={request}
+          onChangeRoute={async (newRoute, rm, v) => {
+            const res = await headChangeRoute(request.id, newRoute, rm, v);
+            if (!res.success) throw new Error(res.error || 'Failed to change route');
+            if (newRoute === 'A') {
+              setBanner({
+                ok: true,
+                text: 'Route changed to Route A. This request is now in your To Review (Route A) tab — you can click "Forward to Admin…" below or open To Review.',
+                actionLabel: 'Open To Review Tab →',
+                onAction: () => navigate('/head/review'),
+              });
+            } else {
+              setBanner({
+                ok: true,
+                text: 'Route changed to Route B. This request is now in your To Approve (Route B) tab — you can click "Approve & Sign" below or open To Approve.',
+                actionLabel: 'Open To Approve Tab →',
+                onAction: () => navigate('/head'),
+              });
+            }
+          }}
         />
       )}
 

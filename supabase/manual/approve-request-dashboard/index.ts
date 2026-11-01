@@ -8,6 +8,7 @@ import { buildPacket, stampDocument, type StampContext } from "./stamp.ts";
 const ACTION_LABEL: Record<string, string> = {
   submitted: "Submitted", resubmitted: "Resubmitted after correction", routed_A: "Routed to A (Admin)",
   routed_B: "Routed to B (Head)", routed_own_A: "Routed own request to A", routed_own_B: "Routed own request to B",
+  route_changed_A: "Head changed route to A (Admin)", route_changed_B: "Head changed route to B (Head)",
   forwarded: "Reviewed and forwarded to Admin", returned: "Returned for correction", rejected: "Rejected",
   withdrawn: "Withdrawn", approved: "Approved", paid: "Marked as paid",
 };

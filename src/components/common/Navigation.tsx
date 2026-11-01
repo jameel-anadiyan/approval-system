@@ -37,7 +37,13 @@ import { useRequests } from '../../context/RequestContext';
 import { useDirectory } from '../../lib/directory';
 import { canViewDiscountReport } from '../../lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from '../../lib/stockTransferReport';
-import { canUserViewReturnedRequest, isMyRegionalRequest, isMyRoutingRequest, canUserViewBillMissingRequest } from '../../lib/workflow';
+import {
+  canUserViewReturnedRequest,
+  isMyRegionalRequest,
+  isMyRoutingRequest,
+  canUserViewBillMissingRequest,
+  isOwningDepartmentHead,
+} from '../../lib/workflow';
 import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
 import { entryPayable, entryOutstanding, entryAvailable } from '../../types/database';
 import { isEntryCheckingUser } from '../../lib/formatters';
@@ -70,11 +76,11 @@ export const Navigation: React.FC = () => {
   const regionalToForwardCount = requests.filter((r) => isMyRegionalRequest(r, user)).length;
 
   const headToApproveCount = requests.filter(
-    (r) => r.status === 'pending_head_approval' && (!user?.department_id || r.department_id === user.department_id)
+    (r) => r.status === 'pending_head_approval' && isOwningDepartmentHead(r, user)
   ).length;
 
   const headToReviewCount = requests.filter(
-    (r) => r.status === 'pending_head_review' && (!user?.department_id || r.department_id === user.department_id)
+    (r) => r.status === 'pending_head_review' && isOwningDepartmentHead(r, user)
   ).length;
 
   const headConsultationsCount = requests.reduce((count, r) => {

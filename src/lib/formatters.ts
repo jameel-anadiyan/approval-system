@@ -215,6 +215,8 @@ export const ACTION_LABELS: Record<string, string> = {
   resubmitted: 'Resubmitted after correction',
   routed_A: 'Routed to Route A (Admin)',
   routed_B: 'Routed to Route B (Head)',
+  route_changed_A: 'Head changed route to Route A (Admin)',
+  route_changed_B: 'Head changed route to Route B (Head)',
   forwarded: 'Reviewed and forwarded to Admin',
   returned: 'Returned for correction',
   rejected: 'Rejected',
@@ -303,13 +305,15 @@ export const TYPE_BADGES: Record<RequestType, string> = {
 export const typeOf = (r: { request_type?: RequestType | null }): RequestType => r.request_type ?? 'general';
 
 /** Status label that knows Discount, Non-Cash, and Stock Transfer approvals have no payment step. */
-export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null }): string {
+export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null; selected_quote_id?: string | null }): string {
   if (r.status === 'approved') {
     const t = typeOf(r);
     if (t === 'discount' || t === 'non_cash' || t === 'stock_transfer') return 'Approved';
     return 'Approved (Awaiting Disbursement)';
   }
-  if (r.status === 'pending_head_review' && (typeOf(r) === 'asset' || typeOf(r) === 'asset_below_20k')) return 'Head: select quotation';
+  if (r.status === 'pending_head_review' && (typeOf(r) === 'asset' || typeOf(r) === 'asset_below_20k') && !r.selected_quote_id) {
+    return 'Head: select quotation';
+  }
   return STATUS_META[r.status]?.label ?? r.status;
 }
 

@@ -29,6 +29,11 @@ import {
   sendReturnedWhatsAppNotification,
   sendPaymentDisbursedWhatsAppNotification,
 } from '../lib/whatsapp';
+import {
+  canHeadChangeRouteToA,
+  canHeadChangeRouteToB,
+  isOwningDepartmentHead,
+} from '../lib/workflow';
 
 type Result = { success: boolean; error?: string; warning?: string };
 
@@ -122,6 +127,8 @@ interface RequestContextType {
   submitRequest: (id: string, entryUserId?: string | null) => Promise<{ success: boolean; request_no?: string; error?: string }>;
   withdrawRequest: (id: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
   routeRequest: (id: string, route: ApprovalRoute, remarks?: string, voice?: ActionVoice | null, assignedEntryUserId?: string) => Promise<{ success: boolean; error?: string }>;
+  /** Department Head changes approval route (Route B -> Route A to review & forward to Admin, or Route A -> Route B when eligible). */
+  headChangeRoute: (id: string, newRoute: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   assignDisbursementEntryUser: (requestId: string, entryUserId: string) => Promise<{ success: boolean; error?: string }>;
   forwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   /** Regional Head forwards an employee's request to the clerk (no approval). */
@@ -1364,6 +1371,158 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const headChangeRoute = async (
+    id: string,
+    newRoute: ApprovalRoute,
+    remarks?: string,
+    voice?: ActionVoice | null
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Must be logged in' };
+    if (user.role !== 'head') {
+      return { success: false, error: 'Only a Department Head can change the approval route.' };
+    }
+
+    const current = getRequestById(id);
+    if (!current) return { success: false, error: 'Request not found' };
+
+    if (!isOwningDepartmentHead(current, user)) {
+      return {
+        success: false,
+        error:
+          current.requester_id === user.id
+            ? 'You cannot change the route of your own request.'
+            : 'Only the owning Department Head can change the route of this request.',
+      };
+    }
+
+    if (newRoute === 'A') {
+      if (current.status === 'pending_head_review') {
+        return { success: false, error: 'This request is already in To Review (Route A).' };
+      }
+      if (!canHeadChangeRouteToA(current, user)) {
+        return {
+          success: false,
+          error: 'Route can only be changed to Route A while the request is waiting for Head approval.',
+        };
+      }
+    } else {
+      if (
+        (current.request_type === 'asset' || current.request_type === 'asset_below_20k') &&
+        !current.selected_quote_id
+      ) {
+        return { success: false, error: 'Select the best quotation before changing to Route B.' };
+      }
+      if (current.status === 'pending_head_approval') {
+        return { success: false, error: 'This request is already in To Approve (Route B).' };
+      }
+      if (current.requester_role === 'head') {
+        return {
+          success: false,
+          error: 'A Department Head request must stay on Route A (Admin approval required).',
+        };
+      }
+      if (current.request_type === 'exhibition') {
+        return {
+          success: false,
+          error: 'Exhibition requests require Administrator approval and must stay on Route A.',
+        };
+      }
+      if (
+        current.request_type !== 'discount' &&
+        current.request_type !== 'stock_transfer' &&
+        current.request_type !== 'non_cash' &&
+        Number(current.amount) > threshold
+      ) {
+        return {
+          success: false,
+          error: `Requests above ₹${threshold.toLocaleString('en-IN')} require Administrator approval and must stay on Route A.`,
+        };
+      }
+      if (!canHeadChangeRouteToB(current, user, threshold)) {
+        return {
+          success: false,
+          error: 'This request cannot be switched to Route B at its current stage.',
+        };
+      }
+    }
+
+    if (isBackendConnected) {
+      try {
+        await uploadActionVoice(id, voice);
+        const { error } = await supabase.rpc('head_change_route', {
+          p_request_id: id,
+          p_new_route: newRoute,
+          p_remarks: remarks?.trim() || null,
+        });
+        if (error) {
+          const msg = error.message || '';
+          if (
+            error.code === 'PGRST202' ||
+            msg.includes('schema cache') ||
+            msg.includes('head_change_route')
+          ) {
+            return {
+              success: false,
+              error:
+                'Database migration required: Please run supabase/manual/apply_0071_head_change_route.sql in your Supabase SQL Editor to enable Head route changes.',
+            };
+          }
+          throw error;
+        }
+        await loadRequests(true);
+        return { success: true };
+      } catch (err: unknown) {
+        const msg = errMsg(err);
+        if (msg.includes('schema cache') || msg.includes('head_change_route')) {
+          return {
+            success: false,
+            error:
+              'Database migration required: Please run supabase/manual/apply_0071_head_change_route.sql in your Supabase SQL Editor to enable Head route changes.',
+          };
+        }
+        return { success: false, error: msg };
+      }
+    }
+
+    const nextStatus: RequestStatus =
+      newRoute === 'A' ? 'pending_head_review' : 'pending_head_approval';
+    const nowIso = new Date().toISOString();
+    const defaultRemarks =
+      newRoute === 'A'
+        ? 'Changed route to Route A — moved to To Review for forwarding to Admin.'
+        : 'Changed route to Route B — moved to To Approve for direct Head approval.';
+
+    const action: RequestAction = {
+      id: `act-${Date.now()}`,
+      request_id: id,
+      actor_id: user.id,
+      actor_name: user.full_name,
+      actor_role: user.role,
+      action: newRoute === 'A' ? 'route_changed_A' : 'route_changed_B',
+      from_status: current.status,
+      to_status: nextStatus,
+      remarks: remarks?.trim() || defaultRemarks,
+      visible_to_requester: true,
+      created_at: nowIso,
+    };
+
+    updateLocalRequests((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status: nextStatus,
+              route: newRoute,
+              updated_at: nowIso,
+              actions: [action, ...(r.actions || [])],
+            }
+          : r
+      )
+    );
+
+    return { success: true };
+  };
+
   const assignDisbursementEntryUser = async (
     requestId: string,
     entryUserId: string
@@ -1413,6 +1572,19 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const forwardRequest = async (id: string, remarks?: string, voice?: ActionVoice | null): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
+    if (user.role !== 'head') return { success: false, error: 'Only a Department Head can forward requests to Admin.' };
+
+    const current = getRequestById(id);
+    if (!current) return { success: false, error: 'Request not found' };
+    if (!isOwningDepartmentHead(current, user)) {
+      return { success: false, error: 'Only the owning Department Head can forward this request.' };
+    }
+    if (current.status !== 'pending_head_review') {
+      return { success: false, error: 'This request is not waiting for Head review.' };
+    }
+    if ((current.request_type === 'asset' || current.request_type === 'asset_below_20k') && !current.selected_quote_id) {
+      return { success: false, error: 'Select the best quotation before forwarding to Admin.' };
+    }
 
     if (isBackendConnected) {
       try {
@@ -1422,16 +1594,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_remarks: remarks || null,
         });
         if (error) throw error;
-        await loadRequests();
+        await loadRequests(true);
         return { success: true };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
       }
     }
 
-    const current = getRequestById(id);
-    if (!current) return { success: false, error: 'Request not found' };
-
+    const nowIso = new Date().toISOString();
     const action: RequestAction = {
       id: `act-${Date.now()}`,
       request_id: id,
@@ -1443,7 +1613,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       to_status: 'pending_admin_approval',
       remarks: remarks || 'Reviewed and forwarded to Admin.',
       visible_to_requester: true,
-      created_at: new Date().toISOString(),
+      created_at: nowIso,
     };
 
     updateLocalRequests((prev) =>
@@ -1452,7 +1622,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ? {
               ...r,
               status: 'pending_admin_approval',
-              updated_at: new Date().toISOString(),
+              reviewed_by: user.id,
+              reviewed_by_name: user.full_name,
+              reviewed_at: nowIso,
+              updated_at: nowIso,
               actions: [action, ...(r.actions || [])],
             }
           : r
@@ -3742,6 +3915,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         submitRequest,
         withdrawRequest,
         routeRequest,
+        headChangeRoute,
         forwardRequest,
         regionalForwardRequest,
         loadCategoryOptions,
