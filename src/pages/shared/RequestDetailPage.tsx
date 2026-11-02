@@ -1509,14 +1509,29 @@ export const RequestDetailPage: React.FC = () => {
                               if (!signedPacket.storage_path) return;
                               setSendingWaDoc(true);
                               try {
-                                const { data: signedData } = await supabase.storage
-                                  .from('signed-documents')
-                                  .createSignedUrl(signedPacket.storage_path, 60 * 60 * 24 * 7);
+                                const [dlRes, signedRes] = await Promise.all([
+                                  supabase.storage
+                                    .from('signed-documents')
+                                    .download(signedPacket.storage_path),
+                                  supabase.storage
+                                    .from('signed-documents')
+                                    .createSignedUrl(signedPacket.storage_path, 60 * 60 * 24 * 7),
+                                ]);
 
-                                const url = signedData?.signedUrl;
-                                if (!url) throw new Error('Could not generate document link');
+                                const stampedBlob = !dlRes.error ? dlRes.data : null;
+                                const url = signedRes.data?.signedUrl || '';
+                                if (!stampedBlob && !url) {
+                                  throw new Error('Could not load stamped approval document');
+                                }
 
-                                const res = await sendApprovalWhatsAppNotification(request, url);
+                                const res = await sendApprovalWhatsAppNotification(
+                                  request,
+                                  url,
+                                  undefined,
+                                  undefined,
+                                  undefined,
+                                  stampedBlob
+                                );
                                 if (res.success) {
                                   setBanner({ ok: true, text: `✅ Approved document and message sent to WhatsApp!` });
                                 } else {

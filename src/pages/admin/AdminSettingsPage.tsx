@@ -30,6 +30,7 @@ import {
   fetchMetaTemplates,
   createMetaApprovalTemplate,
   registerAllMetaTemplates,
+  ensureDocumentTemplatesRegistered,
   META_TEMPLATES,
   META_TEMPLATE_SPEC,
   DEFAULT_WHATSAPP_CONFIG,
@@ -55,7 +56,7 @@ export const AdminSettingsPage: React.FC = () => {
 
   // Multi-Template state
   const [templatesMap, setTemplatesMap] = useState<Record<string, { status: string; id?: string; language?: string }>>({});
-  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>('approval_notification');
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>('approval_document_packet');
   const [loadingTemplateStatus, setLoadingTemplateStatus] = useState(false);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
   const [registeringAll, setRegisteringAll] = useState(false);
@@ -87,6 +88,9 @@ export const AdminSettingsPage: React.FC = () => {
   useEffect(() => {
     if (waConfig.access_token && waConfig.phone_number_id) {
       checkTemplateStatus(waConfig);
+      ensureDocumentTemplatesRegistered(waConfig)
+        .then(() => checkTemplateStatus(waConfig))
+        .catch(() => {});
     }
   }, [waConfig.access_token, waConfig.phone_number_id]);
 
@@ -420,7 +424,7 @@ export const AdminSettingsPage: React.FC = () => {
                 onClick={handleRegisterAll}
                 disabled={registeringAll}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold transition-colors disabled:opacity-50"
-                title="Register or update all 6 templates in Meta WABA"
+                title="Register or update all lifecycle & document-header templates in Meta WABA"
               >
                 {registeringAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 <span>{registeringAll ? 'Syncing…' : 'Sync All in Meta'}</span>
@@ -474,6 +478,17 @@ export const AdminSettingsPage: React.FC = () => {
                   }`}
                 >
                   <span>{def.title}</span>
+                  {def.headerFormat === 'DOCUMENT' && (
+                    <span
+                      className={`text-[9px] px-1.5 py-0.5 rounded-md font-extrabold uppercase tracking-wide ${
+                        isSelected
+                          ? 'bg-white/20 text-white'
+                          : 'bg-indigo-100 text-indigo-700'
+                      }`}
+                    >
+                      DOC
+                    </span>
+                  )}
                   <span
                     className={`w-2 h-2 rounded-full ${
                       isApproved ? 'bg-emerald-300' : isPending ? 'bg-amber-300 animate-pulse' : 'bg-slate-300'
@@ -503,14 +518,21 @@ export const AdminSettingsPage: React.FC = () => {
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-bold text-slate-900">{currentDef.title}</span>
                       <span className="font-mono text-[11px] text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
                         {currentDef.name}
                       </span>
+                      {currentDef.headerFormat === 'DOCUMENT' && (
+                        <span className="text-[10px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full border border-indigo-200">
+                          DOCUMENT HEADER (PDF Attached)
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] text-slate-500 block mt-0.5">
-                      Category: {currentDef.category} · Positional Format ({currentDef.variables.length} parameters)
+                      Category: {currentDef.category} ·{' '}
+                      {currentDef.headerFormat === 'DOCUMENT' ? 'Header: DOCUMENT + ' : ''}
+                      Positional Body ({currentDef.variables.length} parameters)
                     </span>
                   </div>
 

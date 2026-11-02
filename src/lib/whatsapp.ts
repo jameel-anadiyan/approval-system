@@ -1,3 +1,4 @@
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabase } from './supabase';
 import { errMsg } from './errorUtils';
 import type { RequestRecord, WhatsAppConfig } from '../types/database';
@@ -16,7 +17,7 @@ export const DEFAULT_WHATSAPP_CONFIG: WhatsAppConfig = {
   notify_requester: true,
   notify_head: true,
   admin_phone_number: '+91 9846880713',
-  template_name: 'approval_notification',
+  template_name: 'approval_document_packet',
   template_language: 'en',
   use_template: true,
 };
@@ -26,14 +27,108 @@ export interface MetaTemplateDefinition {
   title: string;
   category: 'UTILITY';
   language: string;
+  headerFormat?: 'DOCUMENT';
   bodyText: string;
   variables: { num: string; name: string; sample: string }[];
 }
 
 export const META_TEMPLATES: Record<string, MetaTemplateDefinition> = {
+  approval_document_packet: {
+    name: 'approval_document_packet',
+    title: 'Approved Stamped Document',
+    category: 'UTILITY',
+    language: 'en',
+    headerFormat: 'DOCUMENT',
+    bodyText:
+      `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `Your request has been approved and officially stamped with seal & signature. The stamped approval document packet is attached above.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💰 *Amount:* {{6}}\n` +
+      `✍️ *Approved by:* {{7}}\n` +
+      `📅 *Approved on:* {{8}}\n\n` +
+      `📄 *Please download the attached stamped approval PDF above.*`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Event Sponsorship & Promotion' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Amount', sample: 'Rs. 50,000.00' },
+      { num: '{{7}}', name: 'Approver Name', sample: 'Managing Director' },
+      { num: '{{8}}', name: 'Approved Date', sample: '31 Oct 2026' },
+    ],
+  },
+  payment_completed_document: {
+    name: 'payment_completed_document',
+    title: 'Payment Completed + Doc',
+    category: 'UTILITY',
+    language: 'en',
+    headerFormat: 'DOCUMENT',
+    bodyText:
+      `💵 *PAYMENT COMPLETED & CLOSED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `The final payment for your approved request has been processed and this request is now closed. The disbursement payment document is attached above.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💰 *Total Amount:* {{6}}\n` +
+      `💳 *Payment Mode:* {{7}}\n` +
+      `🔢 *Ref / UTR No:* {{8}}\n` +
+      `📅 *Payment Date:* {{9}}\n\n` +
+      `All scheduled disbursements for this approval are complete.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Marketing Material' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Total Amount', sample: 'Rs. 50,000.00' },
+      { num: '{{7}}', name: 'Payment Mode', sample: 'Bank Transfer' },
+      { num: '{{8}}', name: 'Ref / UTR No', sample: 'UTR98472918471' },
+      { num: '{{9}}', name: 'Payment Date', sample: '31 Oct 2026' },
+    ],
+  },
+  partial_payment_document: {
+    name: 'partial_payment_document',
+    title: 'Partial Payment + Doc',
+    category: 'UTILITY',
+    language: 'en',
+    headerFormat: 'DOCUMENT',
+    bodyText:
+      `💳 *PARTIAL PAYMENT DISBURSED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `A partial payment has been disbursed for your approved request. The disbursement payment document is attached above.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💵 *Disbursed Amount:* {{6}}\n` +
+      `📊 *Remaining Balance:* {{7}}\n` +
+      `💳 *Payment Mode:* {{8}}\n` +
+      `🔢 *Ref / UTR No:* {{9}}\n` +
+      `📅 *Payment Date:* {{10}}\n\n` +
+      `The remaining balance will be disbursed in subsequent instalments.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Interior Work' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Disbursed Amount', sample: 'Rs. 25,000.00' },
+      { num: '{{7}}', name: 'Remaining Balance', sample: 'Rs. 25,000.00' },
+      { num: '{{8}}', name: 'Payment Mode', sample: 'Bank Transfer' },
+      { num: '{{9}}', name: 'Ref / UTR No', sample: 'UTR102938472' },
+      { num: '{{10}}', name: 'Payment Date', sample: '31 Oct 2026' },
+    ],
+  },
   approval_notification: {
     name: 'approval_notification',
-    title: 'Approved Document Packet',
+    title: 'Approval Alert (Text Fallback)',
     category: 'UTILITY',
     language: 'en',
     bodyText:
@@ -57,6 +152,68 @@ export const META_TEMPLATES: Record<string, MetaTemplateDefinition> = {
       { num: '{{6}}', name: 'Amount', sample: 'Rs. 50,000.00' },
       { num: '{{7}}', name: 'Approver Name', sample: 'Managing Director' },
       { num: '{{8}}', name: 'Approved Date', sample: '31 Oct 2026' },
+    ],
+  },
+  payment_completed_notification: {
+    name: 'payment_completed_notification',
+    title: 'Payment Completed (No Doc)',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `💵 *PAYMENT COMPLETED & CLOSED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `The final payment for your approved request has been processed and this request is now closed.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💰 *Total Amount:* {{6}}\n` +
+      `💳 *Payment Mode:* {{7}}\n` +
+      `🔢 *Ref / UTR No:* {{8}}\n` +
+      `📅 *Payment Date:* {{9}}\n\n` +
+      `All scheduled disbursements for this approval are complete.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Marketing Material' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Total Amount', sample: 'Rs. 50,000.00' },
+      { num: '{{7}}', name: 'Payment Mode', sample: 'Bank Transfer' },
+      { num: '{{8}}', name: 'Ref / UTR No', sample: 'UTR98472918471' },
+      { num: '{{9}}', name: 'Payment Date', sample: '31 Oct 2026' },
+    ],
+  },
+  partial_payment_notification: {
+    name: 'partial_payment_notification',
+    title: 'Partial Payment (No Doc)',
+    category: 'UTILITY',
+    language: 'en',
+    bodyText:
+      `💳 *PARTIAL PAYMENT DISBURSED*\n\n` +
+      `Dear *{{1}}*,\n\n` +
+      `A partial payment has been disbursed for your approved request.\n\n` +
+      `📋 *Request No:* {{2}}\n` +
+      `🎉 *Approval No:* {{3}}\n` +
+      `📝 *Subject:* {{4}}\n` +
+      `🏢 *Outlet / Shop:* {{5}}\n` +
+      `💵 *Disbursed Amount:* {{6}}\n` +
+      `📊 *Remaining Balance:* {{7}}\n` +
+      `💳 *Payment Mode:* {{8}}\n` +
+      `🔢 *Ref / UTR No:* {{9}}\n` +
+      `📅 *Payment Date:* {{10}}\n\n` +
+      `The remaining balance will be disbursed in subsequent instalments.`,
+    variables: [
+      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
+      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
+      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
+      { num: '{{4}}', name: 'Subject / Title', sample: 'Interior Work' },
+      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
+      { num: '{{6}}', name: 'Disbursed Amount', sample: 'Rs. 25,000.00' },
+      { num: '{{7}}', name: 'Remaining Balance', sample: 'Rs. 25,000.00' },
+      { num: '{{8}}', name: 'Payment Mode', sample: 'Bank Transfer' },
+      { num: '{{9}}', name: 'Ref / UTR No', sample: 'UTR102938472' },
+      { num: '{{10}}', name: 'Payment Date', sample: '31 Oct 2026' },
     ],
   },
   rejection_notification: {
@@ -145,80 +302,32 @@ export const META_TEMPLATES: Record<string, MetaTemplateDefinition> = {
       { num: '{{8}}', name: 'Remarks / Notes', sample: 'Please attach supporting tax invoices' },
     ],
   },
-  payment_completed_notification: {
-    name: 'payment_completed_notification',
-    title: 'Payment Completed & Closed',
-    category: 'UTILITY',
-    language: 'en',
-    bodyText:
-      `💵 *PAYMENT COMPLETED & CLOSED*\n\n` +
-      `Dear *{{1}}*,\n\n` +
-      `The final payment for your approved request has been processed and this request is now closed.\n\n` +
-      `📋 *Request No:* {{2}}\n` +
-      `🎉 *Approval No:* {{3}}\n` +
-      `📝 *Subject:* {{4}}\n` +
-      `🏢 *Outlet / Shop:* {{5}}\n` +
-      `💰 *Total Amount:* {{6}}\n` +
-      `💳 *Payment Mode:* {{7}}\n` +
-      `🔢 *Ref / UTR No:* {{8}}\n` +
-      `📅 *Payment Date:* {{9}}\n\n` +
-      `All scheduled disbursements for this approval are complete.`,
-    variables: [
-      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
-      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
-      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
-      { num: '{{4}}', name: 'Subject / Title', sample: 'Marketing Material' },
-      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
-      { num: '{{6}}', name: 'Total Amount', sample: 'Rs. 50,000.00' },
-      { num: '{{7}}', name: 'Payment Mode', sample: 'Bank Transfer' },
-      { num: '{{8}}', name: 'Ref / UTR No', sample: 'UTR98472918471' },
-      { num: '{{9}}', name: 'Payment Date', sample: '31 Oct 2026' },
-    ],
-  },
-  partial_payment_notification: {
-    name: 'partial_payment_notification',
-    title: 'Partial Payment Disbursed',
-    category: 'UTILITY',
-    language: 'en',
-    bodyText:
-      `💳 *PARTIAL PAYMENT DISBURSED*\n\n` +
-      `Dear *{{1}}*,\n\n` +
-      `A partial payment has been disbursed for your approved request.\n\n` +
-      `📋 *Request No:* {{2}}\n` +
-      `🎉 *Approval No:* {{3}}\n` +
-      `📝 *Subject:* {{4}}\n` +
-      `🏢 *Outlet / Shop:* {{5}}\n` +
-      `💵 *Disbursed Amount:* {{6}}\n` +
-      `📊 *Remaining Balance:* {{7}}\n` +
-      `💳 *Payment Mode:* {{8}}\n` +
-      `🔢 *Ref / UTR No:* {{9}}\n` +
-      `📅 *Payment Date:* {{10}}\n\n` +
-      `The remaining balance will be disbursed in subsequent instalments.`,
-    variables: [
-      { num: '{{1}}', name: 'Requester Name', sample: 'Rahul Sharma' },
-      { num: '{{2}}', name: 'Request No', sample: 'REQ-2026-000054' },
-      { num: '{{3}}', name: 'Approval No', sample: 'APR-2026-000054' },
-      { num: '{{4}}', name: 'Subject / Title', sample: 'Interior Work' },
-      { num: '{{5}}', name: 'Outlet / Shop', sample: 'Calicut Showroom' },
-      { num: '{{6}}', name: 'Disbursed Amount', sample: 'Rs. 25,000.00' },
-      { num: '{{7}}', name: 'Remaining Balance', sample: 'Rs. 25,000.00' },
-      { num: '{{8}}', name: 'Payment Mode', sample: 'Bank Transfer' },
-      { num: '{{9}}', name: 'Ref / UTR No', sample: 'UTR102938472' },
-      { num: '{{10}}', name: 'Payment Date', sample: '31 Oct 2026' },
-    ],
-  },
 };
 
-export const META_TEMPLATE_SPEC = META_TEMPLATES.approval_notification;
+export const META_TEMPLATE_SPEC = META_TEMPLATES.approval_document_packet;
+
+const DOCUMENT_TEMPLATE_KEYS = [
+  'approval_document_packet',
+  'payment_completed_document',
+  'partial_payment_document',
+] as const;
 
 const STORAGE_KEY = 'approval_app_whatsapp_config';
 
+/** Supported native document MIME types for Meta WhatsApp DOCUMENT headers */
+const META_DOC_MIME_BY_EXT: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+};
+
 /**
  * Normalizes phone numbers to WhatsApp Cloud API format (E.164 without '+').
- * Examples:
- *   "+91 80893 04002" -> "918089304002"
- *   "8089304002" -> "918089304002" (assumes India 91 for 10-digit numbers)
- *   "08089304002" -> "918089304002"
  */
 export function cleanWhatsAppNumber(phone?: string | null): string {
   if (!phone) return '';
@@ -308,6 +417,324 @@ export async function saveWhatsAppConfig(
   return { success: true };
 }
 
+/** Builds a clean 1-page sample PDF Blob for testing or template registration */
+export async function buildSamplePdfBlob(title: string): Promise<Blob> {
+  const cleanAscii = (s: string) => String(s || '').replace(/[^\x20-\x7E]/g, ' ');
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([595.28, 841.89]);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const regular = await pdf.embedFont(StandardFonts.Helvetica);
+
+  page.drawText('SWA DIAMONDS - OFFICIAL DOCUMENT', {
+    x: 50,
+    y: 770,
+    size: 16,
+    font: bold,
+    color: rgb(0.05, 0.35, 0.25),
+  });
+  page.drawText(cleanAscii(title || 'Sample Document Attachment'), {
+    x: 50,
+    y: 740,
+    size: 12,
+    font: regular,
+    color: rgb(0.2, 0.2, 0.2),
+  });
+  page.drawText(
+    cleanAscii(`Generated ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`),
+    {
+      x: 50,
+      y: 712,
+      size: 10,
+      font: regular,
+      color: rgb(0.4, 0.4, 0.4),
+    }
+  );
+
+  const bytes = await pdf.save();
+  return new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
+}
+
+/** Converts raster images (PNG, JPEG, WEBP, etc.) into a 1-page PDF so Meta DOCUMENT headers accept them */
+async function rasterImageBlobToPngBytes(blob: Blob): Promise<Uint8Array | null> {
+  if (typeof document === 'undefined' || typeof createImageBitmap === 'undefined') return null;
+  try {
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bmp, 0, 0);
+    bmp.close?.();
+    const pngBlob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/png')
+    );
+    if (!pngBlob) return null;
+    return new Uint8Array(await pngBlob.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ensures any file (PDF, JPG/PNG/WEBP payment screenshot, Word/Excel, etc.) is formatted
+ * into a MIME type + extension supported by Meta WhatsApp DOCUMENT template headers.
+ */
+export async function ensureWhatsAppCompatibleDocument(
+  blob: Blob,
+  rawFilename: string
+): Promise<{ blob: Blob; filename: string; mimeType: string }> {
+  const safeName = (rawFilename || 'Official_Document.pdf').trim();
+  const extMatch = safeName.match(/\.([a-zA-Z0-9]+)$/);
+  const ext = extMatch ? extMatch[1].toLowerCase() : '';
+  const mime = (blob.type || '').split(';')[0].trim().toLowerCase();
+
+  const isPng = mime === 'image/png' || ext === 'png';
+  const isJpg = mime === 'image/jpeg' || mime === 'image/jpg' || ext === 'jpg' || ext === 'jpeg';
+  const isOtherImage = mime.startsWith('image/') || ['webp', 'gif', 'bmp'].includes(ext);
+
+  if (isPng || isJpg || isOtherImage) {
+    try {
+      const pdf = await PDFDocument.create();
+      const rawBytes = new Uint8Array(await blob.arrayBuffer());
+      let embedded;
+      if (isPng) {
+        embedded = await pdf.embedPng(rawBytes);
+      } else if (isJpg) {
+        embedded = await pdf.embedJpg(rawBytes);
+      } else {
+        const pngBytes = await rasterImageBlobToPngBytes(blob);
+        if (!pngBytes) throw new Error('Image conversion unavailable');
+        embedded = await pdf.embedPng(pngBytes);
+      }
+
+      const maxW = 535;
+      const maxH = 780;
+      const scale = Math.min(1, maxW / embedded.width, maxH / embedded.height);
+      const drawW = embedded.width * scale;
+      const drawH = embedded.height * scale;
+      const pageW = Math.max(drawW + 60, 420);
+      const pageH = Math.max(drawH + 60, 595);
+      const page = pdf.addPage([pageW, pageH]);
+      page.drawImage(embedded, {
+        x: (pageW - drawW) / 2,
+        y: (pageH - drawH) / 2,
+        width: drawW,
+        height: drawH,
+      });
+
+      const pdfBytes = await pdf.save();
+      const baseName = safeName.replace(/\.[^.]+$/, '') || 'Disbursement_Receipt';
+      return {
+        blob: new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
+        filename: `${baseName}.pdf`,
+        mimeType: 'application/pdf',
+      };
+    } catch (convErr) {
+      console.warn('Could not wrap image into PDF, keeping original:', convErr);
+    }
+  }
+
+  if (ext && META_DOC_MIME_BY_EXT[ext]) {
+    const targetMime = META_DOC_MIME_BY_EXT[ext];
+    return {
+      blob: blob.type === targetMime ? blob : new Blob([blob], { type: targetMime }),
+      filename: safeName,
+      mimeType: targetMime,
+    };
+  }
+
+  if (mime === 'application/pdf') {
+    const baseName = safeName.replace(/\.[^.]+$/, '') || 'Approved_Document';
+    return {
+      blob,
+      filename: `${baseName}.pdf`,
+      mimeType: 'application/pdf',
+    };
+  }
+
+  // Default fallback to PDF naming if extension was missing
+  return {
+    blob: new Blob([blob], { type: 'application/pdf' }),
+    filename: ext ? safeName : `${safeName}.pdf`,
+    mimeType: 'application/pdf',
+  };
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const sub = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...sub);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Uploads a document (Blob or remote URL) to Meta WhatsApp Media API (`/{PHONE_NUMBER_ID}/media`)
+ * and returns a Meta `media_id` ready to embed in a DOCUMENT header template.
+ */
+export async function uploadWhatsAppDocumentMedia(params: {
+  config: WhatsAppConfig;
+  fileBlob?: Blob | null;
+  documentUrl?: string | null;
+  filename: string;
+}): Promise<{ mediaId?: string; filename: string; fallbackUrl?: string }> {
+  const { config, fileBlob, documentUrl, filename } = params;
+  const token = config.access_token?.trim();
+  const phoneId = config.phone_number_id?.trim();
+  const isRemoteUrl =
+    Boolean(documentUrl) &&
+    (documentUrl!.startsWith('https://') || documentUrl!.startsWith('http://'));
+
+  if (!token || !phoneId) {
+    return { filename, fallbackUrl: isRemoteUrl ? documentUrl! : undefined };
+  }
+
+  // 1. Obtain Blob if we have it locally or can fetch it cleanly
+  let workingBlob: Blob | null = fileBlob || null;
+  if (!workingBlob && isRemoteUrl && documentUrl) {
+    try {
+      const dl = await fetch(documentUrl);
+      if (dl.ok) {
+        workingBlob = await dl.blob();
+      }
+    } catch {
+      /* will try server-side /api/whatsapp-meta upload_media below */
+    }
+  }
+
+  if (workingBlob && workingBlob.size > 0) {
+    const prepared = await ensureWhatsAppCompatibleDocument(workingBlob, filename);
+
+    // 1A. Try direct multipart upload to Meta WhatsApp Media endpoint
+    try {
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append(
+        'file',
+        new File([prepared.blob], prepared.filename, { type: prepared.mimeType })
+      );
+
+      const mRes = await fetch(
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}/media`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        }
+      );
+      const mData = await mRes.json();
+      if (mRes.ok && mData?.id) {
+        return {
+          mediaId: String(mData.id),
+          filename: prepared.filename,
+          fallbackUrl: isRemoteUrl ? documentUrl! : undefined,
+        };
+      }
+      console.warn('Direct WhatsApp media upload returned error, trying server proxy:', mData);
+    } catch (directErr) {
+      console.warn('Direct WhatsApp media upload exception, trying server proxy:', directErr);
+    }
+
+    // 1B. Fallback to Vercel Serverless /api/whatsapp-meta proxy
+    try {
+      const bytes = new Uint8Array(await prepared.blob.arrayBuffer());
+      // Base64 proxy for files up to ~3.2 MB (Vercel 4.5 MB body limit); larger files use source_url below
+      if (bytes.byteLength <= 3_200_000) {
+        const proxyRes = await fetch('/api/whatsapp-meta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upload_media',
+            access_token: token,
+            phone_number_id: phoneId,
+            file_base64: uint8ToBase64(bytes),
+            mime_type: prepared.mimeType,
+            filename: prepared.filename,
+          }),
+        });
+        const proxyData = await proxyRes.json();
+        if (proxyRes.ok && proxyData?.media_id) {
+          return {
+            mediaId: String(proxyData.media_id),
+            filename: proxyData.filename || prepared.filename,
+            fallbackUrl: isRemoteUrl ? documentUrl! : undefined,
+          };
+        }
+      }
+    } catch (proxyErr) {
+      console.warn('Proxy base64 WhatsApp media upload failed:', proxyErr);
+    }
+
+    if (isRemoteUrl && documentUrl) {
+      try {
+        const urlProxyRes = await fetch('/api/whatsapp-meta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upload_media',
+            access_token: token,
+            phone_number_id: phoneId,
+            source_url: documentUrl,
+            filename: prepared.filename,
+          }),
+        });
+        const urlProxyData = await urlProxyRes.json();
+        if (urlProxyRes.ok && urlProxyData?.media_id) {
+          return {
+            mediaId: String(urlProxyData.media_id),
+            filename: urlProxyData.filename || prepared.filename,
+            fallbackUrl: documentUrl,
+          };
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return {
+      filename: prepared.filename,
+      fallbackUrl: isRemoteUrl ? documentUrl! : undefined,
+    };
+  }
+
+  // 2. If we didn't have a local Blob, ask /api/whatsapp-meta to fetch source_url & upload to Meta
+  if (isRemoteUrl && documentUrl) {
+    try {
+      const proxyRes = await fetch('/api/whatsapp-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upload_media',
+          access_token: token,
+          phone_number_id: phoneId,
+          source_url: documentUrl,
+          filename,
+        }),
+      });
+      const proxyData = await proxyRes.json();
+      if (proxyRes.ok && proxyData?.media_id) {
+        return {
+          mediaId: String(proxyData.media_id),
+          filename: proxyData.filename || filename,
+          fallbackUrl: documentUrl,
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return {
+    filename,
+    fallbackUrl: isRemoteUrl ? documentUrl! : undefined,
+  };
+}
+
 /** Fetches existing message templates from Meta WhatsApp Business Account (WABA) */
 export async function fetchMetaTemplates(config?: WhatsAppConfig): Promise<{
   success: boolean;
@@ -320,7 +747,7 @@ export async function fetchMetaTemplates(config?: WhatsAppConfig): Promise<{
   if (!token || !wabaId) return { success: false, templates: [], error: 'Missing access token or WABA ID' };
 
   try {
-    const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=100`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -333,10 +760,10 @@ export async function fetchMetaTemplates(config?: WhatsAppConfig): Promise<{
   }
 }
 
-/** Registers or submits a template in Meta WABA */
+/** Registers or submits a template (including DOCUMENT header templates) in Meta WABA */
 export async function createMetaApprovalTemplate(
   config?: WhatsAppConfig,
-  templateKey: string = 'approval_notification'
+  templateKey: string = 'approval_document_packet'
 ): Promise<{
   success: boolean;
   templateId?: string;
@@ -345,11 +772,55 @@ export async function createMetaApprovalTemplate(
 }> {
   const cfg = config || (await loadWhatsAppConfig(true));
   const wabaId = cfg.waba_id || '1792622932047989';
+  const appId = cfg.app_id || DEFAULT_WHATSAPP_CONFIG.app_id || '3607856502698794';
   const token = cfg.access_token?.trim();
   if (!token || !wabaId) return { success: false, error: 'Missing access token or WABA ID' };
 
   const spec = META_TEMPLATES[templateKey] || META_TEMPLATE_SPEC;
 
+  // 1. Use /api/whatsapp-meta server proxy first (required for DOCUMENT header resumable uploads)
+  try {
+    const proxyRes = await fetch('/api/whatsapp-meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'register_template',
+        access_token: token,
+        waba_id: wabaId,
+        app_id: appId,
+        name: spec.name,
+        title: spec.title,
+        category: spec.category,
+        language: cfg.template_language || spec.language,
+        header_format: spec.headerFormat || null,
+        body_text: spec.bodyText,
+        sample_values: spec.variables.map((v) => v.sample),
+      }),
+    });
+    const proxyData = await proxyRes.json();
+    if (proxyRes.ok && proxyData?.success) {
+      return {
+        success: true,
+        templateId: proxyData.templateId,
+        status: proxyData.status || 'PENDING',
+      };
+    }
+    if (spec.headerFormat === 'DOCUMENT') {
+      return {
+        success: false,
+        error: proxyData?.error || `Failed to register document template (${proxyRes.status})`,
+      };
+    }
+  } catch (proxyErr) {
+    if (spec.headerFormat === 'DOCUMENT') {
+      return {
+        success: false,
+        error: `Could not reach /api/whatsapp-meta to upload sample PDF header: ${errMsg(proxyErr)}`,
+      };
+    }
+  }
+
+  // 2. Direct fallback for BODY-only templates
   try {
     const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
       method: 'POST',
@@ -383,7 +854,7 @@ export async function createMetaApprovalTemplate(
   }
 }
 
-/** Registers all standard lifecycle templates in Meta WABA */
+/** Registers all standard lifecycle templates (including Document-header templates) in Meta WABA */
 export async function registerAllMetaTemplates(config?: WhatsAppConfig): Promise<{
   success: boolean;
   registeredCount: number;
@@ -409,19 +880,52 @@ export async function registerAllMetaTemplates(config?: WhatsAppConfig): Promise
   };
 }
 
+let lastDocTemplateSyncAt = 0;
+
+/**
+ * Ensures the 3 Document-header templates (approval_document_packet,
+ * payment_completed_document, partial_payment_document) are registered in Meta WABA.
+ */
+export async function ensureDocumentTemplatesRegistered(config?: WhatsAppConfig): Promise<void> {
+  const now = Date.now();
+  if (now - lastDocTemplateSyncAt < 3 * 60 * 1000) return;
+  lastDocTemplateSyncAt = now;
+
+  try {
+    const cfg = config || (await loadWhatsAppConfig(true));
+    if (!cfg.enabled || !cfg.access_token?.trim()) return;
+
+    const existing = await fetchMetaTemplates(cfg);
+    if (!existing.success) return;
+
+    const registeredNames = new Set(existing.templates.map((t) => t.name));
+    for (const key of DOCUMENT_TEMPLATE_KEYS) {
+      const spec = META_TEMPLATES[key];
+      if (spec && !registeredNames.has(spec.name)) {
+        await createMetaApprovalTemplate(cfg, key);
+      }
+    }
+  } catch (e) {
+    console.warn('Background Meta document template sync note:', e);
+  }
+}
+
 export interface SendDirectParams {
   to: string;
   documentUrl?: string;
+  documentMediaId?: string;
   documentFilename?: string;
   caption?: string;
   text?: string;
   config?: WhatsAppConfig;
   templateName?: string;
+  fallbackTextTemplateName?: string;
+  templateHasDocumentHeader?: boolean;
   templateLanguage?: string;
   templateBodyParams?: string[];
 }
 
-/** Sends a message or document directly using WhatsApp Cloud API (Graph API) */
+/** Sends a message or document-header template using WhatsApp Cloud API (Graph API) */
 export async function sendWhatsAppDirect(
   params: SendDirectParams
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
@@ -446,12 +950,41 @@ export async function sendWhatsAppDirect(
   const isRemoteDocUrl =
     Boolean(params.documentUrl) &&
     (params.documentUrl!.startsWith('https://') || params.documentUrl!.startsWith('http://'));
+  const hasDocumentAttachment = Boolean(params.documentMediaId || isRemoteDocUrl);
+  const docFilename = params.documentFilename || 'Official_Document.pdf';
 
-  // 1. Attempt Meta Pre-Approved Message Template dispatch if template parameters are supplied
+  // 1. Attempt Meta Pre-Approved Message Template dispatch
   if (params.templateBodyParams && params.templateBodyParams.length > 0 && config.use_template !== false) {
+    const primaryTemplateName =
+      params.templateName || config.template_name || 'approval_document_packet';
+    const templateLanguage = params.templateLanguage || config.template_language || 'en';
+    const spec = META_TEMPLATES[primaryTemplateName];
+    const shouldIncludeDocHeader = Boolean(
+      (params.templateHasDocumentHeader || spec?.headerFormat === 'DOCUMENT') &&
+        hasDocumentAttachment
+    );
+
     try {
-      const templateName = params.templateName || config.template_name || 'approval_notification';
-      const templateLanguage = params.templateLanguage || config.template_language || 'en';
+      const components: Record<string, unknown>[] = [];
+      if (shouldIncludeDocHeader) {
+        const docObject = params.documentMediaId
+          ? { id: params.documentMediaId, filename: docFilename }
+          : { link: params.documentUrl!, filename: docFilename };
+        components.push({
+          type: 'header',
+          parameters: [
+            {
+              type: 'document',
+              document: docObject,
+            },
+          ],
+        });
+      }
+
+      components.push({
+        type: 'body',
+        parameters: params.templateBodyParams.map((p) => ({ type: 'text', text: String(p) })),
+      });
 
       const templatePayload = {
         messaging_product: 'whatsapp',
@@ -459,14 +992,9 @@ export async function sendWhatsAppDirect(
         to: recipient,
         type: 'template',
         template: {
-          name: templateName,
+          name: primaryTemplateName,
           language: { code: templateLanguage },
-          components: [
-            {
-              type: 'body',
-              parameters: params.templateBodyParams.map((p) => ({ type: 'text', text: String(p) })),
-            },
-          ],
+          components,
         },
       };
 
@@ -481,12 +1009,28 @@ export async function sendWhatsAppDirect(
 
       const tData = await tRes.json();
       if (tRes.ok) {
-        const msgId = tData?.messages?.[0]?.id;
+        return { success: true, messageId: tData?.messages?.[0]?.id };
+      }
 
-        // If a document was also provided, send it as companion attachment
-        if (isRemoteDocUrl && params.documentUrl) {
+      console.warn(
+        `Meta template "${primaryTemplateName}" returned error, triggering auto-registration & fallback:`,
+        tData
+      );
+
+      // If the document-header template hasn't been registered or approved in Meta yet,
+      // auto-register it right away so Meta approves it for subsequent sends!
+      if (shouldIncludeDocHeader) {
+        createMetaApprovalTemplate(config, primaryTemplateName).catch(() => {});
+      }
+
+      // While a newly registered DOCUMENT template is awaiting Meta's ~60s review:
+      // (a) Try sending the document directly via media_id/link (delivers if 24h window is open)
+      // (b) Also send the pre-approved fallback text template so the alert always arrives 24/7
+      if (shouldIncludeDocHeader && params.fallbackTextTemplateName) {
+        let docDeliveredMsgId: string | undefined;
+        if (hasDocumentAttachment) {
           try {
-            await fetch(url, {
+            const directDocRes = await fetch(url, {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${token}`,
@@ -497,40 +1041,90 @@ export async function sendWhatsAppDirect(
                 recipient_type: 'individual',
                 to: recipient,
                 type: 'document',
-                document: {
-                  link: params.documentUrl,
-                  caption: params.caption || 'Approved Document Packet',
-                  filename: params.documentFilename || 'Approved_Document.pdf',
-                },
+                document: params.documentMediaId
+                  ? {
+                      id: params.documentMediaId,
+                      caption: params.caption || 'Official Document Attachment',
+                      filename: docFilename,
+                    }
+                  : {
+                      link: params.documentUrl!,
+                      caption: params.caption || 'Official Document Attachment',
+                      filename: docFilename,
+                    },
               }),
             });
+            const directDocData = await directDocRes.json();
+            if (directDocRes.ok) {
+              docDeliveredMsgId = directDocData?.messages?.[0]?.id;
+            }
           } catch {
-            /* ignore document companion failure if template succeeded */
+            /* ignore */
           }
         }
 
-        return { success: true, messageId: msgId };
+        try {
+          const fbRes = await fetch(url, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              recipient_type: 'individual',
+              to: recipient,
+              type: 'template',
+              template: {
+                name: params.fallbackTextTemplateName,
+                language: { code: templateLanguage },
+                components: [
+                  {
+                    type: 'body',
+                    parameters: params.templateBodyParams.map((p) => ({
+                      type: 'text',
+                      text: String(p),
+                    })),
+                  },
+                ],
+              },
+            }),
+          });
+          const fbData = await fbRes.json();
+          if (fbRes.ok) {
+            return {
+              success: true,
+              messageId: docDeliveredMsgId || fbData?.messages?.[0]?.id,
+            };
+          }
+        } catch {
+          /* continue to direct fallback below */
+        }
       }
-
-      console.warn('Meta template send returned error, falling back to direct document/text dispatch:', tData);
     } catch (tErr) {
       console.warn('Meta template dispatch exception, falling back to direct dispatch:', tErr);
     }
   }
 
-  // 2. Direct Document Attachment dispatch (or fallback from template)
-  if (isRemoteDocUrl && params.documentUrl) {
+  // 2. Direct Document Attachment dispatch (when templates are disabled or unapproved)
+  if (hasDocumentAttachment) {
     try {
       const docPayload = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to: recipient,
         type: 'document',
-        document: {
-          link: params.documentUrl,
-          caption: params.caption || 'Approved Document Attachment',
-          filename: params.documentFilename || 'Approved_Document.pdf',
-        },
+        document: params.documentMediaId
+          ? {
+              id: params.documentMediaId,
+              caption: params.caption || 'Official Document Attachment',
+              filename: docFilename,
+            }
+          : {
+              link: params.documentUrl!,
+              caption: params.caption || 'Official Document Attachment',
+              filename: docFilename,
+            },
       };
 
       const res = await fetch(url, {
@@ -547,7 +1141,6 @@ export async function sendWhatsAppDirect(
         const errorMsg = data?.error?.message || `WhatsApp API error (${res.status})`;
         console.warn('WhatsApp send document failed, falling back to text notification:', data);
 
-        // Fallback to text message so notification is never lost
         if (params.text) {
           try {
             const fallbackRes = await fetch(url, {
@@ -577,7 +1170,6 @@ export async function sendWhatsAppDirect(
 
       const msgId = data?.messages?.[0]?.id;
 
-      // If there's also additional text, send it as a follow-up
       if (params.text) {
         try {
           await fetch(url, {
@@ -601,59 +1193,31 @@ export async function sendWhatsAppDirect(
 
       return { success: true, messageId: msgId };
     } catch (e: unknown) {
-      console.warn('WhatsApp send document network exception, attempting text fallback:', e);
-      if (params.text) {
-        try {
-          const fallbackRes = await fetch(url, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              recipient_type: 'individual',
-              to: recipient,
-              type: 'text',
-              text: { body: params.text },
-            }),
-          });
-          const fallbackData = await fallbackRes.json();
-          if (fallbackRes.ok) {
-            return { success: true, messageId: fallbackData?.messages?.[0]?.id };
-          }
-        } catch {
-          /* ignore */
-        }
-      }
       return { success: false, error: errMsg(e) };
     }
   }
 
-  // 2. Send Text-only message if no remote documentUrl
+  // 3. Send Text-only message if no document attachment
   if (params.text) {
     try {
-      const textPayload = {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: recipient,
-        type: 'text',
-        text: { body: params.text },
-      };
-
       const res = await fetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(textPayload),
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: recipient,
+          type: 'text',
+          text: { body: params.text },
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) {
         const errorMsg = data?.error?.message || `WhatsApp API error (${res.status})`;
-        console.error('WhatsApp send text failed:', data);
         return { success: false, error: errorMsg };
       }
 
@@ -684,7 +1248,7 @@ export async function sendTestWhatsAppMessage(
     `• Phone Number ID: \`${cfg.phone_number_id}\`\n` +
     `• Sender: ${cfg.display_phone_number || '+91 80893 04002'}\n` +
     `• Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST\n\n` +
-    `✅ When any document or request is approved, the official approved PDF will be delivered directly to this number with the approval details.`;
+    `✅ Stamped approval PDFs and disbursement payment documents will be delivered directly via WhatsApp templates.`;
 
   return sendWhatsAppDirect({
     to: cleanTo,
@@ -696,8 +1260,8 @@ export async function sendTestWhatsAppMessage(
 /**
  * Resolves all target recipients for a request notification:
  * 1. Extra recipient (if provided)
- * 2. Requester (from profile or mock data)
- * 3. Department Head (from owner_head_id or mock data)
+ * 2. Requester (via security-definer RPC get_request_whatsapp_recipients, profile, or mock data)
+ * 3. Department Head (from owner_head_id / default_head_id)
  * 4. Admin copy (cfg.admin_phone_number or +91 9846880713)
  */
 export async function getNotificationRecipients(
@@ -707,28 +1271,55 @@ export async function getNotificationRecipients(
 ): Promise<{ phone: string; name?: string }[]> {
   const targets: { phone: string; name?: string }[] = [];
 
-  // 1. Extra explicit recipient
   if (extraRecipientPhone) {
     targets.push({ phone: extraRecipientPhone, name: 'Specified Recipient' });
   }
 
-  // 2. Requester
-  if (cfg.notify_requester && request.requester_id) {
-    let reqPhone: string | undefined;
-    let reqName = request.requester_name;
-    try {
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('whatsapp_number, full_name')
-        .eq('id', request.requester_id)
-        .maybeSingle();
+  // Try security-definer RPC first so Disbursement & Cross-Department Heads aren't blocked by profiles RLS
+  type RpcRecipientInfo = {
+    requester_phone?: string | null;
+    requester_name?: string | null;
+    head_phone?: string | null;
+    head_name?: string | null;
+  };
+  let rpcInfo: RpcRecipientInfo | null = null;
 
-      if (prof?.whatsapp_number) {
-        reqPhone = prof.whatsapp_number;
-        reqName = prof.full_name || reqName;
+  if (request.id) {
+    try {
+      const { data, error } = await supabase.rpc('get_request_whatsapp_recipients', {
+        p_request_id: request.id,
+      });
+      if (!error && data && typeof data === 'object') {
+        rpcInfo = data as RpcRecipientInfo;
       }
     } catch {
-      /* ignore */
+      /* RPC may not be applied yet; fallback below */
+    }
+  }
+
+  // 2. Requester
+  if (cfg.notify_requester && request.requester_id) {
+    let reqPhone: string | undefined =
+      rpcInfo?.requester_phone ||
+      ((request.requester as unknown as { whatsapp_number?: string | null } | undefined)
+        ?.whatsapp_number ?? undefined);
+    let reqName = rpcInfo?.requester_name || request.requester_name;
+
+    if (!reqPhone) {
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('whatsapp_number, full_name')
+          .eq('id', request.requester_id)
+          .maybeSingle();
+
+        if (prof?.whatsapp_number) {
+          reqPhone = prof.whatsapp_number;
+          reqName = prof.full_name || reqName;
+        }
+      } catch {
+        /* ignore */
+      }
     }
 
     if (!reqPhone) {
@@ -747,7 +1338,12 @@ export async function getNotificationRecipients(
   // 3. Head
   if (cfg.notify_head) {
     const headId = request.owner_head_id;
-    if (headId && headId !== request.requester_id) {
+    if (rpcInfo?.head_phone && (!headId || headId !== request.requester_id)) {
+      targets.push({
+        phone: rpcInfo.head_phone,
+        name: rpcInfo.head_name || 'Department Head',
+      });
+    } else if (headId && headId !== request.requester_id) {
       let headPhone: string | undefined;
       let headName = 'Department Head';
       try {
@@ -781,7 +1377,7 @@ export async function getNotificationRecipients(
 
   // 4. Admin copy
   const adminPhone = (cfg.admin_phone_number && cfg.admin_phone_number.trim()) || '+91 9846880713';
-  targets.push({ phone: adminPhone, name: 'Admin Test Copy' });
+  targets.push({ phone: adminPhone, name: 'Admin Notification Copy' });
 
   // Deduplicate
   const seen = new Set<string>();
@@ -794,15 +1390,16 @@ export async function getNotificationRecipients(
 }
 
 /**
- * Builds and dispatches the "your approval has been approved" WhatsApp message
- * along with the signed approval PDF attachment to the requester, head, and admin.
+ * Builds and dispatches the "your approval has been approved" WhatsApp template
+ * WITH the official stamped approval PDF attached directly in the template's DOCUMENT header.
  */
 export async function sendApprovalWhatsAppNotification(
   request: RequestRecord,
   signedPdfUrl: string,
   config?: WhatsAppConfig,
   extraRecipientPhone?: string,
-  customApproverName?: string
+  customApproverName?: string,
+  signedPdfBlob?: Blob | null
 ): Promise<{
   success: boolean;
   results: { recipient: string; name?: string; ok: boolean; error?: string }[];
@@ -811,6 +1408,9 @@ export async function sendApprovalWhatsAppNotification(
   if (!cfg.enabled) {
     return { success: false, results: [] };
   }
+
+  // Kick off non-blocking check so all 3 document templates exist in Meta WABA
+  ensureDocumentTemplatesRegistered(cfg).catch(() => {});
 
   const approvalNo = request.approval_no || 'APPROVED';
   const requestNo = request.request_no || 'REQ';
@@ -827,8 +1427,17 @@ export async function sendApprovalWhatsAppNotification(
     'Authorized Head / Admin';
 
   const titleStr = request.title || 'Official Approval';
-  const outletStr = request.shop_name || 'All Outlets';
-  const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const outletStr =
+    request.request_type === 'exhibition'
+      ? ((request.details as { conducting_shop_name?: string } | null)?.conducting_shop_name?.trim() ||
+          request.shop_name ||
+          'All Outlets')
+      : request.shop_name || 'All Outlets';
+  const dateStr = new Date().toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 
   const caption =
     `✅ *Your approval has been approved!*\n` +
@@ -847,7 +1456,7 @@ export async function sendApprovalWhatsAppNotification(
     `💰 *Amount:* ${amountStr}\n` +
     `✍️ *Approved by:* ${approverName}\n` +
     `📅 *Approved on:* ${dateStr}\n\n` +
-    `📄 *The official signed approval document packet has been stamped.*`;
+    `📄 *The official signed approval document packet is attached above.*`;
 
   const templateBodyParams = [
     request.requester_name || 'Staff Member', // {{1}}
@@ -861,18 +1470,34 @@ export async function sendApprovalWhatsAppNotification(
   ];
 
   const filename = `${approvalNo}_Approved_Document.pdf`;
+
+  // Upload the stamped PDF to Meta WhatsApp Media API once and share media_id across all recipients
+  const uploadedDoc =
+    signedPdfBlob || signedPdfUrl
+      ? await uploadWhatsAppDocumentMedia({
+          config: cfg,
+          fileBlob: signedPdfBlob || null,
+          documentUrl: signedPdfUrl || null,
+          filename,
+        })
+      : { filename };
+
+  const hasDoc = Boolean(uploadedDoc.mediaId || uploadedDoc.fallbackUrl);
   const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
   const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
 
   for (const target of targets) {
     const res = await sendWhatsAppDirect({
       to: target.phone,
-      documentUrl: signedPdfUrl,
-      documentFilename: filename,
+      documentMediaId: uploadedDoc.mediaId,
+      documentUrl: uploadedDoc.fallbackUrl || signedPdfUrl || undefined,
+      documentFilename: uploadedDoc.filename || filename,
       caption,
       text: messageBody,
       config: cfg,
-      templateName: 'approval_notification',
+      templateName: hasDoc ? 'approval_document_packet' : 'approval_notification',
+      fallbackTextTemplateName: 'approval_notification',
+      templateHasDocumentHeader: hasDoc,
       templateLanguage: cfg.template_language || 'en',
       templateBodyParams,
     });
@@ -889,11 +1514,17 @@ export async function sendApprovalWhatsAppNotification(
         request_id: request.id,
         recipient_phone: target.phone,
         recipient_name: target.name || null,
-        message_type: 'document',
+        message_type: 'document_template',
         status: res.success ? 'sent' : 'failed',
         meta_message_id: res.messageId || null,
         error_message: res.error || null,
-        details: { approval_no: approvalNo, request_no: requestNo, event: 'approval' },
+        details: {
+          approval_no: approvalNo,
+          request_no: requestNo,
+          event: 'approval',
+          media_id: uploadedDoc.mediaId || null,
+          has_document: hasDoc,
+        },
       });
     } catch {
       /* ignore */
@@ -1153,9 +1784,11 @@ export async function sendReturnedWhatsAppNotification(
 }
 
 /**
- * Builds and dispatches the WhatsApp disbursement message for either:
- * - Complete paid and close (payment_completed_notification)
- * - Partial payment (partial_payment_notification)
+ * Builds and dispatches the WhatsApp disbursement message:
+ * - When the Payment Account attached a disbursement document: sends the DOCUMENT-header
+ *   template (`payment_completed_document` or `partial_payment_document`) with that
+ *   exact disbursement document attached directly inside the template header.
+ * - When no document was attached: sends `payment_completed_notification` or `partial_payment_notification`.
  */
 export async function sendPaymentDisbursedWhatsAppNotification(
   request: RequestRecord,
@@ -1168,7 +1801,8 @@ export async function sendPaymentDisbursedWhatsAppNotification(
   config?: WhatsAppConfig,
   extraRecipientPhone?: string,
   attachmentUrl?: string | null,
-  attachmentFilename?: string | null
+  attachmentFilename?: string | null,
+  attachmentBlob?: Blob | null
 ): Promise<{
   success: boolean;
   results: { recipient: string; name?: string; ok: boolean; error?: string }[];
@@ -1176,28 +1810,50 @@ export async function sendPaymentDisbursedWhatsAppNotification(
   const cfg = config || (await loadWhatsAppConfig(true));
   if (!cfg.enabled) return { success: false, results: [] };
 
+  ensureDocumentTemplatesRegistered(cfg).catch(() => {});
+
   const approvalNo = request.approval_no || 'APPROVED';
   const requestNo = request.request_no || 'REQ';
   const titleStr = request.title || 'Official Request';
-  const outletStr = request.shop_name || 'All Outlets';
+  const outletStr =
+    request.request_type === 'exhibition'
+      ? ((request.details as { conducting_shop_name?: string } | null)?.conducting_shop_name?.trim() ||
+          request.shop_name ||
+          'All Outlets')
+      : request.shop_name || 'All Outlets';
   const modeStr = paymentMode || 'Bank Transfer';
   const refStr = paymentRef?.trim() || 'Processed';
   const dateStr =
-    paymentDate || new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-
-  const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
-  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
+    paymentDate ||
+    new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
   const defaultDocFilename = isFullyPaid
     ? `${approvalNo}_Payment_Settlement_Receipt.pdf`
     : `${approvalNo}_Partial_Payment_Receipt.pdf`;
-  const finalFilename = attachmentFilename || defaultDocFilename;
+  const rawFilename = attachmentFilename || defaultDocFilename;
+
+  // Upload the Payment Account's attached disbursement document to Meta WhatsApp Media API once
+  const uploadedDoc =
+    attachmentBlob || attachmentUrl
+      ? await uploadWhatsAppDocumentMedia({
+          config: cfg,
+          fileBlob: attachmentBlob || null,
+          documentUrl: attachmentUrl || null,
+          filename: rawFilename,
+        })
+      : { filename: rawFilename };
+
+  const hasDoc = Boolean(uploadedDoc.mediaId || uploadedDoc.fallbackUrl);
+  const finalFilename = uploadedDoc.filename || rawFilename;
   const companionCaption = isFullyPaid
     ? `✅ Payment Completed Receipt · ${approvalNo} · ${modeStr}`
     : `💳 Partial Payment Receipt · ${approvalNo} · ${modeStr}`;
 
+  const targets = await getNotificationRecipients(request, cfg, extraRecipientPhone);
+  const results: { recipient: string; name?: string; ok: boolean; error?: string }[] = [];
+
   if (isFullyPaid) {
-    const totalAmountStr = formatINR(request.amount || (request.paid_amount || 0));
+    const totalAmountStr = formatINR(request.amount || request.paid_amount || disbursedAmount);
     const messageBody =
       `💵 *PAYMENT COMPLETED & CLOSED*\n\n` +
       `Dear *${request.requester_name || 'Staff Member'}*,\n\n` +
@@ -1210,9 +1866,7 @@ export async function sendPaymentDisbursedWhatsAppNotification(
       `💳 *Payment Mode:* ${modeStr}\n` +
       `🔢 *Ref / UTR No:* ${refStr}\n` +
       `📅 *Payment Date:* ${dateStr}\n\n` +
-      (attachmentUrl
-        ? `📄 *Disbursement receipt attachment is delivered above.*\n\n`
-        : '') +
+      (hasDoc ? `📄 *Disbursement payment document is attached above.*\n\n` : '') +
       `All scheduled disbursements for this approval are complete.`;
 
     const templateBodyParams = [
@@ -1230,12 +1884,15 @@ export async function sendPaymentDisbursedWhatsAppNotification(
     for (const target of targets) {
       const res = await sendWhatsAppDirect({
         to: target.phone,
-        documentUrl: attachmentUrl || undefined,
+        documentMediaId: uploadedDoc.mediaId,
+        documentUrl: uploadedDoc.fallbackUrl || undefined,
         documentFilename: finalFilename,
         caption: companionCaption,
         text: messageBody,
         config: cfg,
-        templateName: 'payment_completed_notification',
+        templateName: hasDoc ? 'payment_completed_document' : 'payment_completed_notification',
+        fallbackTextTemplateName: 'payment_completed_notification',
+        templateHasDocumentHeader: hasDoc,
         templateLanguage: cfg.template_language || 'en',
         templateBodyParams,
       });
@@ -1247,7 +1904,7 @@ export async function sendPaymentDisbursedWhatsAppNotification(
           request_id: request.id,
           recipient_phone: target.phone,
           recipient_name: target.name || null,
-          message_type: attachmentUrl ? 'document' : 'template',
+          message_type: hasDoc ? 'document_template' : 'template',
           status: res.success ? 'sent' : 'failed',
           meta_message_id: res.messageId || null,
           error_message: res.error || null,
@@ -1256,7 +1913,8 @@ export async function sendPaymentDisbursedWhatsAppNotification(
             request_no: requestNo,
             event: 'fully_paid',
             ref: refStr,
-            has_attachment: Boolean(attachmentUrl),
+            media_id: uploadedDoc.mediaId || null,
+            has_attachment: hasDoc,
           },
         });
       } catch {
@@ -1264,7 +1922,6 @@ export async function sendPaymentDisbursedWhatsAppNotification(
       }
     }
   } else {
-    // Partial payment
     const disbursedStr = formatINR(disbursedAmount);
     const balanceStr = formatINR(remainingBalance);
     const messageBody =
@@ -1280,9 +1937,7 @@ export async function sendPaymentDisbursedWhatsAppNotification(
       `💳 *Payment Mode:* ${modeStr}\n` +
       `🔢 *Ref / UTR No:* ${refStr}\n` +
       `📅 *Payment Date:* ${dateStr}\n\n` +
-      (attachmentUrl
-        ? `📄 *Disbursement receipt attachment is delivered above.*\n\n`
-        : '') +
+      (hasDoc ? `📄 *Disbursement payment document is attached above.*\n\n` : '') +
       `The remaining balance will be disbursed in subsequent instalments.`;
 
     const templateBodyParams = [
@@ -1301,12 +1956,15 @@ export async function sendPaymentDisbursedWhatsAppNotification(
     for (const target of targets) {
       const res = await sendWhatsAppDirect({
         to: target.phone,
-        documentUrl: attachmentUrl || undefined,
+        documentMediaId: uploadedDoc.mediaId,
+        documentUrl: uploadedDoc.fallbackUrl || undefined,
         documentFilename: finalFilename,
         caption: companionCaption,
         text: messageBody,
         config: cfg,
-        templateName: 'partial_payment_notification',
+        templateName: hasDoc ? 'partial_payment_document' : 'partial_payment_notification',
+        fallbackTextTemplateName: 'partial_payment_notification',
+        templateHasDocumentHeader: hasDoc,
         templateLanguage: cfg.template_language || 'en',
         templateBodyParams,
       });
@@ -1318,7 +1976,7 @@ export async function sendPaymentDisbursedWhatsAppNotification(
           request_id: request.id,
           recipient_phone: target.phone,
           recipient_name: target.name || null,
-          message_type: attachmentUrl ? 'document' : 'template',
+          message_type: hasDoc ? 'document_template' : 'template',
           status: res.success ? 'sent' : 'failed',
           meta_message_id: res.messageId || null,
           error_message: res.error || null,
@@ -1328,7 +1986,8 @@ export async function sendPaymentDisbursedWhatsAppNotification(
             disbursed: disbursedAmount,
             remaining: remainingBalance,
             event: 'partial_paid',
-            has_attachment: Boolean(attachmentUrl),
+            media_id: uploadedDoc.mediaId || null,
+            has_attachment: hasDoc,
           },
         });
       } catch {
@@ -1340,10 +1999,10 @@ export async function sendPaymentDisbursedWhatsAppNotification(
   return { success: results.some((r) => r.ok), results };
 }
 
-/** Sends a test message using any specified Meta template (default: approval_notification) */
+/** Sends a test message using any specified Meta template (including DOCUMENT-header templates) */
 export async function sendTestWhatsAppTemplate(
   toPhone: string,
-  templateKey: string = 'approval_notification',
+  templateKey: string = 'approval_document_packet',
   config?: WhatsAppConfig
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const cfg = config || (await loadWhatsAppConfig(true));
@@ -1353,9 +2012,28 @@ export async function sendTestWhatsAppTemplate(
   const spec = META_TEMPLATES[templateKey] || META_TEMPLATE_SPEC;
   const sampleParams = spec.variables.map((v) => v.sample);
 
+  let docMediaId: string | undefined;
+  let docFilename: string | undefined;
+
+  if (spec.headerFormat === 'DOCUMENT') {
+    await createMetaApprovalTemplate(cfg, templateKey).catch(() => {});
+    const sampleBlob = await buildSamplePdfBlob(spec.title);
+    const sampleName = `${spec.name}_sample.pdf`;
+    const uploaded = await uploadWhatsAppDocumentMedia({
+      config: cfg,
+      fileBlob: sampleBlob,
+      filename: sampleName,
+    });
+    docMediaId = uploaded.mediaId;
+    docFilename = uploaded.filename;
+  }
+
   return sendWhatsAppDirect({
     to: cleanTo,
+    documentMediaId: docMediaId,
+    documentFilename: docFilename,
     templateName: spec.name,
+    templateHasDocumentHeader: spec.headerFormat === 'DOCUMENT',
     templateLanguage: cfg.template_language || 'en',
     templateBodyParams: sampleParams,
     config: cfg,

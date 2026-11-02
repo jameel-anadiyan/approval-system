@@ -441,7 +441,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const res = await supabase
         .from('requests')
         .select(
-          '*, routing_clerk_ids, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))'
+          '*, routing_clerk_ids, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path, whatsapp_number), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*), consultations:head_consultations(*, head:profiles!head_id(id, full_name, designation, photo_path))'
         )
         .order('created_at', { ascending: false });
 
@@ -454,7 +454,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const coreRes = await supabase
           .from('requests')
           .select(
-            '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)'
+            '*, department:departments(*), requester:profiles!requester_id(id, full_name, designation, photo_path, whatsapp_number), files:request_files!request_files_request_id_fkey(*), signed_files(*), actions:request_actions(*), payments:request_payments(*)'
           )
           .order('created_at', { ascending: false });
         if (!coreRes.error && coreRes.data) {
@@ -2254,25 +2254,46 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           request_id: id,
           // Used for the QR / verify link stamped on every page.
           app_url: window.location.origin,
+          // Client dispatches the unified approval_document_packet template with media_id
+          skip_whatsapp: true,
         });
         if (error) throw error;
         if (opts.reload !== false) await loadRequests();
 
-        // 🔔 Dispatch WhatsApp notification with approved document attachment to requester, head, and admin (9846880713)
+        // 🔔 Dispatch WhatsApp template notification with stamped document packet to requester, head, and admin (9846880713)
         (async () => {
           try {
-            let fresh = getRequestById(id);
-            if (!fresh) {
-              const { data: dbReq } = await supabase
-                .from('requests')
-                .select('*')
-                .eq('id', id)
-                .maybeSingle();
-              if (dbReq) fresh = dbReq as RequestRecord;
-            }
+            const staleReq = getRequestById(id);
+            const { data: dbReq } = await supabase
+              .from('requests')
+              .select('*')
+              .eq('id', id)
+              .maybeSingle();
+
+            const mergedApprovalNo =
+              (dbReq as RequestRecord | null)?.approval_no ||
+              data?.approval_no ||
+              staleReq?.approval_no ||
+              null;
+
+            const fresh: RequestRecord | undefined = dbReq
+              ? ({
+                  ...(staleReq || {}),
+                  ...(dbReq as RequestRecord),
+                  approval_no: mergedApprovalNo,
+                } as RequestRecord)
+              : staleReq
+              ? ({
+                  ...staleReq,
+                  approval_no: mergedApprovalNo,
+                  status: 'approved',
+                } as RequestRecord)
+              : undefined;
 
             let signedPdfUrl = '';
-            // 1. Fetch signed packet from signed_files
+            let stampedBlob: Blob | null = null;
+
+            // 1. Fetch signed packet path & download stamped PDF bytes from signed-documents
             try {
               const { data: sfData } = await supabase
                 .from('signed_files')
@@ -2281,28 +2302,45 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 .order('is_packet', { ascending: false });
 
               const packet = sfData?.find((s) => s.is_packet) || sfData?.[0];
-              if (packet?.storage_path) {
-                const { data: signUrlData } = await supabase.storage
-                  .from('signed-documents')
-                  .createSignedUrl(packet.storage_path, 60 * 60 * 24 * 7);
-                if (signUrlData?.signedUrl) {
-                  signedPdfUrl = signUrlData.signedUrl;
+              const packetPath =
+                packet?.storage_path ||
+                (mergedApprovalNo ? `${id}/${mergedApprovalNo}_packet.pdf` : '');
+
+              if (packetPath) {
+                const [dlRes, signUrlRes] = await Promise.all([
+                  supabase.storage.from('signed-documents').download(packetPath),
+                  supabase.storage
+                    .from('signed-documents')
+                    .createSignedUrl(packetPath, 60 * 60 * 24 * 7),
+                ]);
+
+                if (!dlRes.error && dlRes.data) {
+                  stampedBlob = dlRes.data;
+                }
+                if (signUrlRes.data?.signedUrl) {
+                  signedPdfUrl = signUrlRes.data.signedUrl;
                 }
               }
             } catch (sfErr) {
               console.warn('Could not retrieve signed packet storage path:', sfErr);
             }
 
-            // 2. Fallback to source document if signed packet URL not available
-            if (!signedPdfUrl && fresh?.files && fresh.files.length > 0) {
+            // 2. Fallback to source document if signed packet was not available
+            if (!stampedBlob && !signedPdfUrl && fresh?.files && fresh.files.length > 0) {
               const srcFile = fresh.files[0];
               if (srcFile.storage_path) {
                 try {
-                  const { data: srcUrlData } = await supabase.storage
-                    .from('request-files')
-                    .createSignedUrl(srcFile.storage_path, 60 * 60 * 24 * 7);
-                  if (srcUrlData?.signedUrl) {
-                    signedPdfUrl = srcUrlData.signedUrl;
+                  const [srcDl, srcUrlRes] = await Promise.all([
+                    supabase.storage.from('request-files').download(srcFile.storage_path),
+                    supabase.storage
+                      .from('request-files')
+                      .createSignedUrl(srcFile.storage_path, 60 * 60 * 24 * 7),
+                  ]);
+                  if (!srcDl.error && srcDl.data) {
+                    stampedBlob = srcDl.data;
+                  }
+                  if (srcUrlRes.data?.signedUrl) {
+                    signedPdfUrl = srcUrlRes.data.signedUrl;
                   }
                 } catch {
                   /* ignore */
@@ -2316,7 +2354,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 signedPdfUrl,
                 undefined,
                 undefined,
-                user.full_name
+                user.full_name,
+                stampedBlob
               );
             }
           } catch (waErr) {
@@ -2523,41 +2562,109 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           throw error;
         }
         await loadRequests();
-        const full = !!(data as { fully_paid?: boolean } | null)?.fully_paid;
-        const currentReq = id
+        const payData = (data || {}) as {
+          fully_paid?: boolean;
+          is_fully_paid?: boolean;
+          amount?: number;
+          total_paid?: number;
+          document_storage_path?: string | null;
+          document_name?: string | null;
+        };
+        const full = Boolean(payData.fully_paid ?? payData.is_fully_paid);
+        const staleReq = id
           ? getRequestById(id)
           : requests.find((r) => (r.disbursement_entries || []).some((e) => e.id === details.entry_id));
 
-        // Generate signed URL for the uploaded payment attachment if available
-        let paymentDocUrl: string | null = null;
-        if (storagePath && isBackendConnected) {
-          try {
-            const { data: signData } = await supabase.storage
-              .from('request-files')
-              .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
-            paymentDocUrl = signData?.signedUrl || null;
-          } catch (signErr) {
-            console.warn('Could not generate signed URL for payment document:', signErr);
-          }
-        }
+        const effectiveStoragePath = storagePath || payData.document_storage_path || null;
+        const effectiveDocName =
+          docName || payData.document_name || details.document_name || null;
 
-        if (currentReq) {
-          const disbursed = details.amount || 0;
-          const balance = Math.max(0, (currentReq.amount || 0) - ((currentReq.paid_amount || 0) + disbursed));
-          sendPaymentDisbursedWhatsAppNotification(
-            currentReq,
-            disbursed,
-            balance,
-            details.payment_mode,
-            details.payment_ref,
-            details.payment_date,
-            full,
-            undefined,
-            undefined,
-            paymentDocUrl,
-            docName || details.document_name || 'Disbursement_Receipt.pdf'
-          ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
-        }
+        // Dispatch WhatsApp payment template (with Payment Account's attached disbursement document in DOCUMENT header)
+        (async () => {
+          try {
+            let resolvedReqId = id?.trim() || staleReq?.id || '';
+            if (!resolvedReqId && details.entry_id) {
+              const { data: entRow } = await supabase
+                .from('disbursement_entries')
+                .select('request_id')
+                .eq('id', details.entry_id)
+                .maybeSingle();
+              if (entRow?.request_id) resolvedReqId = entRow.request_id;
+            }
+
+            let freshReq: RequestRecord | undefined = staleReq;
+            if (resolvedReqId) {
+              const { data: dbReq } = await supabase
+                .from('requests')
+                .select('*')
+                .eq('id', resolvedReqId)
+                .maybeSingle();
+              if (dbReq) {
+                freshReq = {
+                  ...(staleReq || {}),
+                  ...(dbReq as RequestRecord),
+                } as RequestRecord;
+              }
+            }
+
+            if (!freshReq) return;
+
+            let paymentDocBlob: Blob | null = details.document || null;
+            let paymentDocUrl: string | null = null;
+
+            if (effectiveStoragePath) {
+              try {
+                const tasks: [
+                  Promise<{ data: Blob | null; error: unknown }>,
+                  Promise<{ data: { signedUrl: string } | null; error: unknown }>,
+                ] = [
+                  paymentDocBlob
+                    ? Promise.resolve({ data: paymentDocBlob, error: null })
+                    : supabase.storage.from('request-files').download(effectiveStoragePath),
+                  supabase.storage
+                    .from('request-files')
+                    .createSignedUrl(effectiveStoragePath, 60 * 60 * 24 * 7),
+                ];
+                const [dlRes, signRes] = await Promise.all(tasks);
+                if (!paymentDocBlob && !dlRes.error && dlRes.data) {
+                  paymentDocBlob = dlRes.data;
+                }
+                paymentDocUrl = signRes.data?.signedUrl || null;
+              } catch (signErr) {
+                console.warn('Could not retrieve payment document for WhatsApp:', signErr);
+              }
+            }
+
+            const disbursed = Number(payData.amount ?? details.amount ?? 0);
+            const totalPaidAfter =
+              payData.total_paid !== undefined
+                ? Number(payData.total_paid)
+                : Number(
+                    freshReq.paid_amount ??
+                      (Number(staleReq?.paid_amount || 0) + disbursed)
+                  );
+            const balance = full
+              ? 0
+              : Math.max(0, Number(freshReq.amount || 0) - totalPaidAfter);
+
+            await sendPaymentDisbursedWhatsAppNotification(
+              freshReq,
+              disbursed,
+              balance,
+              details.payment_mode,
+              details.payment_ref,
+              details.payment_date,
+              full,
+              undefined,
+              undefined,
+              paymentDocUrl,
+              effectiveDocName || undefined,
+              paymentDocBlob
+            );
+          } catch (e) {
+            console.warn('Payment WhatsApp notification failed:', e);
+          }
+        })();
         return { success: true, fully_paid: full };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
@@ -2677,7 +2784,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       undefined,
       undefined,
       mockDocUrl,
-      docName || details.document_name || 'Disbursement_Receipt.pdf'
+      docName || details.document_name || undefined,
+      details.document || null
     ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
 
     return { success: true, fully_paid: full };

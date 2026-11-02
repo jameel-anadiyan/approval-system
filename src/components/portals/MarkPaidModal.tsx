@@ -334,15 +334,15 @@ export const MarkPaidModal: React.FC<MarkPaidModalProps> = ({
             placeholder="e.g. Disbursed against Entry #1" className={inputCls} />
         </div>
 
-        {/* Optional Document Upload for Reference */}
+        {/* Optional Disbursement Document Upload (sent on WhatsApp template + stored for reference) */}
         <div>
           <label className="text-xs font-bold text-slate-700 flex items-center justify-between mb-1">
             <span className="flex items-center gap-1.5">
               <Paperclip className="w-3.5 h-3.5 text-slate-500" />
-              <span>Reference Document (Optional)</span>
+              <span>Disbursement Document / Receipt (Optional)</span>
             </span>
-            <span className="text-[11px] font-normal text-slate-500">
-              Any file type · For future reference
+            <span className="text-[11px] font-normal text-emerald-700">
+              Any file · Attached to WhatsApp payment alert
             </span>
           </label>
 

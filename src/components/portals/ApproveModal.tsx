@@ -151,29 +151,48 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
     setWaSending(true);
     setWaStatus(null);
     try {
-      const fresh = getRequestById(request.id) || request;
+      const baseReq = getRequestById(request.id) || request;
+      const mergedApprovalNo = baseReq.approval_no || generatedApprovalNo || null;
+      const fresh = {
+        ...baseReq,
+        approval_no: mergedApprovalNo,
+      };
       const packet = fresh.signed_files?.find((s) => s.is_packet) || fresh.signed_files?.[0];
+      const packetPath =
+        packet?.storage_path ||
+        (mergedApprovalNo ? `${request.id}/${mergedApprovalNo}_packet.pdf` : '');
+
       let url = '';
-      if (packet?.storage_path && isBackendConnected) {
-        const { data: signUrlData } = await supabase.storage
-          .from('signed-documents')
-          .createSignedUrl(packet.storage_path, 60 * 60 * 24 * 7);
-        url = signUrlData?.signedUrl || '';
+      let stampedBlob: Blob | null = null;
+      if (packetPath && isBackendConnected) {
+        const [dlRes, signUrlRes] = await Promise.all([
+          supabase.storage.from('signed-documents').download(packetPath),
+          supabase.storage
+            .from('signed-documents')
+            .createSignedUrl(packetPath, 60 * 60 * 24 * 7),
+        ]);
+        if (!dlRes.error && dlRes.data) stampedBlob = dlRes.data;
+        url = signUrlRes.data?.signedUrl || '';
       } else if (fresh.files && fresh.files[0]?.storage_path && isBackendConnected) {
-        const { data: srcUrlData } = await supabase.storage
-          .from('request-files')
-          .createSignedUrl(fresh.files[0].storage_path, 60 * 60 * 24 * 7);
-        url = srcUrlData?.signedUrl || '';
+        const [srcDlRes, srcUrlRes] = await Promise.all([
+          supabase.storage.from('request-files').download(fresh.files[0].storage_path),
+          supabase.storage
+            .from('request-files')
+            .createSignedUrl(fresh.files[0].storage_path, 60 * 60 * 24 * 7),
+        ]);
+        if (!srcDlRes.error && srcDlRes.data) stampedBlob = srcDlRes.data;
+        url = srcUrlRes.data?.signedUrl || '';
       }
       const res = await sendApprovalWhatsAppNotification(
         fresh,
         url,
         undefined,
         undefined,
-        user?.full_name
+        user?.full_name,
+        stampedBlob
       );
       if (res.success) {
-        setWaStatus('✅ Delivered to WhatsApp (+91 9846880713 & staff)!');
+        setWaStatus('✅ Delivered stamped PDF & message to WhatsApp!');
       } else {
         const errs = res.results.map((r) => r.error).filter(Boolean).join(', ');
         setWaStatus(`WhatsApp: ${errs || 'Failed'}`);

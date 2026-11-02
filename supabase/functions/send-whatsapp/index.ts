@@ -97,12 +97,14 @@ Deno.serve(handle(async (req) => {
     const packet = (signedFiles ?? []).find((f: { is_packet: boolean }) => f.is_packet) || signedFiles?.[0];
     if (!packet) throw new HttpError(404, "no_packet", "No approved signed document found for this request.");
 
-    const { data: urlData } = await admin.storage
-      .from("signed-documents")
-      .createSignedUrl(packet.storage_path, 60 * 60 * 24 * 7);
+    const [dlRes, urlRes] = await Promise.all([
+      admin.storage.from("signed-documents").download(packet.storage_path),
+      admin.storage.from("signed-documents").createSignedUrl(packet.storage_path, 60 * 60 * 24 * 7),
+    ]);
 
-    const docUrl = urlData?.signedUrl;
-    if (!docUrl) throw new HttpError(500, "url_failed", "Could not generate document link.");
+    const docUrl = urlRes.data?.signedUrl || "";
+    const docBytes = !dlRes.error && dlRes.data ? new Uint8Array(await dlRes.data.arrayBuffer()) : null;
+    if (!docBytes && !docUrl) throw new HttpError(500, "url_failed", "Could not load signed document packet.");
 
     let targetPhone = body.to ? cleanPhone(body.to) : "";
     let recipientName = body.recipient_name || "";
@@ -112,20 +114,50 @@ Deno.serve(handle(async (req) => {
     }
     if (!targetPhone) throw new HttpError(400, "no_phone", "No WhatsApp number found for this requester.");
 
-    const caption = `✅ *Your approval has been approved!*\nRequest No: ${r.request_no}\nApproval No: ${r.approval_no}\nAmount: Rs. ${r.amount}`;
-    const messageBody =
-      `✅ *YOUR APPROVAL HAS BEEN APPROVED*\n\n` +
-      `Dear *${recipientName || "Staff Member"}*,\n\n` +
-      `Your request has been approved and officially sealed.\n\n` +
-      `📋 *Request No:* ${r.request_no}\n` +
-      `🎉 *Approval No:* ${r.approval_no}\n` +
-      `📝 *Subject:* ${r.title || "—"}\n` +
-      `💰 *Amount:* Rs. ${Number(r.amount).toLocaleString("en-IN")}\n` +
-      `🏢 *Outlet:* ${r.shop_name || "—"}\n\n` +
-      `📄 *The official signed approval document packet is attached above.*`;
+    const docFilename = `${r.approval_no}_Approved_Document.pdf`;
+    let mediaId: string | null = null;
+    if (docBytes) {
+      try {
+        const mediaForm = new FormData();
+        mediaForm.append("messaging_product", "whatsapp");
+        mediaForm.append("type", "application/pdf");
+        mediaForm.append("file", new Blob([docBytes], { type: "application/pdf" }), docFilename);
+        const mRes = await fetch(`https://graph.facebook.com/v21.0/${cfg.phone_number_id}/media`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${cfg.access_token}` },
+          body: mediaForm,
+        });
+        const mJson = await mRes.json();
+        if (mRes.ok && mJson?.id) mediaId = String(mJson.id);
+      } catch {
+        /* ignore media upload error, fallback to docUrl */
+      }
+    }
 
+    const amountLabel = `Rs. ${Number(r.amount || 0).toLocaleString("en-IN")}`;
+    const dateLabel = new Date(r.decided_at || Date.now()).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+    const bodyParams = [
+      recipientName || r.requester_name || "Staff Member",
+      r.request_no || "REQ",
+      r.approval_no || "APPROVED",
+      r.title || "Official Approval",
+      r.shop_name || "All Outlets",
+      amountLabel,
+      me.full_name || "Authorized Head / Admin",
+      dateLabel,
+    ];
+
+    const caption = `✅ *Your approval has been approved!*\nRequest No: ${r.request_no}\nApproval No: ${r.approval_no}\nAmount: ${amountLabel}`;
     const waUrl = `https://graph.facebook.com/v21.0/${cfg.phone_number_id}/messages`;
-    const res = await fetch(waUrl, {
+    const docObj = mediaId
+      ? { id: mediaId, filename: docFilename }
+      : { link: docUrl, filename: docFilename };
+
+    let res = await fetch(waUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${cfg.access_token}`,
@@ -135,45 +167,84 @@ Deno.serve(handle(async (req) => {
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to: targetPhone,
-        type: "document",
-        document: {
-          link: docUrl,
-          caption,
-          filename: `${r.approval_no}_Approved_Document.pdf`,
+        type: "template",
+        template: {
+          name: "approval_document_packet",
+          language: { code: cfg.template_language || "en" },
+          components: [
+            {
+              type: "header",
+              parameters: [{ type: "document", document: docObj }],
+            },
+            {
+              type: "body",
+              parameters: bodyParams.map((p) => ({ type: "text", text: String(p) })),
+            },
+          ],
         },
       }),
     });
 
-    const resJson = await res.json();
+    let resJson = await res.json();
+
+    // Fallback to body-only template + companion document if approval_document_packet is awaiting Meta review
+    if (!res.ok) {
+      await fetch(waUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cfg.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: targetPhone,
+          type: "document",
+          document: mediaId
+            ? { id: mediaId, caption, filename: docFilename }
+            : { link: docUrl, caption, filename: docFilename },
+        }),
+      }).catch(() => {});
+
+      res = await fetch(waUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cfg.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: targetPhone,
+          type: "template",
+          template: {
+            name: "approval_notification",
+            language: { code: cfg.template_language || "en" },
+            components: [
+              {
+                type: "body",
+                parameters: bodyParams.map((p) => ({ type: "text", text: String(p) })),
+              },
+            ],
+          },
+        }),
+      });
+      resJson = await res.json();
+    }
+
     if (!res.ok) {
       const err = resJson?.error?.message || `WhatsApp API error (${res.status})`;
       throw new HttpError(400, "whatsapp_error", err);
     }
 
-    // Follow-up text message
-    await fetch(waUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.access_token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: targetPhone,
-        type: "text",
-        text: { body: messageBody },
-      }),
-    }).catch(() => {});
-
     await admin.from("whatsapp_logs").insert({
       request_id: requestId,
       recipient_phone: targetPhone,
       recipient_name: recipientName || null,
-      message_type: "document",
+      message_type: "document_template",
       status: "sent",
       meta_message_id: resJson?.messages?.[0]?.id || null,
-      details: { approval_no: r.approval_no, request_no: r.request_no },
+      details: { approval_no: r.approval_no, request_no: r.request_no, media_id: mediaId },
     }).catch(() => {});
 
     return json({ ok: true, message_id: resJson?.messages?.[0]?.id, recipient: targetPhone });
