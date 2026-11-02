@@ -2,12 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
-import { useDirectory } from '../../lib/directory';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
-import { isMyRegionalRequest, isOwningDepartmentHead } from '../../lib/workflow';
-import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
-import { entryAvailable, RequestRecord } from '../../types/database';
+import { isOwningDepartmentHead } from '../../lib/workflow';
+import { RequestRecord } from '../../types/database';
 import { Wallet, PlusCircle, CheckCircle2, Clock, Inbox, FileCheck } from 'lucide-react';
 
 type PettyTab = 'action' | 'in_progress' | 'approved' | 'all';
@@ -15,90 +13,41 @@ type PettyTab = 'action' | 'in_progress' | 'approved' | 'all';
 export const PettyCashPage: React.FC = () => {
   const { user, role } = useAuth();
   const { requests } = useRequests();
-  const { users } = useDirectory();
   const navigate = useNavigate();
 
-  const canRaise = role === 'employee' || role === 'regional_head' || role === 'clerk' || role === 'head';
-  const isEntryOnlyUser = role === 'disbursement' && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
-  const isPaymentOnlyUser = role === 'disbursement' && user?.disbursement_type === 'payment_only';
-
   const scopedPettyCash = useMemo<RequestRecord[]>(() => {
+    if (!user || role !== 'head') return [];
     const allPetty = requests.filter((r) => typeOf(r) === 'petty_cash');
-    if (!user || !role) return [];
-    if (role === 'admin') {
-      return allPetty.filter((r) => r.status !== 'draft' || r.requester_id === user.id);
-    }
-    if (role === 'head') {
-      return allPetty.filter(
-        (r) =>
-          (r.status !== 'draft' || r.requester_id === user.id) &&
-          (r.owner_head_id === user.id ||
-            r.requester_id === user.id ||
-            (r.consultations || []).some((c) => c.head_id === user.id) ||
-            (!r.owner_head_id && user.department_id && r.department_id === user.department_id))
-      );
-    }
-    if (role === 'regional_head') {
-      return allPetty.filter(
-        (r) =>
-          (r.status !== 'draft' || r.requester_id === user.id) &&
-          (r.requester_id === user.id || r.regional_head_id === user.id)
-      );
-    }
-    if (role === 'disbursement') {
-      return allPetty.filter((r) => {
-        if (r.status !== 'approved' && r.status !== 'paid') return false;
-        if (isEntryOnlyUser && r.assigned_entry_user_id && r.assigned_entry_user_id !== user.id) {
-          return false;
-        }
-        return true;
-      });
-    }
-    if (role === 'clerk') {
-      return allPetty.filter(
-        (r) => r.requester_id === user.id || (r.status !== 'draft' && user.department_id && r.department_id === user.department_id)
-      );
-    }
-    return allPetty.filter((r) => r.requester_id === user.id);
-  }, [requests, user, role, isEntryOnlyUser]);
+    return allPetty.filter(
+      (r) =>
+        (r.status !== 'draft' || r.requester_id === user.id) &&
+        (r.owner_head_id === user.id ||
+          r.requester_id === user.id ||
+          (r.consultations || []).some((c) => c.head_id === user.id) ||
+          (!r.owner_head_id && user.department_id && r.department_id === user.department_id))
+    );
+  }, [requests, user, role]);
 
   const actionItems = useMemo<RequestRecord[]>(() => {
-    if (!user || !role) return [];
-    if (role === 'head') {
-      return scopedPettyCash.filter(
-        (r) =>
-          (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
-          isOwningDepartmentHead(r, user)
-      );
-    }
-    if (role === 'regional_head') {
-      return scopedPettyCash.filter((r) => isMyRegionalRequest(r, user));
-    }
-    if (role === 'admin') {
-      return scopedPettyCash.filter(
-        (r) =>
-          r.status === 'pending_admin_approval' ||
-          (r.status === 'approving' &&
-            (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
-      );
-    }
-    if (role === 'disbursement') {
-      return scopedPettyCash.filter((r) => {
-        if (r.status !== 'approved') return false;
-        if (isEntryOnlyUser) return entryAvailable(r) > 0;
-        if (isPaymentOnlyUser) return canPaymentUserViewAwaitingRequest(user, r, users);
-        return true;
-      });
-    }
-    return scopedPettyCash.filter((r) => r.requester_id === user.id && (r.status === 'returned' || r.status === 'draft'));
-  }, [scopedPettyCash, user, role, isEntryOnlyUser, isPaymentOnlyUser, users]);
+    if (!user || role !== 'head') return [];
+    return scopedPettyCash.filter(
+      (r) =>
+        (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
+        isOwningDepartmentHead(r, user)
+    );
+  }, [scopedPettyCash, user, role]);
 
   const inProgressItems = useMemo(
     () =>
       scopedPettyCash.filter((r) =>
-        ['pending_regional_review', 'submitted', 'pending_head_review', 'pending_head_approval', 'pending_admin_approval', 'approving'].includes(
-          r.status
-        )
+        [
+          'pending_regional_review',
+          'submitted',
+          'pending_head_review',
+          'pending_head_approval',
+          'pending_admin_approval',
+          'approving',
+        ].includes(r.status)
       ),
     [scopedPettyCash]
   );
@@ -125,47 +74,36 @@ export const PettyCashPage: React.FC = () => {
     [approvedItems]
   );
 
-  const actionLabel =
-    role === 'head' || role === 'admin'
-      ? 'To Approve'
-      : role === 'regional_head'
-      ? 'To Forward'
-      : role === 'disbursement'
-      ? 'Pending Disbursement'
-      : 'Drafts & Returned';
-
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-800 bg-teal-50 px-2.5 py-1 rounded-full border border-teal-200 mb-1.5">
             <Wallet className="w-3.5 h-3.5 text-teal-600" />
-            <span>Petty Cash Form Below 1000</span>
+            <span>Petty Cash Dealing Head · Below 1000</span>
           </span>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display flex items-center gap-2.5">
             <span>Petty Cash Requests</span>
             {actionItems.length > 0 && (
               <span className="px-2.5 py-0.5 rounded-full bg-teal-600 text-white text-xs font-bold">
-                {actionItems.length} {role === 'regional_head' ? 'to forward' : 'pending'}
+                {actionItems.length} pending
               </span>
             )}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Expenses up to ₹1,000 · Cash default · Skips clerk routing and goes directly to the selected Petty Cash Dealing Head.
+            Expenses up to ₹1,000 routed directly to you as a Petty Cash Dealing Department Head.
           </p>
         </div>
 
-        {canRaise && (
-          <button
-            type="button"
-            id="raise-petty-cash-btn"
-            onClick={() => navigate('/new', { state: { defaultType: 'petty_cash' } })}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-md shadow-teal-200 transition-all self-start sm:self-auto cursor-pointer"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>Raise Petty Cash</span>
-          </button>
-        )}
+        <button
+          type="button"
+          id="raise-petty-cash-btn"
+          onClick={() => navigate('/new', { state: { defaultType: 'petty_cash' } })}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-md shadow-teal-200 transition-all self-start sm:self-auto cursor-pointer"
+        >
+          <PlusCircle className="w-4 h-4" />
+          <span>Raise Petty Cash</span>
+        </button>
       </div>
 
       {/* Summary Strip */}
@@ -178,7 +116,7 @@ export const PettyCashPage: React.FC = () => {
               : 'bg-white border-slate-200 hover:border-teal-300'
           }`}
         >
-          <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700 block">{actionLabel}</span>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700 block">To Approve</span>
           <span className="text-2xl font-extrabold text-teal-950 font-display mt-1 block">{actionItems.length}</span>
         </div>
 
@@ -225,7 +163,7 @@ export const PettyCashPage: React.FC = () => {
       <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200 gap-1 flex-wrap" role="tablist">
         {(
           [
-            ['action', `${actionLabel} (${actionItems.length})`, Inbox],
+            ['action', `To Approve (${actionItems.length})`, Inbox],
             ['in_progress', `In Progress (${inProgressItems.length})`, Clock],
             ['approved', `Approved & Paid (${approvedItems.length})`, FileCheck],
             ['all', `All Petty Cash (${scopedPettyCash.length})`, Wallet],
@@ -250,14 +188,14 @@ export const PettyCashPage: React.FC = () => {
 
       <RequestQueue
         items={items}
-        bulkApprove={tab === 'action' && (role === 'head' || role === 'admin')}
+        bulkApprove={tab === 'action'}
         initialFilters={{ sort: tab === 'action' ? 'oldest' : 'newest' }}
         emptyIcon={tab === 'action' ? CheckCircle2 : Wallet}
         emptyTitle={tab === 'action' ? 'No Pending Petty Cash Requests' : 'No Petty Cash Requests Yet'}
         emptyDescription={
           tab === 'action'
             ? 'All Petty Cash requests requiring your action have been cleared.'
-            : 'Petty Cash requests (up to ₹1,000) will appear here.'
+            : 'Petty Cash requests (up to ₹1,000) assigned to you will appear here.'
         }
       />
     </div>

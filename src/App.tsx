@@ -12,6 +12,7 @@ import type { AppRole } from './types/database';
 import { canViewDiscountReport } from './lib/discountReport';
 import { canViewStockTransferReport, isStockMonitor } from './lib/stockTransferReport';
 import { isEntryCheckingUser } from './lib/formatters';
+import { useDirectory } from './lib/directory';
 
 import { NewRequestPage } from './pages/shared/NewRequestPage';
 import { RequestDetailPage } from './pages/shared/RequestDetailPage';
@@ -118,6 +119,18 @@ const RequireExhibitionWaitlist: React.FC = () => {
   return <Outlet />;
 };
 
+/** Department Head enabled as a Petty Cash Dealer. */
+const RequirePettyCashDealerHead: React.FC = () => {
+  const { user, role } = useAuth();
+  const dir = useDirectory();
+  const dirMe = dir.users.find((u) => u.id === user?.id);
+  const isPettyCashDealer = Boolean(
+    user && role === 'head' && (dirMe?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
+  );
+  if (!isPettyCashDealer) return <RoleRedirect />;
+  return <Outlet />;
+};
+
 /** User who has access to exhibition requests. */
 const RequireExhibitionAccess: React.FC = () => {
   const { user, role } = useAuth();
@@ -214,7 +227,11 @@ export const App: React.FC = () => {
                 <Route path="approved" element={<ApprovedRequestsPage />} />
                 <Route path="returned" element={<ReturnedRequestsPage />} />
                 <Route path="bill-missing" element={<BillMissingPage />} />
-                <Route path="petty-cash" element={<PettyCashPage />} />
+
+                {/* Petty Cash tab (Petty Cash Dealing Department Heads only) */}
+                <Route element={<RequirePettyCashDealerHead />}>
+                  <Route path="petty-cash" element={<PettyCashPage />} />
+                </Route>
 
                 {/* Discount report (Admin + Heads with access) */}
                 <Route element={<RequireDiscountReport />}>

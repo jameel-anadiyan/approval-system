@@ -5,12 +5,19 @@ import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { isOwningDepartmentHead } from '../../lib/workflow';
 import { typeOf } from '../../lib/formatters';
+import { useDirectory } from '../../lib/directory';
 import { CheckCircle, CheckCircle2, Clock, CornerDownRight, Wallet } from 'lucide-react';
 
 export const HeadReviewPage: React.FC = () => {
   const { user } = useAuth();
   const { requests } = useRequests();
+  const dir = useDirectory();
   const navigate = useNavigate();
+
+  const isPettyCashDealer = Boolean(
+    user?.role === 'head' &&
+      (dir.users.find((u) => u.id === user.id)?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
+  );
 
   // Route B requests waiting for Head direct approval
   const toApproveQueue = requests.filter(
@@ -50,19 +57,21 @@ export const HeadReviewPage: React.FC = () => {
           </span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => navigate('/petty-cash')}
-          className="px-4 py-2 text-xs font-bold rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
-        >
-          <Wallet className="w-3.5 h-3.5 text-teal-600" />
-          <span>Petty Cash</span>
-          {pettyCashCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-teal-600 text-white text-[10px] font-bold">
-              {pettyCashCount}
-            </span>
-          )}
-        </button>
+        {isPettyCashDealer && (
+          <button
+            type="button"
+            onClick={() => navigate('/petty-cash')}
+            className="px-4 py-2 text-xs font-bold rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+          >
+            <Wallet className="w-3.5 h-3.5 text-teal-600" />
+            <span>Petty Cash</span>
+            {pettyCashCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-teal-600 text-white text-[10px] font-bold">
+                {pettyCashCount}
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
       <div>

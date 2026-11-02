@@ -170,37 +170,20 @@ export const Navigation: React.FC = () => {
     isBillMissingTab: true,
   };
 
-  const pettyCashCount = requests.filter((r) => {
-    if (typeOf(r) !== 'petty_cash') return false;
-    if (role === 'head') {
-      return (
-        (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
-        isOwningDepartmentHead(r, user)
-      );
-    }
-    if (role === 'regional_head') {
-      return isMyRegionalRequest(r, user);
-    }
-    if (role === 'admin') {
-      return (
-        r.status === 'pending_admin_approval' ||
-        (r.status === 'approving' &&
-          (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
-      );
-    }
-    if (role === 'disbursement') {
-      if (r.status !== 'approved') return false;
-      if (isEntryOnlyUser) {
-        if (r.assigned_entry_user_id && r.assigned_entry_user_id !== user?.id) return false;
-        return entryAvailable(r) > 0;
-      }
-      if (isPaymentOnlyUser) {
-        return canPaymentUserViewAwaitingRequest(user, r, users);
-      }
-      return true;
-    }
-    return r.requester_id === user?.id && r.status === 'returned';
-  }).length;
+  const isPettyCashDealerHead = Boolean(
+    role === 'head' &&
+      user &&
+      (users.find((u) => u.id === user.id)?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
+  );
+
+  const pettyCashCount = isPettyCashDealerHead
+    ? requests.filter(
+        (r) =>
+          typeOf(r) === 'petty_cash' &&
+          (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
+          isOwningDepartmentHead(r, user)
+      ).length
+    : 0;
 
   const pettyCashNavItem: NavItem = {
     label: 'Petty Cash',
@@ -215,7 +198,6 @@ export const Navigation: React.FC = () => {
     case 'employee':
       mainNavItems = [
         { label: 'My Requests', path: '/my', icon: FileText },
-        pettyCashNavItem,
         billMissingNavItem,
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
@@ -231,7 +213,6 @@ export const Navigation: React.FC = () => {
     case 'regional_head':
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
-        pettyCashNavItem,
         billMissingNavItem,
         { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
         ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
@@ -257,7 +238,6 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
-        pettyCashNavItem,
         ...stockReportItem,
         { label: 'My Requests', path: '/my', icon: FileText },
         { label: 'Profile', path: '/profile', icon: UserCheck },
@@ -267,7 +247,7 @@ export const Navigation: React.FC = () => {
     case 'head':
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
-        pettyCashNavItem,
+        ...(isPettyCashDealerHead ? [pettyCashNavItem] : []),
         billMissingNavItem,
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
         ...(user?.can_view_exhibition_waitlist
@@ -294,7 +274,6 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
-        pettyCashNavItem,
         billMissingNavItem,
         { label: 'Regions', path: '/admin/regions', icon: MapPin },
         { label: 'Regional Heads', path: '/admin/regional-heads', icon: Globe },
@@ -338,7 +317,6 @@ export const Navigation: React.FC = () => {
       if (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)) {
         mainNavItems = [
           { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
-          pettyCashNavItem,
           billMissingNavItem,
           { label: 'Search', path: '/disbursement', icon: Search },
           { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
@@ -353,7 +331,6 @@ export const Navigation: React.FC = () => {
       }
       mainNavItems = [
         { label: 'Search', path: '/disbursement', icon: Search },
-        pettyCashNavItem,
         billMissingNavItem,
         isEntryOnlyUser
           ? { label: 'New Entry Wait', path: '/disbursement', icon: Clock, badge: disbNewEntryCount }
@@ -394,7 +371,8 @@ export const Navigation: React.FC = () => {
                 item.path === '/regional' ||
                 item.path === '/approved' ||
                 item.path === '/returned' ||
-                item.path === '/bill-missing'
+                item.path === '/bill-missing' ||
+                item.path === '/petty-cash'
               }
               className={({ isActive }) =>
                 `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-all ${

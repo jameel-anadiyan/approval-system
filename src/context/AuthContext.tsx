@@ -116,6 +116,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       parsed.can_view_discount_report !== undefined
                         ? parsed.can_view_discount_report
                         : matched.can_view_discount_report,
+                    is_petty_cash_dealer:
+                      parsed.is_petty_cash_dealer !== undefined
+                        ? parsed.is_petty_cash_dealer
+                        : matched.is_petty_cash_dealer,
                     region_id: parsed.region_id ?? matched.region_id,
                     allowed_types: parsed.allowed_types ?? matched.allowed_types,
                   }

@@ -5,6 +5,7 @@ import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
 import { canUserViewBillMissingRequest, isOwningDepartmentHead } from '../../lib/workflow';
+import { useDirectory } from '../../lib/directory';
 import {
   CheckCircle2,
   Clock,
@@ -24,7 +25,13 @@ import {
 export const HeadDashboardPage: React.FC = () => {
   const { user } = useAuth();
   const { requests } = useRequests();
+  const dir = useDirectory();
   const navigate = useNavigate();
+
+  const isPettyCashDealer = Boolean(
+    user?.role === 'head' &&
+      (dir.users.find((u) => u.id === user.id)?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
+  );
 
   const [selectedQueue, setSelectedQueue] = useState<'to_approve' | 'bill_missing'>('to_approve');
 
@@ -138,20 +145,22 @@ export const HeadDashboardPage: React.FC = () => {
           </span>
         </button>
 
-        <button
-          type="button"
-          id="head-petty-cash-tab-btn"
-          onClick={() => navigate('/petty-cash')}
-          className="px-4 py-2 text-xs font-bold rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
-        >
-          <Wallet className="w-3.5 h-3.5 text-teal-600" />
-          <span>Petty Cash</span>
-          {pettyCashApproveCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-teal-600 text-white text-[10px] font-bold">
-              {pettyCashApproveCount}
-            </span>
-          )}
-        </button>
+        {isPettyCashDealer && (
+          <button
+            type="button"
+            id="head-petty-cash-tab-btn"
+            onClick={() => navigate('/petty-cash')}
+            className="px-4 py-2 text-xs font-bold rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+          >
+            <Wallet className="w-3.5 h-3.5 text-teal-600" />
+            <span>Petty Cash</span>
+            {pettyCashApproveCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-teal-600 text-white text-[10px] font-bold">
+                {pettyCashApproveCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Glowing Red Bill Missing Tab */}
         <button

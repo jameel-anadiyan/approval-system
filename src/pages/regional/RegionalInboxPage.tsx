@@ -5,9 +5,8 @@ import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
 import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { EmptyState } from '../../components/common/EmptyState';
-import { CheckCircle2, Inbox, Info, Send, RotateCcw, AlertTriangle, FileWarning, Wallet } from 'lucide-react';
+import { CheckCircle2, Inbox, Info, Send, RotateCcw, AlertTriangle, FileWarning } from 'lucide-react';
 import { isMyRegionalRequest, canUserViewBillMissingRequest } from '../../lib/workflow';
-import { typeOf } from '../../lib/formatters';
 import type { RequestRecord } from '../../types/database';
 
 /**
@@ -57,7 +56,6 @@ export const RegionalInboxPage: React.FC = () => {
 
   // 1. Pending (To forward): employee requests waiting for regional head action
   const pending = requests.filter((r) => isMyRegionalRequest(r, user));
-  const pendingPettyCount = pending.filter((r) => typeOf(r) === 'petty_cash').length;
 
   // 2. Returned for correction: requests in scope that were returned
   const returned = requests.filter((r) => isRegionalScope(r) && r.status === 'returned');
@@ -174,21 +172,6 @@ export const RegionalInboxPage: React.FC = () => {
             <span>{label}</span>
           </button>
         ))}
-
-        {/* Petty Cash Quick Tab */}
-        <button
-          type="button"
-          onClick={() => navigate('/petty-cash')}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-teal-50 text-teal-800 border border-teal-300 hover:bg-teal-100 transition-all cursor-pointer"
-        >
-          <Wallet className="w-3.5 h-3.5 text-teal-600" />
-          <span>Petty Cash</span>
-          {pendingPettyCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-teal-600 text-white text-[10px] font-bold">
-              {pendingPettyCount}
-            </span>
-          )}
-        </button>
 
         {/* Glowing Red Bill Missing Tab */}
         <button
