@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { RequestRecord, ApprovalRoute } from '../../types/database';
+import { RequestRecord, ApprovalRoute, isNonCashRequestType } from '../../types/database';
 import { formatINR, formatINRWhole, TYPE_LABELS, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
-import { canHeadChangeRouteToB } from '../../lib/workflow';
+import { canHeadChangeRouteToA, canHeadChangeRouteToB } from '../../lib/workflow';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { ArrowLeftRight, ArrowRight, ShieldAlert, CheckCircle2, Clock } from 'lucide-react';
 
@@ -41,6 +41,11 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const canSwitchToA =
+    currentRoute === 'A'
+      ? true
+      : canHeadChangeRouteToA(request, user);
+
   const canSwitchToB =
     currentRoute === 'B'
       ? true
@@ -49,12 +54,14 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
   const isHighValue =
     type !== 'discount' &&
     type !== 'stock_transfer' &&
-    type !== 'non_cash' &&
+    !isNonCashRequestType(type) &&
+    type !== 'statutory_payment' &&
     request.amount > threshold;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedRoute === currentRoute) return;
+    if (selectedRoute === 'A' && !canSwitchToA) return;
     if (selectedRoute === 'B' && !canSwitchToB) return;
 
     setIsSubmitting(true);
@@ -83,7 +90,7 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
           <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
             <span>{type === 'stock_transfer' ? 'Total MRP:' : 'Amount:'}</span>
             <span className="font-bold text-slate-900 text-sm font-display">
-              {type === 'non_cash' ? 'Non Cash' : formatINR(request.amount)}
+              {isNonCashRequestType(type) ? 'Non-Cash' : formatINR(request.amount)}
             </span>
           </div>
           <div className="text-xs font-semibold text-slate-800 line-clamp-1">
@@ -154,7 +161,7 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
           {/* Route A Option */}
           <label
             className={`flex items-start gap-3 p-3.5 rounded-xl border-2 transition-all ${
-              currentRoute === 'A'
+              currentRoute === 'A' || !canSwitchToA
                 ? 'opacity-60 cursor-not-allowed bg-slate-50 border-slate-200'
                 : selectedRoute === 'A'
                 ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-100 cursor-pointer'
@@ -165,7 +172,7 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
               type="radio"
               name="head-change-route"
               value="A"
-              disabled={currentRoute === 'A'}
+              disabled={currentRoute === 'A' || !canSwitchToA}
               checked={selectedRoute === 'A'}
               onChange={() => setSelectedRoute('A')}
               className="mt-1 text-indigo-600 focus:ring-indigo-500"
@@ -176,7 +183,11 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
                   Route A — Move to &ldquo;To Review&rdquo; (Admin Approval)
                 </span>
                 <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700">
-                  {currentRoute === 'A' ? 'Current Route' : 'Recommended for Escalation'}
+                  {currentRoute === 'A'
+                    ? 'Current Route'
+                    : !canSwitchToA
+                    ? 'Head Approval Only'
+                    : 'Recommended for Escalation'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
@@ -217,6 +228,8 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-600">
                     {type === 'exhibition'
                       ? 'Exhibition requires Route A'
+                      : type === 'audit_report'
+                      ? 'Audit Report requires Route A'
                       : isHighValue
                       ? `Disabled (> ${limit})`
                       : 'Not eligible'}
@@ -229,7 +242,10 @@ export const ChangeRouteModal: React.FC<ChangeRouteModalProps> = ({
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 Places request in your <strong>To Approve (Route B)</strong> queue for direct Head seal & signature
-                {type === 'discount' || type === 'stock_transfer' || type === 'non_cash'
+                {type === 'discount' ||
+                type === 'stock_transfer' ||
+                isNonCashRequestType(type) ||
+                type === 'statutory_payment'
                   ? '.'
                   : ` (allowed up to ${limit}).`}
               </p>

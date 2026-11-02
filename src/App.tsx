@@ -32,6 +32,7 @@ import { ApprovedRequestsPage } from './pages/shared/ApprovedRequestsPage';
 import { ReturnedRequestsPage } from './pages/shared/ReturnedRequestsPage';
 import { BillMissingPage } from './pages/shared/BillMissingPage';
 import { PettyCashPage } from './pages/shared/PettyCashPage';
+import { SpecialRequestTypePage, type SpecialPageRequestType } from './pages/shared/SpecialRequestTypePage';
 
 // Secondary pages are code-split
 const page = <K extends string>(loader: () => Promise<Record<K, React.ComponentType>>, name: K) =>
@@ -129,6 +130,23 @@ const RequirePettyCashTabAccess: React.FC = () => {
     user && role === 'head' && (dirMe?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
   );
   if (!isPettyCashDealer) return <RoleRedirect />;
+  return <Outlet />;
+};
+
+/** Admin, or Head/Clerk/Employee/Regional Head granted access to the given special request type. */
+const RequireSpecialRequestTabAccess: React.FC<{ requestType: SpecialPageRequestType }> = ({
+  requestType,
+}) => {
+  const { user, role } = useAuth();
+  const dir = useDirectory();
+  if (!user || !role) return <RoleRedirect />;
+  if (role === 'admin') return <Outlet />;
+  if (!['head', 'clerk', 'employee', 'regional_head'].includes(role)) {
+    return <RoleRedirect />;
+  }
+  const dirMe = dir.users.find((u) => u.id === user.id);
+  const allowedTypes = dirMe?.allowed_types ?? user.allowed_types ?? [];
+  if (!allowedTypes.includes(requestType)) return <RoleRedirect />;
   return <Outlet />;
 };
 
@@ -232,6 +250,17 @@ export const App: React.FC = () => {
                 {/* Petty Cash tab (Admin + Petty Cash Dealing Department Heads) */}
                 <Route element={<RequirePettyCashTabAccess />}>
                   <Route path="petty-cash" element={<PettyCashPage />} />
+                </Route>
+
+                {/* Agreement, Statutory Payment & Audit Report tabs (Admin + enabled Head/Clerk/Employee/Regional Head) */}
+                <Route element={<RequireSpecialRequestTabAccess requestType="agreement" />}>
+                  <Route path="agreements" element={<SpecialRequestTypePage requestType="agreement" />} />
+                </Route>
+                <Route element={<RequireSpecialRequestTabAccess requestType="statutory_payment" />}>
+                  <Route path="statutory-payments" element={<SpecialRequestTypePage requestType="statutory_payment" />} />
+                </Route>
+                <Route element={<RequireSpecialRequestTabAccess requestType="audit_report" />}>
+                  <Route path="audit-reports" element={<SpecialRequestTypePage requestType="audit_report" />} />
                 </Route>
 
                 {/* Discount report (Admin + Heads with access) */}

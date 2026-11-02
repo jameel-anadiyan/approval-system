@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { RequestRecord, ApprovalRoute } from '../../types/database';
+import {
+  RequestRecord,
+  ApprovalRoute,
+  Profile,
+  isDisbursementAssociated,
+  isNonCashRequestType,
+} from '../../types/database';
 import { formatINR, formatINRWhole, TYPE_LABELS, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
 import { useRequests, ActionVoice } from '../../context/RequestContext';
@@ -8,7 +14,6 @@ import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { ShieldAlert, ArrowRight, UserCheck, Lock, Award, Wallet } from 'lucide-react';
 import { useDirectory, fetchActiveEntryOfficers, isEntryCheckingUser } from '../../lib/directory';
 import { useAuth } from '../../context/AuthContext';
-import { Profile } from '../../types/database';
 
 interface RouteModalProps {
   isOpen: boolean;
@@ -25,7 +30,9 @@ export const RouteModal: React.FC<RouteModalProps> = ({
 }) => {
   const { isBackendConnected } = useAuth();
   const type = typeOf(request);
-  const [selectedRoute, setSelectedRoute] = useState<ApprovalRoute>(type === 'discount' ? 'B' : 'A');
+  const [selectedRoute, setSelectedRoute] = useState<ApprovalRoute>(
+    type === 'discount' || type === 'agreement' || type === 'statutory_payment' ? 'B' : 'A'
+  );
   const [remarks, setRemarks] = useState('');
   const [voice, setVoice] = useState<ActionVoice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -35,15 +42,22 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   const isHighValue = type === 'general' && request.amount > threshold;
   const limit = formatINRWhole(threshold);
   const isRequesterHead = request.requester_role === 'head';
+  const isHeadOnlySpecial = type === 'agreement' || type === 'statutory_payment';
 
-  // Request type decides the level: Discount & Stock Transfer = B (Head), Exhibition = A (Admin).
+  // Request type decides the level:
+  // Agreement & Statutory Payment = always B (Head only, never Admin).
+  // Audit Report & Exhibition = always A (Admin).
+  // Discount & Stock Transfer = B (when not raised by Head).
   const typeLock: ApprovalRoute | null =
-    type === 'exhibition'
+    type === 'exhibition' || type === 'audit_report'
       ? 'A'
-      : (type === 'discount' || type === 'stock_transfer') && !isRequesterHead
+      : isHeadOnlySpecial
         ? 'B'
-        : null;
-  const isRouteBDisabled = isHighValue || isRequesterHead || typeLock === 'A';
+        : (type === 'discount' || type === 'stock_transfer') && !isRequesterHead
+          ? 'B'
+          : null;
+  const isRouteBDisabled =
+    isHighValue || (isRequesterHead && !isHeadOnlySpecial) || typeLock === 'A';
   const isRouteADisabled = typeLock === 'B';
 
   const { users } = useDirectory();
@@ -79,7 +93,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
     };
   }, [isBackendConnected]);
 
-  const needsPayment = type !== 'discount' && type !== 'stock_transfer' && type !== 'non_cash';
+  const needsPayment = isDisbursementAssociated(type);
   const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>(
     request.assigned_entry_user_id || ''
   );
@@ -128,7 +142,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
           <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
             <span>{type === 'stock_transfer' ? 'Total MRP:' : 'Amount:'}</span>
             <span className="font-bold text-slate-900 text-sm font-display">
-              {formatINR(request.amount)}
+              {isNonCashRequestType(type) ? 'Non-Cash' : formatINR(request.amount)}
             </span>
           </div>
           <div className="text-xs font-semibold text-slate-800 line-clamp-1">
@@ -161,7 +175,13 @@ export const RouteModal: React.FC<RouteModalProps> = ({
               {typeLock === 'B'
                 ? type === 'stock_transfer'
                   ? 'Internal stock movement — the Department / Regional Head approves directly. No disbursement or payment step.'
+                  : type === 'agreement'
+                  ? 'Non-cash Agreement — approved directly by the Department Head (Admin approval & disbursement not required).'
+                  : type === 'statutory_payment'
+                  ? 'Statutory Payment — approved directly by the Department Head (Admin approval not required), then sent for disbursement.'
                   : 'needs B-level approval — the Department Head approves directly. No payment step.'
+                : type === 'audit_report'
+                ? 'Audit Report requests are approved exclusively by the Administrator (Route A: Head reviews, then Admin approves).'
                 : 'needs A-level approval — Head reviews, then Admin approves.'}
             </div>
           </div>
@@ -181,7 +201,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
           </div>
         )}
 
-        {isRequesterHead && !isAsset && (
+        {isRequesterHead && !isAsset && !isHeadOnlySpecial && (
           <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-start gap-2.5 text-xs text-purple-900">
             <UserCheck className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
             <div>

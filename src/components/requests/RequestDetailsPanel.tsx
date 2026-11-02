@@ -1,7 +1,7 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
 import { formatINR, formatISTDate, getExhibitionShopName, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
-import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store, Wallet, UserCheck } from 'lucide-react';
+import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store, Wallet, UserCheck, Building2, ShieldCheck } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -85,6 +85,144 @@ export const RequestDetailsPanel: React.FC<{
         <p className="text-[11px] text-slate-500">
           Stamping is applied on <strong>Petty Cash Form Below 1000</strong> along with any attached supporting documents.
         </p>
+      </div>
+    );
+  }
+
+  if (t === 'agreement') {
+    return (
+      <div className="bg-white rounded-2xl border border-violet-200 p-5 sm:p-6 shadow-xs space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-violet-100 pb-3">
+          <h3 className="text-sm font-bold text-violet-950 font-display flex items-center gap-2">
+            <FileCheck className="w-4 h-4 text-violet-600" />
+            <span>Agreement Details</span>
+          </h3>
+          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-violet-50 text-violet-800 border border-violet-200">
+            Non-Cash · Head Approval Only
+          </span>
+        </div>
+        <div className="p-3 bg-violet-50/60 border border-violet-200/70 rounded-xl text-xs text-violet-900 flex items-center gap-2">
+          <FileCheck className="w-4 h-4 text-violet-600 shrink-0" />
+          <span>Non-cash agreement request — no disbursement or payout is required. Approved by Department Head only.</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (t === 'statutory_payment') {
+    const modeLabel =
+      (request.disbursement_mode || d.disbursement_mode || '') === 'bank'
+        ? 'Bank Transfer'
+        : (request.disbursement_mode || d.disbursement_mode || '') === 'cash'
+        ? 'Cash'
+        : 'Standard';
+    return (
+      <div className="bg-white rounded-2xl border border-orange-200 p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-100 pb-3">
+          <h3 className="text-sm font-bold text-orange-950 font-display flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-orange-600" />
+            <span>Statutory Payment Details</span>
+          </h3>
+          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-800 border border-orange-200">
+            Head Approval Only
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="rounded-xl bg-orange-50/70 border border-orange-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-orange-700 font-bold block">Payment Amount</span>
+            <span className="text-sm sm:text-base font-extrabold text-orange-950 font-display mt-0.5 block">
+              {money(d.payment_amount ?? request.amount)}
+            </span>
+          </div>
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Payment Date</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5 block">
+              {d.payment_date ? formatISTDate(d.payment_date, false) : '—'}
+            </span>
+          </div>
+          <div className="rounded-xl bg-rose-50/60 border border-rose-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-rose-700 font-bold block">Due Date</span>
+            <span className="text-xs sm:text-sm font-bold text-rose-950 mt-0.5 block">
+              {d.due_date ? formatISTDate(d.due_date, false) : '—'}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+          <Row label="Payment Mode" value={modeLabel} />
+          <Row label="Department Head" value={request.owner_head_name} />
+        </div>
+
+        {(request.assigned_entry_user_name || onEditEntryAccount) && (
+          <div className="p-3 rounded-xl bg-orange-50/40 border border-orange-200/80 flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <span className="text-[11px] font-semibold text-slate-500 block">Disbursement Entry Account</span>
+              <span className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5 mt-0.5">
+                <UserCheck className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                <span className="truncate">{request.assigned_entry_user_name || 'Not assigned yet'}</span>
+              </span>
+            </div>
+            {onEditEntryAccount && (
+              <button
+                type="button"
+                onClick={onEditEntryAccount}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-orange-50 text-orange-800 border border-orange-300 text-xs font-bold transition-colors cursor-pointer shrink-0"
+              >
+                <Pencil className="w-3 h-3" />
+                <span>{request.assigned_entry_user_id ? 'Edit Entry Account' : 'Assign Entry Account'}</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (t === 'audit_report') {
+    return (
+      <div className="bg-white rounded-2xl border border-cyan-200 p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyan-100 pb-3">
+          <h3 className="text-sm font-bold text-cyan-950 font-display flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-cyan-700" />
+            <span>Audit Report Details</span>
+          </h3>
+          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-cyan-50 text-cyan-900 border border-cyan-300">
+            Non-Cash · Admin Approval Only
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="rounded-xl bg-cyan-50/70 border border-cyan-200 p-3 sm:col-span-1">
+            <span className="text-[10px] uppercase tracking-wider text-cyan-800 font-bold block">
+              Audit Report of Which Firm
+            </span>
+            <span className="text-xs sm:text-sm font-extrabold text-cyan-950 mt-0.5 block break-words">
+              {d.audit_firm || '—'}
+            </span>
+          </div>
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">
+              Audit Period From
+            </span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5 block">
+              {d.audit_from_date ? formatISTDate(d.audit_from_date, false) : '—'}
+            </span>
+          </div>
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">
+              Audit Period To
+            </span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5 block">
+              {d.audit_to_date ? formatISTDate(d.audit_to_date, false) : '—'}
+            </span>
+          </div>
+        </div>
+
+        <div className="p-3 bg-cyan-50/50 border border-cyan-200/70 rounded-xl text-xs text-cyan-900 flex items-center gap-2">
+          <Building2 className="w-4 h-4 text-cyan-700 shrink-0" />
+          <span>Non-cash audit report — no disbursement step. Approved exclusively by the Administrator.</span>
+        </div>
       </div>
     );
   }

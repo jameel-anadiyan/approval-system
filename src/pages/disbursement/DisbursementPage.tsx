@@ -8,7 +8,7 @@ import { AddDisbursementEntryModal } from '../../components/portals/AddDisbursem
 import { EditDisbursementEntryModal } from '../../components/portals/EditDisbursementEntryModal';
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
-import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, entriesTotal, entryAvailable } from '../../types/database';
+import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, entriesTotal, entryAvailable, isDisbursementAssociated } from '../../types/database';
 import { formatINR, formatISTDate, typeOf, isEntryCheckingUser } from '../../lib/formatters';
 import {
   Banknote,
@@ -122,10 +122,8 @@ export const DisbursementPage: React.FC = () => {
     if (!res.success) setNotice(res.error || 'Download failed');
   };
 
-  // Discount approvals, Non-Cash, and Stock Transfers have no payment step, so they never reach Disbursement.
-  const payable = requests.filter(
-    (r) => typeOf(r) !== 'discount' && typeOf(r) !== 'stock_transfer' && typeOf(r) !== 'non_cash'
-  );
+  // Non-disbursement requests (Discount, Non-Cash, Agreement, Audit Report, Stock Transfer) have no payment step.
+  const payable = requests.filter((r) => isDisbursementAssociated(typeOf(r)));
 
   // Entry Only user only receives requests assigned to them (or unassigned requests)
   const entryFilteredPayable = isEntryOnly
@@ -197,7 +195,7 @@ export const DisbursementPage: React.FC = () => {
 
   // Total entries waiting for Entry Approver review across payable requests
   const pendingApproverEntriesCount = requests.reduce((cnt, r) => {
-    if (typeOf(r) === 'discount' || typeOf(r) === 'stock_transfer' || typeOf(r) === 'non_cash') return cnt;
+    if (!isDisbursementAssociated(typeOf(r))) return cnt;
     const pendingInReq = (r.disbursement_entries || []).filter(
       (e) =>
         e.status === 'pending_approval' ||
@@ -754,7 +752,7 @@ export const DisbursementPage: React.FC = () => {
                             {req.approval_no || req.request_no}
                           </span>
                           <TypeBadge type={typeOf(req)} />
-                          {typeOf(req) !== 'discount' && typeOf(req) !== 'non_cash' && typeOf(req) !== 'stock_transfer' && (
+                          {isDisbursementAssociated(typeOf(req)) && (
                             <div className="flex items-center gap-1.5 text-xs text-sky-800 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200">
                               <Wallet className="w-3 h-3 text-sky-600" />
                               <span>Entry: <strong>{req.assigned_entry_user_name || <span className="text-amber-700 italic font-medium">Not assigned yet</span>}</strong></span>
@@ -806,7 +804,7 @@ export const DisbursementPage: React.FC = () => {
                         </h3>
 
                         {/* Disbursement Mode & Bank Account Details */}
-                        {typeOf(req) !== 'discount' && typeOf(req) !== 'non_cash' && typeOf(req) !== 'stock_transfer' && (
+                        {isDisbursementAssociated(typeOf(req)) && (
                           <div className="mt-2 flex items-center gap-2 flex-wrap">
                             <div
                               className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border ${

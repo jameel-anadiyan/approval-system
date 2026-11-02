@@ -31,6 +31,9 @@ import {
   Truck,
   PackageCheck,
   PackageSearch,
+  FileSignature,
+  Landmark,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -45,7 +48,7 @@ import {
   isOwningDepartmentHead,
 } from '../../lib/workflow';
 import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
-import { entryPayable, entryOutstanding, entryAvailable } from '../../types/database';
+import { entryPayable, entryOutstanding, entryAvailable, isDisbursementAssociated, type RequestType } from '../../types/database';
 import { isEntryCheckingUser, typeOf } from '../../lib/formatters';
 import { FileWarning } from 'lucide-react';
 
@@ -77,7 +80,10 @@ export const Navigation: React.FC = () => {
   const regionalToForwardCount = requests.filter((r) => isMyRegionalRequest(r, user)).length;
 
   const headToApproveCount = requests.filter(
-    (r) => r.status === 'pending_head_approval' && isOwningDepartmentHead(r, user)
+    (r) =>
+      r.status === 'pending_head_approval' &&
+      typeOf(r) !== 'audit_report' &&
+      isOwningDepartmentHead(r, user)
   ).length;
 
   const headToReviewCount = requests.filter(
@@ -112,7 +118,7 @@ export const Navigation: React.FC = () => {
   const isPaymentOnlyUser = role === 'disbursement' && user?.disbursement_type === 'payment_only';
 
   const disbNewEntryCount = requests.filter((r) => {
-    if (r.status !== 'approved' || r.request_type === 'discount' || r.request_type === 'non_cash' || r.request_type === 'stock_transfer') {
+    if (r.status !== 'approved' || !isDisbursementAssociated(r.request_type)) {
       return false;
     }
     if (isEntryOnlyUser) {
@@ -123,7 +129,7 @@ export const Navigation: React.FC = () => {
   }).length;
 
   const disbAwaitingCount = requests.filter((r) => {
-    if (r.status !== 'approved' || r.request_type === 'discount' || r.request_type === 'non_cash' || r.request_type === 'stock_transfer') {
+    if (r.status !== 'approved' || !isDisbursementAssociated(r.request_type)) {
       return false;
     }
     if (isEntryOnlyUser) {
@@ -203,10 +209,96 @@ export const Navigation: React.FC = () => {
     isPettyCashTab: true,
   };
 
+  const dirMe = users.find((u) => u.id === user?.id);
+  const effectiveAllowedTypes: RequestType[] =
+    (dirMe?.allowed_types ?? user?.allowed_types ?? []) as RequestType[];
+
+  const hasAgreementTab =
+    role === 'admin' ||
+    (['head', 'clerk', 'employee', 'regional_head'].includes(role) &&
+      effectiveAllowedTypes.includes('agreement'));
+  const hasStatutoryTab =
+    role === 'admin' ||
+    (['head', 'clerk', 'employee', 'regional_head'].includes(role) &&
+      effectiveAllowedTypes.includes('statutory_payment'));
+  const hasAuditReportTab =
+    role === 'admin' ||
+    (['head', 'clerk', 'employee', 'regional_head'].includes(role) &&
+      effectiveAllowedTypes.includes('audit_report'));
+
+  const getSpecialBadgeCount = (t: 'agreement' | 'statutory_payment' | 'audit_report'): number => {
+    if (!user) return 0;
+    const list = requests.filter((r) => typeOf(r) === t);
+    if (role === 'admin') {
+      if (t !== 'audit_report') return 0;
+      return list.filter(
+        (r) =>
+          r.status === 'pending_admin_approval' ||
+          (r.status === 'approving' &&
+            (!r.approving_started_at ||
+              Date.now() - new Date(r.approving_started_at).getTime() > 60000))
+      ).length;
+    }
+    if (role === 'head') {
+      if (t === 'audit_report') {
+        return list.filter(
+          (r) => r.status === 'pending_head_review' && isOwningDepartmentHead(r, user)
+        ).length;
+      }
+      return list.filter(
+        (r) => r.status === 'pending_head_approval' && isOwningDepartmentHead(r, user)
+      ).length;
+    }
+    if (role === 'clerk') {
+      return list.filter((r) => isMyRoutingRequest(r, user)).length;
+    }
+    if (role === 'regional_head') {
+      return list.filter((r) => isMyRegionalRequest(r, user)).length;
+    }
+    return list.filter((r) => r.requester_id === user.id && r.status === 'returned').length;
+  };
+
+  const specialNavItems: NavItem[] = [
+    ...(hasAgreementTab
+      ? [
+          {
+            label: 'Agreements',
+            path: '/agreements',
+            icon: FileSignature,
+            badge: getSpecialBadgeCount('agreement'),
+            badgeVariant: 'teal' as const,
+          },
+        ]
+      : []),
+    ...(hasStatutoryTab
+      ? [
+          {
+            label: 'Statutory Payments',
+            path: '/statutory-payments',
+            icon: Landmark,
+            badge: getSpecialBadgeCount('statutory_payment'),
+            badgeVariant: 'teal' as const,
+          },
+        ]
+      : []),
+    ...(hasAuditReportTab
+      ? [
+          {
+            label: 'Audit Reports',
+            path: '/audit-reports',
+            icon: ClipboardCheck,
+            badge: getSpecialBadgeCount('audit_report'),
+            badgeVariant: 'amber' as const,
+          },
+        ]
+      : []),
+  ];
+
   switch (role) {
     case 'employee':
       mainNavItems = [
         { label: 'My Requests', path: '/my', icon: FileText },
+        ...specialNavItems,
         billMissingNavItem,
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
@@ -222,6 +314,7 @@ export const Navigation: React.FC = () => {
     case 'regional_head':
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
+        ...specialNavItems,
         billMissingNavItem,
         { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
         ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
@@ -239,6 +332,7 @@ export const Navigation: React.FC = () => {
     case 'clerk':
       mainNavItems = [
         { label: 'To Route', path: '/clerk', icon: Inbox, badge: clerkToRouteCount },
+        ...specialNavItems,
         billMissingNavItem,
         { label: 'Department', path: '/clerk/department', icon: Building2 },
         ...(hasExhibitionAccess ? [{ label: 'Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
@@ -257,6 +351,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
         ...(isPettyCashDealerHead ? [pettyCashNavItem] : []),
+        ...specialNavItems,
         billMissingNavItem,
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
         ...(user?.can_view_exhibition_waitlist
@@ -284,6 +379,7 @@ export const Navigation: React.FC = () => {
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
         pettyCashNavItem,
+        ...specialNavItems,
         billMissingNavItem,
         { label: 'Regions', path: '/admin/regions', icon: MapPin },
         { label: 'Regional Heads', path: '/admin/regional-heads', icon: Globe },

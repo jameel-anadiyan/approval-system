@@ -97,11 +97,12 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
     fileName.toLowerCase().endsWith('.pdf');
   const isImage =
     (file.mimeType &&
-      (file.mimeType.includes('image') ||
+      (file.mimeType.startsWith('image/') ||
         file.mimeType.includes('jpeg') ||
         file.mimeType.includes('png') ||
         file.mimeType.includes('webp'))) ||
-    fileName.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/i);
+    Boolean(fileName.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|bmp|svg|tif|tiff|avif|ico|heic|heif)$/i));
+  const fileExt = (fileName.split('.').pop() || '').toUpperCase();
 
   const [numPages, setNumPages] = useState<number | null>(file.pageCount || null);
   const [pdfError, setPdfError] = useState<boolean>(false);
@@ -400,12 +401,31 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
             />
           </div>
         ) : (
-          <div className="py-12 text-center text-slate-400">
-            <FileText className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-            <p className="text-xs font-semibold">{fileName}</p>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Direct preview is not available for this format. Please download the file to inspect it.
+          <div className="w-full max-w-xl my-6 bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center shadow-xl">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center mx-auto mb-3 text-indigo-400">
+              <FileText className="w-7 h-7" />
+            </div>
+            {fileExt && (
+              <span className="inline-block text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-800 text-indigo-300 border border-slate-700 mb-2">
+                {fileExt} Document
+              </span>
+            )}
+            <p className="text-sm font-bold text-slate-100 break-all">{fileName}</p>
+            {file.sizeBytes ? (
+              <p className="text-xs text-slate-400 mt-1">{formatFileSize(file.sizeBytes)}</p>
+            ) : null}
+            <p className="text-xs text-slate-400 mt-2">
+              Excel, Word, CSV, and Office documents can be downloaded directly to open in full fidelity.
             </p>
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={downloading || (!resolvedUrl && !file.storagePath)}
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span>Download {fileExt || 'File'}</span>
+            </button>
           </div>
         )}
       </div>

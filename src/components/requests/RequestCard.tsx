@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RequestRecord, isDisbursementAssociated } from '../../types/database';
+import { RequestRecord, isDisbursementAssociated, isNonCashRequestType } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
 import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
@@ -247,8 +247,8 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             {rType === 'discount' ? 'Discount' : rType === 'stock_transfer' ? 'Total MRP' : 'Amount'}
           </div>
           <div className="font-bold text-slate-900 text-base font-display">
-            {rType === 'non_cash' ? (
-              <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Non Cash</span>
+            {isNonCashRequestType(rType) ? (
+              <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Non-Cash</span>
             ) : (
               formatINR(request.amount)
             )}

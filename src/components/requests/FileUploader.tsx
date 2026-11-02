@@ -1,15 +1,85 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloud, Camera, FileText, Image as ImageIcon, Trash2, Eye } from 'lucide-react';
+import { UploadCloud, Camera, FileText, FileSpreadsheet, Image as ImageIcon, Trash2, Eye, Download } from 'lucide-react';
 import { RequestFile } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
-import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
+import { DocumentPreviewModal } from './DocumentPreviewModal';
 import { useDocumentMouseFollow } from './ZoomMultiplierControls';
+
+const EXT_TO_MIME: Record<string, string> = {
+  pdf: 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  avif: 'image/avif',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  ico: 'image/x-icon',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  csv: 'text/csv',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  odt: 'application/vnd.oasis.opendocument.text',
+  rtf: 'application/rtf',
+  txt: 'text/plain',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
+const EXTENDED_ACCEPT =
+  '.pdf,.xls,.xlsx,.xlsm,.csv,.ods,.doc,.docx,.odt,.rtf,.txt,.ppt,.pptx,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
+
+function resolveMimeType(file: File): string {
+  const raw = (file.type || '').trim();
+  if (raw && raw !== 'application/octet-stream') return raw;
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  return EXT_TO_MIME[ext] || raw || 'application/octet-stream';
+}
+
+function classifyDocKind(mime: string, name: string): 'pdf' | 'image' | 'spreadsheet' | 'word' | 'other' {
+  const m = (mime || '').toLowerCase();
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (m.includes('pdf') || ext === 'pdf') return 'pdf';
+  if (
+    m.startsWith('image/') ||
+    ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tif', 'tiff', 'avif', 'heic', 'heif', 'ico'].includes(ext)
+  ) {
+    return 'image';
+  }
+  if (
+    m.includes('spreadsheet') ||
+    m.includes('ms-excel') ||
+    m === 'text/csv' ||
+    ['xls', 'xlsx', 'xlsm', 'csv', 'ods'].includes(ext)
+  ) {
+    return 'spreadsheet';
+  }
+  if (
+    m.includes('wordprocessingml') ||
+    m.includes('msword') ||
+    m.includes('opendocument.text') ||
+    ['doc', 'docx', 'odt', 'rtf', 'txt'].includes(ext)
+  ) {
+    return 'word';
+  }
+  return 'other';
+}
 
 interface FileUploaderProps {
   files: RequestFile[];
   onAddFiles: (newFiles: RequestFile[]) => void;
   onRemoveFile: (fileId: string) => void;
   disabled?: boolean;
+  /** Allows Excel, Word, CSV, PDF, and any image file (used for Agreement, Statutory Payment, Audit Report). */
+  allowExtendedDocs?: boolean;
 }
 
 export const FileUploader: React.FC<FileUploaderProps> = ({
@@ -17,6 +87,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   onAddFiles,
   onRemoveFile,
   disabled = false,
+  allowExtendedDocs = false,
 }) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [inlinePreviewIndex, setInlinePreviewIndex] = useState(0);
@@ -27,7 +98,6 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   const {
     containerRef: uploaderCanvasRef,
     mouseFollowEnabled,
-    setMouseFollowEnabled,
     handleMouseMove,
   } = useDocumentMouseFollow({ multiplier: inlineMultiplier });
 
@@ -35,19 +105,31 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     if (!incomingFiles || incomingFiles.length === 0) return;
 
     const validFiles: RequestFile[] = [];
+    const maxBytes = (allowExtendedDocs ? 25 : 15) * 1024 * 1024;
 
     Array.from(incomingFiles).forEach((file) => {
-      // Validate file size: 15 MB cap per build plan
-      if (file.size > 15 * 1024 * 1024) {
-        alert(`File ${file.name} is too large. Maximum size is 15 MB.`);
+      if (file.size > maxBytes) {
+        alert(`File ${file.name} is too large. Maximum size is ${allowExtendedDocs ? '25 MB' : '15 MB'}.`);
         return;
       }
 
-      // Validate allowed formats
-      const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
-      if (!allowed.includes(file.type)) {
-        alert(`Format ${file.type} is not supported. Please upload PDF, JPG, or PNG.`);
-        return;
+      const resolvedMime = resolveMimeType(file);
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+
+      if (allowExtendedDocs) {
+        const isAllowedExt = Boolean(EXT_TO_MIME[ext]) || resolvedMime.startsWith('image/');
+        if (!isAllowedExt) {
+          alert(
+            `File "${file.name}" is not supported. Upload Excel (.xls/.xlsx/.csv), Word (.doc/.docx), PDF, or any image file.`
+          );
+          return;
+        }
+      } else {
+        const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+        if (!allowed.includes(resolvedMime)) {
+          alert(`Format ${file.type || ext} is not supported. Please upload PDF, JPG, or PNG.`);
+          return;
+        }
       }
 
       const tempUrl = URL.createObjectURL(file);
@@ -58,9 +140,9 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         kind: 'document',
         storage_path: `uploads/${file.name}`,
         original_name: file.name,
-        mime_type: file.type,
+        mime_type: resolvedMime,
         size_bytes: file.size,
-        page_count: file.type === 'application/pdf' ? 1 : 1,
+        page_count: resolvedMime === 'application/pdf' ? 1 : null,
         duration_sec: null,
         sha256: null,
         created_at: new Date().toISOString(),
@@ -81,9 +163,12 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+        accept={allowExtendedDocs ? EXTENDED_ACCEPT : '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png'}
         className="hidden"
-        onChange={(e) => handleFiles(e.target.files)}
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          e.target.value = '';
+        }}
         disabled={disabled}
       />
       <input
@@ -92,7 +177,10 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={(e) => handleFiles(e.target.files)}
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          e.target.value = '';
+        }}
         disabled={disabled}
       />
 
@@ -109,10 +197,12 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
             <UploadCloud className="w-5 h-5" />
           </div>
           <span className="text-xs font-bold text-slate-800">
-            Upload PDF or Photo
+            {allowExtendedDocs ? 'Upload Excel, Word, PDF or Image' : 'Upload PDF or Photo'}
           </span>
           <span className="text-[10px] text-slate-500 mt-0.5">
-            PDF, JPG, PNG up to 15 MB
+            {allowExtendedDocs
+              ? 'Excel, Word, CSV, PDF, PNG, JPG & any Image up to 25 MB'
+              : 'PDF, JPG, PNG up to 15 MB'}
           </span>
         </button>
 
@@ -153,7 +243,10 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
           </div>
           <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
             {files.map((file, idx) => {
-              const isPdf = file.mime_type.includes('pdf');
+              const kind = classifyDocKind(file.mime_type, file.original_name);
+              const isPdf = kind === 'pdf';
+              const isSpreadsheet = kind === 'spreadsheet';
+              const isWord = kind === 'word';
               return (
                 <div
                   key={file.id}
@@ -164,11 +257,17 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                       className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
                         isPdf
                           ? 'bg-rose-50 text-rose-600 border border-rose-200'
-                          : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                          : isSpreadsheet
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : isWord
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                          : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
                       }`}
                     >
-                      {isPdf ? (
+                      {isPdf || isWord || kind === 'other' ? (
                         <FileText className="w-4 h-4" />
+                      ) : isSpreadsheet ? (
+                        <FileSpreadsheet className="w-4 h-4" />
                       ) : (
                         <ImageIcon className="w-4 h-4" />
                       )}
@@ -219,7 +318,9 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
           {(() => {
             const currentInline = files[inlinePreviewIndex] || files[0];
             if (!currentInline) return null;
-            const isPdf = currentInline.mime_type.includes('pdf');
+            const inlineKind = classifyDocKind(currentInline.mime_type, currentInline.original_name);
+            const isPdf = inlineKind === 'pdf';
+            const isImage = inlineKind === 'image';
             const previewUrl = currentInline.public_url || currentInline.storage_path;
             return (
               <div className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-sm mt-3">
@@ -227,10 +328,22 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                   <div className="flex items-center gap-2 min-w-0">
                     <div
                       className={`w-6 h-6 rounded flex items-center justify-center shrink-0 ${
-                        isPdf ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                        isPdf
+                          ? 'bg-rose-500/20 text-rose-400'
+                          : inlineKind === 'spreadsheet'
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : inlineKind === 'word'
+                          ? 'bg-blue-500/20 text-blue-400'
+                          : 'bg-indigo-500/20 text-indigo-400'
                       }`}
                     >
-                      {isPdf ? <FileText className="w-3.5 h-3.5" /> : <ImageIcon className="w-3.5 h-3.5" />}
+                      {inlineKind === 'spreadsheet' ? (
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                      ) : isImage ? (
+                        <ImageIcon className="w-3.5 h-3.5" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5" />
+                      )}
                     </div>
                     <span className="text-xs font-bold text-slate-200 truncate max-w-[220px]" title={currentInline.original_name}>
                       {currentInline.original_name}
@@ -241,7 +354,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {previewUrl && (
+                    {previewUrl && (isPdf || isImage) && (
                       <div className="flex items-center bg-slate-800 rounded-md p-0.5 border border-slate-700 gap-0.5">
                         {[1, 2, 3].map((m) => (
                           <button
@@ -321,7 +434,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                         />
                       )}
                     </div>
-                  ) : previewUrl ? (
+                  ) : isImage && previewUrl ? (
                     <div
                       style={{
                         minWidth: inlineMultiplier > 1 ? `${inlineMultiplier * 100}%` : '100%',
@@ -339,8 +452,35 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                       />
                     </div>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                      Preview ready
+                    <div className="h-full w-full flex flex-col items-center justify-center text-center p-6 gap-2.5">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-indigo-400">
+                        {inlineKind === 'spreadsheet' ? (
+                          <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
+                        ) : (
+                          <FileText className="w-6 h-6 text-blue-400" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-200">{currentInline.original_name}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {inlineKind === 'spreadsheet'
+                            ? 'Excel / Spreadsheet Attachment'
+                            : inlineKind === 'word'
+                            ? 'Word / Document Attachment'
+                            : 'Attached File'}{' '}
+                          • {formatFileSize(currentInline.size_bytes)}
+                        </p>
+                      </div>
+                      {previewUrl && (
+                        <a
+                          href={previewUrl}
+                          download={currentInline.original_name}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download File</span>
+                        </a>
+                      )}
                     </div>
                   )}
                 </div>

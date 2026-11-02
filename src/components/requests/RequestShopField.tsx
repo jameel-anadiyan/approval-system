@@ -6,7 +6,7 @@ import { useDirectory } from '../../lib/directory';
 import type { RequestShopOption, RequestType } from '../../types/database';
 
 /** Request types where the requester tags the request with a shop. */
-export const SHOP_PICK_TYPES: RequestType[] = ['general', 'non_cash'];
+export const SHOP_PICK_TYPES: RequestType[] = ['general', 'non_cash', 'agreement', 'statutory_payment', 'audit_report'];
 export const needsShopPick = (t: RequestType) => SHOP_PICK_TYPES.includes(t);
 
 export interface RequestShopsState {

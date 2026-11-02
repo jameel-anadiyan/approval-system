@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, formatINRWhole, typeOf } from '../../lib/formatters';
+import { isDisbursementAssociated } from '../../types/database';
 import { useDirectory } from '../../lib/directory';
 import {
   ShieldCheck,
@@ -36,9 +37,9 @@ export const AdminDashboardPage: React.FC = () => {
   );
   const pettyCashPendingCount = pendingApprovals.filter((r) => typeOf(r) === 'petty_cash').length;
 
-  // Total Disbursed / Approved (discount values and stock transfers are not payouts)
+  // Total Disbursed / Approved (non-disbursement requests are not payouts)
   const totalApproved = requests
-    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount' && typeOf(r) !== 'stock_transfer' && typeOf(r) !== 'non_cash')
+    .filter((r) => (r.status === 'approved' || r.status === 'paid') && isDisbursementAssociated(typeOf(r)))
     .reduce((sum, r) => sum + r.amount, 0);
 
   // High Value requests (threshold applies to General requests)

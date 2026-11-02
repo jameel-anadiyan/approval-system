@@ -15,6 +15,7 @@ import {
   UploadCloud,
   CheckCircle2,
   AlertCircle,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { RequestFile } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
@@ -31,6 +32,7 @@ interface DocumentViewerProps {
   requestId?: string;
   canAddDocs?: boolean;
   canDeleteDocs?: boolean;
+  allowExtendedDocs?: boolean;
 }
 
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({
@@ -39,6 +41,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   requestId,
   canAddDocs = false,
   canDeleteDocs = false,
+  allowExtendedDocs = false,
 }) => {
   const { isBackendConnected, user } = useAuth();
   const { addExtraDocuments, removeExtraDocument } = useRequests();
@@ -72,12 +75,30 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const selected = Array.from(e.target.files);
-      const valid = selected.filter((f) =>
-        ['application/pdf', 'image/jpeg', 'image/png'].includes(f.type) ||
-        f.name.toLowerCase().match(/\.(pdf|jpe?g|png)$/i)
-      );
+      const valid = selected.filter((f) => {
+        if (allowExtendedDocs) {
+          return (
+            f.type === 'application/pdf' ||
+            f.type.startsWith('image/') ||
+            f.type.includes('spreadsheet') ||
+            f.type.includes('excel') ||
+            f.type.includes('word') ||
+            f.type === 'text/csv' ||
+            f.type === 'text/plain' ||
+            Boolean(f.name.toLowerCase().match(/\.(pdf|jpe?g|png|webp|gif|bmp|svg|heic|heif|tiff?|xls|xlsx|csv|doc|docx|rtf|txt)$/i))
+          );
+        }
+        return (
+          ['application/pdf', 'image/jpeg', 'image/png'].includes(f.type) ||
+          Boolean(f.name.toLowerCase().match(/\.(pdf|jpe?g|png)$/i))
+        );
+      });
       if (valid.length < selected.length) {
-        setUploadError('Some files were skipped. Only PDF, JPG, and PNG are supported.');
+        setUploadError(
+          allowExtendedDocs
+            ? 'Some files were skipped. Supported formats: PDF, Excel, Word, CSV, and Image files.'
+            : 'Some files were skipped. Only PDF, JPG, and PNG are supported.'
+        );
       } else {
         setUploadError(null);
       }
@@ -183,7 +204,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,image/png,image/jpeg"
+                accept={
+                  allowExtendedDocs
+                    ? '.pdf,.xls,.xlsx,.csv,.doc,.docx,.rtf,.txt,image/*'
+                    : '.pdf,image/png,image/jpeg'
+                }
                 className="hidden"
                 onChange={handleFileSelect}
               />
@@ -193,7 +218,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               <div className="text-xs text-slate-700">
                 <span className="font-bold text-purple-700">Click to choose files</span> or drag and drop
               </div>
-              <p className="text-[11px] text-slate-400">PDF, JPG, PNG up to 25MB each</p>
+              <p className="text-[11px] text-slate-400">
+                {allowExtendedDocs
+                  ? 'PDF, Excel, Word, CSV, PNG, JPG & any image up to 25MB each'
+                  : 'PDF, JPG, PNG up to 25MB each'}
+              </p>
             </div>
 
             {/* Selected Files List */}
@@ -316,6 +345,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     );
   };
 
+  const signed = useSignedUrl('request-files', activeFile?.storage_path, isBackendConnected);
+
   if (documentFiles.length === 0) {
     if (canAddDocs && requestId) {
       return (
@@ -351,14 +382,21 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     );
   }
 
-  const signed = useSignedUrl('request-files', activeFile?.storage_path, isBackendConnected);
   const previewUrl = isBackendConnected ? signed.url : activeFile.public_url;
   const isPdf =
     activeFile.mime_type.includes('pdf') ||
     activeFile.original_name.toLowerCase().endsWith('.pdf');
   const isImage =
     activeFile.mime_type.includes('image') ||
-    activeFile.original_name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/i);
+    Boolean(activeFile.original_name.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|bmp|svg|heic|heif|tiff?)$/i));
+  const isSpreadsheet =
+    activeFile.mime_type.includes('spreadsheet') ||
+    activeFile.mime_type.includes('excel') ||
+    activeFile.mime_type === 'text/csv' ||
+    Boolean(activeFile.original_name.toLowerCase().match(/\.(xls|xlsx|csv)$/i));
+  const isWordDoc =
+    activeFile.mime_type.includes('word') ||
+    Boolean(activeFile.original_name.toLowerCase().match(/\.(doc|docx|rtf)$/i));
 
   const canDeleteActiveFile = Boolean(
     requestId &&
@@ -387,17 +425,27 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     setDownloading(false);
   };
 
-  const previewItems: DocumentPreviewItem[] = documentFiles.map((f) => ({
-    id: f.id,
-    name: f.original_name,
-    storagePath: f.storage_path,
-    publicUrl: f.public_url,
-    bucket: 'request-files',
-    mimeType: f.mime_type,
-    sizeBytes: f.size_bytes,
-    pageCount: f.page_count,
-    badge: f.mime_type.includes('pdf') ? 'PDF' : 'Photo',
-  }));
+  const previewItems: DocumentPreviewItem[] = documentFiles.map((f) => {
+    const lower = f.original_name.toLowerCase();
+    const badge = f.mime_type.includes('pdf') || lower.endsWith('.pdf')
+      ? 'PDF'
+      : lower.match(/\.(xls|xlsx|csv)$/i)
+      ? 'Excel / CSV'
+      : lower.match(/\.(doc|docx|rtf)$/i)
+      ? 'Word'
+      : 'Image';
+    return {
+      id: f.id,
+      name: f.original_name,
+      storagePath: f.storage_path,
+      publicUrl: f.public_url,
+      bucket: 'request-files',
+      mimeType: f.mime_type,
+      sizeBytes: f.size_bytes,
+      pageCount: f.page_count,
+      badge,
+    };
+  });
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-xs transition-all">
@@ -651,9 +699,47 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : (
-          <div className="h-full min-h-[350px] flex flex-col items-center justify-center text-center text-xs text-slate-400 p-4">
-            <FileText className="w-8 h-8 text-slate-600 mb-2" />
-            <p>Document preview ready</p>
+          <div className="h-full min-h-[350px] flex flex-col items-center justify-center text-center text-xs text-slate-300 p-6">
+            <div className="max-w-sm w-full rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-4 shadow-xl">
+              <div
+                className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto border ${
+                  isSpreadsheet
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    : isWordDoc
+                    ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                    : 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                }`}
+              >
+                {isSpreadsheet ? (
+                  <FileSpreadsheet className="w-7 h-7" />
+                ) : (
+                  <FileText className="w-7 h-7" />
+                )}
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-white break-all">{activeFile.original_name}</p>
+                <p className="text-[11px] text-slate-400">
+                  {isSpreadsheet
+                    ? 'Excel / Spreadsheet Document'
+                    : isWordDoc
+                    ? 'Word Document'
+                    : 'Supporting Attachment'}{' '}
+                  • {formatFileSize(activeFile.size_bytes)}
+                </p>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Office &amp; spreadsheet documents are downloaded directly so formulas, sheets, and formatting stay intact.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleDownload(activeFile)}
+                disabled={downloading}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                <span>Download {isSpreadsheet ? 'Spreadsheet' : isWordDoc ? 'Word Document' : 'File'}</span>
+              </button>
+            </div>
           </div>
         )}
       </div>

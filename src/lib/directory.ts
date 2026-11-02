@@ -84,6 +84,25 @@ export interface AccessInput {
 /** Offline sandbox store for disbursement persons (live mode keeps them in the database). */
 const mockPersons: DisbursementPerson[] = [];
 
+/** Legacy request types guaranteed to be accepted by older deployed versions of admin-users Edge Function. */
+const LEGACY_EDGE_TYPES: RequestType[] = [
+  'general',
+  'discount',
+  'exhibition',
+  'asset',
+  'asset_below_20k',
+  'non_cash',
+  'stock_transfer',
+];
+
+let ayishaDirectoryBootstrapped = false;
+
+function ensureLegacySafeTypes(types?: RequestType[]): RequestType[] | undefined {
+  if (!types || types.length === 0) return types;
+  if (types.some((t) => LEGACY_EDGE_TYPES.includes(t))) return types;
+  return ['general', ...types];
+}
+
 const toAccountObjs = (ids: string[] = [], userList: Profile[] = []): ConnectedEntryAccount[] =>
   ids.map((id) => ({
     entry_user_id: id,
@@ -104,6 +123,14 @@ export function useDirectory() {
     setLoading(true);
     try {
       if (isBackendConnected && user) {
+        if (!ayishaDirectoryBootstrapped) {
+          ayishaDirectoryBootstrapped = true;
+          try {
+            await supabase.rpc('ensure_ayisha_special_requests_enabled');
+          } catch {
+            // ignore if migration 0080 not yet applied
+          }
+        }
         const [d, s, p, c, rRes, pcRes] = await Promise.all([
           supabase.from('departments').select('*').order('name'),
           supabase.from('shops').select('*').order('name'),
@@ -202,6 +229,14 @@ export function useDirectory() {
             connected_entry_accounts: mappingByPayment[u.id] ? toAccountObjs(mappingByPayment[u.id]) : (u.connected_entry_accounts || []),
           }));
           setUsers(merged);
+          const freshMe = merged.find((u) => u.id === user.id);
+          if (
+            freshMe &&
+            (JSON.stringify(freshMe.allowed_types || []) !== JSON.stringify(user.allowed_types || []) ||
+              freshMe.is_petty_cash_dealer !== user.is_petty_cash_dealer)
+          ) {
+            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: freshMe }));
+          }
         }
 
         // Ensure active Entry Only disbursement accounts are included for Employee, Regional Head, Clerk & Head selection
@@ -305,14 +340,61 @@ export function useDirectory() {
     return { success: true };
   };
 
+  const syncUserAllowedTypes = async (userId: string, allowedTypes: RequestType[]): Promise<Result> => {
+    const cleanTypes: RequestType[] = allowedTypes.length > 0 ? allowedTypes : ['general'];
+    const { error: rpcErr } = await supabase.rpc('set_user_allowed_types', {
+      p_user_id: userId,
+      p_allowed_types: cleanTypes,
+    });
+    if (!rpcErr) return { success: true };
+
+    const msg = rpcErr.message || '';
+    if (
+      msg.includes('does not exist') ||
+      msg.includes('schema cache') ||
+      msg.includes('not found')
+    ) {
+      const { error: directErr } = await supabase
+        .from('profiles')
+        .update({ allowed_types: cleanTypes, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+      if (!directErr) return { success: true };
+      const hasSpecial = cleanTypes.some(
+        (t) => t === 'agreement' || t === 'statutory_payment' || t === 'audit_report'
+      );
+      if (hasSpecial) {
+        return {
+          success: false,
+          error:
+            'Database migration required: please run supabase/manual/apply_0079_agreement_statutory_audit_requests.sql in Supabase SQL Editor.',
+        };
+      }
+      return { success: true };
+    }
+    return { success: false, error: errMsg(rpcErr) };
+  };
+
   const createUser = async (input: NewUserInput): Promise<Result> => {
     if (live) {
       const { account_persons: accountPersons, ...createInput } = input;
+      const edgeCreateInput = {
+        ...createInput,
+        allowed_types: ensureLegacySafeTypes(createInput.allowed_types),
+      };
       const { data, error } = await invokeEdgeFunction<{ id: string; username: string }>('admin-users', {
         action: 'create',
-        ...createInput,
+        ...edgeCreateInput,
       });
       if (error) return { success: false, error: errMsg(error) };
+
+      if (
+        data?.id &&
+        ['employee', 'clerk', 'head', 'regional_head'].includes(input.role) &&
+        input.allowed_types &&
+        input.allowed_types.length > 0
+      ) {
+        await syncUserAllowedTypes(data.id, input.allowed_types);
+      }
 
       // Ensure region_id is assigned directly via RPC or direct update
       if (input.region_id && data?.id) {
@@ -468,33 +550,60 @@ export function useDirectory() {
         );
       }
 
-      // 5. Invoke Edge Function for shop_ids, categories, heads
-      const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...access });
+      // 5. Invoke Edge Function for shop_ids, categories, heads (with legacy-safe allowed_types fallback)
+      const edgeAccess = {
+        ...access,
+        allowed_types: ensureLegacySafeTypes(access.allowed_types) ?? ['general'],
+      };
+      const { error } = await invokeEdgeFunction('admin-users', { action: 'update_access', user_id: userId, ...edgeAccess });
       if (error && access.region_id === undefined && access.disbursement_type === undefined) return { success: false, error: errMsg(error) };
+
+      // 6. Persist exact allowed_types (including Agreement, Statutory Payment, Audit Report, Petty Cash) via RPC
+      if (access.allowed_types && access.allowed_types.length > 0) {
+        const typesRes = await syncUserAllowedTypes(userId, access.allowed_types);
+        if (!typesRes.success) {
+          await reload();
+          return typesRes;
+        }
+      }
 
       await reload();
       return { success: true };
     }
     const shop = shops.find((s) => s.id === access.shop_id) ?? null;
     const region = access.region_id ? regions.find((r) => r.id === access.region_id) ?? null : null;
-    setUsers((prev) => prev.map((u) => (u.id === userId ? {
-      ...u,
-      ...access,
-      shop,
-      region_id: access.region_id !== undefined ? (access.region_id || null) : u.region_id,
-      region: access.region_id !== undefined ? region : u.region,
-      disbursement_type: access.disbursement_type !== undefined ? access.disbursement_type : u.disbursement_type,
-      payment_dealer_type: access.payment_dealer_type !== undefined ? access.payment_dealer_type : u.payment_dealer_type,
-      connected_entry_accounts: access.connected_entry_accounts !== undefined ? toAccountObjs(access.connected_entry_accounts, users) : u.connected_entry_accounts,
-      mandatory_head_consultation: access.mandatory_head_consultation !== undefined ? access.mandatory_head_consultation : u.mandatory_head_consultation,
-      mandatory_consultation_head_id: access.mandatory_consultation_head_id !== undefined ? access.mandatory_consultation_head_id : u.mandatory_consultation_head_id,
-      mandatory_consultation_head_name: access.mandatory_consultation_head_id !== undefined
-        ? (users.find((h) => h.id === access.mandatory_consultation_head_id)?.full_name || null)
-        : u.mandatory_consultation_head_name,
-      rh_shops: (access.shop_ids || []).map((shop_id) => ({ shop_id })),
-      clerk_cats: (access.category_ids || []).map((category_id) => ({ category_id })),
-      user_heads: (access.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === access.default_head_id })),
-    } : u)));
+    setUsers((prev) => {
+      const next = prev.map((u) => (u.id === userId ? {
+        ...u,
+        ...access,
+        shop,
+        region_id: access.region_id !== undefined ? (access.region_id || null) : u.region_id,
+        region: access.region_id !== undefined ? region : u.region,
+        disbursement_type: access.disbursement_type !== undefined ? access.disbursement_type : u.disbursement_type,
+        payment_dealer_type: access.payment_dealer_type !== undefined ? access.payment_dealer_type : u.payment_dealer_type,
+        connected_entry_accounts: access.connected_entry_accounts !== undefined ? toAccountObjs(access.connected_entry_accounts, users) : u.connected_entry_accounts,
+        mandatory_head_consultation: access.mandatory_head_consultation !== undefined ? access.mandatory_head_consultation : u.mandatory_head_consultation,
+        mandatory_consultation_head_id: access.mandatory_consultation_head_id !== undefined ? access.mandatory_consultation_head_id : u.mandatory_consultation_head_id,
+        mandatory_consultation_head_name: access.mandatory_consultation_head_id !== undefined
+          ? (users.find((h) => h.id === access.mandatory_consultation_head_id)?.full_name || null)
+          : u.mandatory_consultation_head_name,
+        rh_shops: (access.shop_ids || []).map((shop_id) => ({ shop_id })),
+        clerk_cats: (access.category_ids || []).map((category_id) => ({ category_id })),
+        user_heads: (access.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === access.default_head_id })),
+      } : u));
+      try {
+        const saved = localStorage.getItem('approval_app_sandbox_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const updatedMe = next.find((u) => u.id === parsed.id);
+          if (updatedMe && parsed.id === userId) {
+            localStorage.setItem('approval_app_sandbox_user', JSON.stringify(updatedMe));
+            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: updatedMe }));
+          }
+        }
+      } catch { /* ignore */ }
+      return next;
+    });
     return { success: true };
   };
 
@@ -817,22 +926,88 @@ export function useDirectory() {
       await reload();
       return { success: true };
     }
+      setUsers((prev) => {
+        const next = prev.map((u) => (u.id === userId ? { ...u, is_petty_cash_dealer: enabled } : u));
+        try {
+          const saved = localStorage.getItem('approval_app_sandbox_user');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed.id === userId) {
+              parsed.is_petty_cash_dealer = enabled;
+              localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
+              window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
+            }
+          }
+        } catch { /* ignore */ }
+        return next;
+      });
+      return { success: true };
+    };
+
+  /** Admin enables / disables Agreement, Statutory Payment, or Audit Report for a Department Head and optionally their related Clerks, Employees & Regional Heads. */
+  const setDepartmentSpecialRequestAccess = async (
+    headId: string,
+    requestType: 'agreement' | 'statutory_payment' | 'audit_report',
+    enabled: boolean,
+    includeRelatedStaff = true
+  ): Promise<Result & { updatedCount?: number }> => {
+    if (live) {
+      const { data, error } = await supabase.rpc('set_department_special_request_access', {
+        p_head_id: headId,
+        p_request_type: requestType,
+        p_enabled: enabled,
+        p_include_related_staff: includeRelatedStaff,
+      });
+      if (error) {
+        return {
+          success: false,
+          error:
+            error.message.includes('does not exist') || error.message.includes('schema cache')
+              ? 'Database migration required: please run supabase/manual/apply_0079_agreement_statutory_audit_requests.sql in Supabase SQL Editor.'
+              : error.message,
+        };
+      }
+      await reload();
+      return { success: true, updatedCount: Number((data as any)?.updated_users ?? 1) };
+    }
+
+    let updatedCount = 0;
     setUsers((prev) => {
-      const next = prev.map((u) => (u.id === userId ? { ...u, is_petty_cash_dealer: enabled } : u));
+      const targetHead = prev.find((u) => u.id === headId && u.role === 'head');
+      if (!targetHead) return prev;
+      const next = prev.map((u) => {
+        const isTargetHead = u.id === targetHead.id;
+        const isRelatedStaff =
+          includeRelatedStaff &&
+          ['clerk', 'employee', 'regional_head'].includes(u.role) &&
+          ((targetHead.department_id && u.department_id === targetHead.department_id) ||
+            u.default_head_id === targetHead.id ||
+            (u.user_heads || []).some((uh) => uh.head_id === targetHead.id && uh.is_default));
+        if (!isTargetHead && !isRelatedStaff) return u;
+        updatedCount += 1;
+        const current = u.allowed_types?.length ? u.allowed_types : (['general'] as RequestType[]);
+        const nextTypes: RequestType[] = enabled
+          ? (current.includes(requestType) ? current : [...current, requestType])
+          : current.filter((t) => t !== requestType);
+        return {
+          ...u,
+          allowed_types: nextTypes.length > 0 ? nextTypes : (['general'] as RequestType[]),
+        };
+      });
       try {
         const saved = localStorage.getItem('approval_app_sandbox_user');
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (parsed.id === userId) {
-            parsed.is_petty_cash_dealer = enabled;
-            localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
-            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
+          const updatedMe = next.find((u) => u.id === parsed.id);
+          if (updatedMe) {
+            localStorage.setItem('approval_app_sandbox_user', JSON.stringify(updatedMe));
+            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: updatedMe }));
           }
         }
       } catch { /* ignore */ }
       return next;
     });
-    return { success: true };
+    return { success: true, updatedCount };
   };
 
   /** Admin adds / renames / (de)activates a region in Region Master (Head cannot manage this). */
@@ -1298,7 +1473,7 @@ export function useDirectory() {
   return {
     departments, shops, regions, users, categories, productCategories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
     saveProductCategory, setProductCategoryActive,
-    createUser, updateAccess, setUserRegion, setDisbursementType, setPaymentDealerConfig, setHeadMandatoryConsultation, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, setPettyCashDealer, resetPassword, setActive,
+    createUser, updateAccess, setUserRegion, setDisbursementType, setPaymentDealerConfig, setHeadMandatoryConsultation, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, setPettyCashDealer, setDepartmentSpecialRequestAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
     listDisbursementPersons, addDisbursementPerson, updateDisbursementPerson, getMyDisbursementPersonCount,
   };

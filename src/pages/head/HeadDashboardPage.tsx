@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
+import { isDisbursementAssociated } from '../../types/database';
 import { canUserViewBillMissingRequest, isOwningDepartmentHead } from '../../lib/workflow';
 import { useDirectory } from '../../lib/directory';
 import {
@@ -53,9 +54,12 @@ export const HeadDashboardPage: React.FC = () => {
       r.department_id === user.department_id
   );
 
-  // Queue 1: To Approve (Route B requests waiting for Head approval)
+  // Queue 1: To Approve (Route B requests waiting for Head approval; Audit Report is Admin-only)
   const toApproveQueue = requests.filter(
-    (r) => r.status === 'pending_head_approval' && isOwningDepartmentHead(r, user)
+    (r) =>
+      r.status === 'pending_head_approval' &&
+      typeOf(r) !== 'audit_report' &&
+      isOwningDepartmentHead(r, user)
   );
   const pettyCashApproveCount = toApproveQueue.filter((r) => typeOf(r) === 'petty_cash').length;
 
@@ -80,9 +84,9 @@ export const HeadDashboardPage: React.FC = () => {
     (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
   );
 
-  // Total department amount approved/paid (discount values and stock transfers are not payouts)
+  // Total department amount approved/paid (non-disbursement items are not payouts)
   const sanctionedTotal = deptRequests
-    .filter((r) => (r.status === 'approved' || r.status === 'paid') && typeOf(r) !== 'discount' && typeOf(r) !== 'stock_transfer' && typeOf(r) !== 'non_cash')
+    .filter((r) => (r.status === 'approved' || r.status === 'paid') && isDisbursementAssociated(typeOf(r)))
     .reduce((sum, r) => sum + r.amount, 0);
 
   return (

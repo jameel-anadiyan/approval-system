@@ -47,7 +47,18 @@ import {
   ROLE_LABELS,
   typeOf,
 } from '../../lib/formatters';
-import { DisbursementEntry, entriesTotal, entryAvailable, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, paymentSummary } from '../../types/database';
+import {
+  DisbursementEntry,
+  entriesTotal,
+  entryAvailable,
+  entryPayable,
+  entryOutstanding,
+  entryHasBalanceAwaitingApproval,
+  paymentSummary,
+  isDisbursementAssociated,
+  isNonCashRequestType,
+  isSpecialRequestType,
+} from '../../types/database';
 import { useDirectory } from '../../lib/directory';
 import { useEntryLock } from '../../lib/entryLock';
 import { isPaymentUserAllowedForEntry, isEntryAssociatedWithPaymentUser } from '../../lib/disbursementRouting';
@@ -171,7 +182,7 @@ export const RequestDetailPage: React.FC = () => {
   const isEntryOnly = isDisbursement && !isStockMonitorUser && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
   const isPaymentOnly = isDisbursement && user?.disbursement_type === 'payment_only';
   const reqTypeEarly = request ? typeOf(request) : 'general';
-  const isPaymentNeededEarly = reqTypeEarly !== 'discount' && reqTypeEarly !== 'non_cash' && reqTypeEarly !== 'stock_transfer';
+  const isPaymentNeededEarly = isDisbursementAssociated(reqTypeEarly);
 
   const dir = useDirectory();
   const entryLock = useEntryLock(
@@ -263,10 +274,13 @@ export const RequestDetailPage: React.FC = () => {
   const isConsultedHead = role === 'head' && (Boolean(myConsultation) || user?.department_id !== request.department_id);
 
   // Strict Owning Head:
-  // Must be role === 'head', NOT the requester, NOT a consulted head, and MUST belong to the request's department or match owner_head_id!
+  // Must be role === 'head', NOT a consulted head, and MUST belong to the request's department or match owner_head_id!
+  // For Agreement & Statutory Payment (which do not require Admin approval), the Department Head may approve their own request.
+  const canSelfApproveAsHead =
+    request.request_type === 'agreement' || request.request_type === 'statutory_payment';
   const isOwningHead =
     role === 'head' &&
-    !isOwner &&
+    (!isOwner || canSelfApproveAsHead) &&
     !myConsultation &&
     ((Boolean(request.owner_head_id) && user?.id === request.owner_head_id) ||
       (Boolean(user?.department_id) && user?.department_id === request.department_id));
@@ -324,7 +338,7 @@ export const RequestDetailPage: React.FC = () => {
     !isFinalized;
 
   const rType = typeOf(request);
-  const isPaymentNeeded = rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer';
+  const isPaymentNeeded = isDisbursementAssociated(rType);
   const isHead =
     role === 'head' ||
     role === 'regional_head' ||
@@ -401,6 +415,9 @@ export const RequestDetailPage: React.FC = () => {
     rType === 'discount' ? 'Discount Value'
       : rType === 'stock_transfer' ? 'Total MRP Value'
       : rType === 'exhibition' ? 'Total Sponsorship (incl. GST)'
+      : rType === 'statutory_payment' ? 'Statutory Payment Amount'
+      : rType === 'agreement' ? 'Agreement Type'
+      : rType === 'audit_report' ? 'Audit Report Type'
       : rType === 'non_cash' ? 'Payable Amount'
       : isAsset ? (request.selected_quote_id ? 'Selected Quotation Amount' : 'Indicative Amount (Head selects final)')
       : 'Total Requested Amount';
@@ -759,7 +776,7 @@ export const RequestDetailPage: React.FC = () => {
               Cancelled by <strong>{request.cancelled_by_name || 'Head'}</strong>
               {request.cancelled_at && <> on {formatISTDate(request.cancelled_at)}</>}. Signed documents for{' '}
               {request.approval_no || 'this approval'} are void.
-              {rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && pay.paid > 0 && (
+              {isPaymentNeeded && pay.paid > 0 && (
                 <> {formatINR(pay.paid)} was paid before cancellation; the balance {formatINR(pay.balance)} will not be paid.</>
               )}
             </p>
@@ -907,7 +924,7 @@ export const RequestDetailPage: React.FC = () => {
                   {amountLabel}
                 </span>
                 <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-display mt-0.5">
-                  {rType === 'non_cash' ? 'Non-Cash (No Payment)' : formatINR(request.amount)}
+                  {isNonCashRequestType(rType) ? 'Non-Cash (No Payment)' : formatINR(request.amount)}
                 </div>
                 {rType === 'non_cash' && (
                   <div className="text-xs text-slate-500 font-medium mt-1.5 flex items-center gap-2 flex-wrap">
@@ -919,6 +936,20 @@ export const RequestDetailPage: React.FC = () => {
                         Associated Value: {formatINR(Number(request.details?.associated_value))} (Not paid directly)
                       </span>
                     )}
+                  </div>
+                )}
+                {rType === 'agreement' && (
+                  <div className="text-xs text-slate-500 font-medium mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span className="text-violet-800 bg-violet-50 px-2 py-0.5 rounded-md border border-violet-200">
+                      Agreement Review · Head Approval Only · No Disbursement Needed
+                    </span>
+                  </div>
+                )}
+                {rType === 'audit_report' && (
+                  <div className="text-xs text-slate-500 font-medium mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span className="text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                      Audit Report · Admin Approval Only · No Disbursement Needed
+                    </span>
                   </div>
                 )}
               </div>
@@ -1308,7 +1339,7 @@ export const RequestDetailPage: React.FC = () => {
           {/* Voice Notes (if present) */}
           {showOriginals && voiceNotes.map((vn) => <VoiceNoteItem key={vn.id} file={vn} />)}
 
-          {/* Document Viewer (PDF or Photos) */}
+          {/* Document Viewer (PDF, Photos, or Office Documents) */}
           {showOriginals && (originalDocs.length > 0 || canHeadAddDocs) && (
             <DocumentViewer
               key={originalDocs.map((f) => f.id).join(',')}
@@ -1316,6 +1347,7 @@ export const RequestDetailPage: React.FC = () => {
               requestId={request.id}
               canAddDocs={canHeadAddDocs}
               canDeleteDocs={canDeleteDocsOnReturned}
+              allowExtendedDocs={isSpecialRequestType(rType)}
             />
           )}
 
@@ -2148,7 +2180,9 @@ export const RequestDetailPage: React.FC = () => {
               request.status === 'submitted' ||
               request.status === 'pending_regional_review' ||
               request.status === 'returned' ||
-              (role === 'head' && request.status === 'pending_admin_approval')
+              (role === 'head' &&
+                (request.status === 'pending_admin_approval' ||
+                  (canSelfApproveAsHead && request.status === 'pending_head_approval')))
             ) && (
               <button
                 type="button"
@@ -2296,8 +2330,8 @@ export const RequestDetailPage: React.FC = () => {
               </>
             )}
 
-            {/* Head Actions (Route B approval) - ONLY for the original owning department head */}
-            {isOwningHead && (request.status === 'pending_head_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
+            {/* Head Actions (Route B approval) - ONLY for the original owning department head (Audit Report is Admin-only) */}
+            {isOwningHead && rType !== 'audit_report' && (request.status === 'pending_head_approval' || (request.status === 'approving' && (!request.approving_started_at || Date.now() - new Date(request.approving_started_at).getTime() > 60000))) && (
               <>
                 <button
                   type="button"
@@ -2454,7 +2488,7 @@ export const RequestDetailPage: React.FC = () => {
             )}
 
             {/* Disbursement Action */}
-            {role === 'disbursement' && !isStockMonitorUser && request.status === 'approved' && rType !== 'discount' && rType !== 'non_cash' && rType !== 'stock_transfer' && (
+            {role === 'disbursement' && !isStockMonitorUser && request.status === 'approved' && isPaymentNeeded && (
               <>
                 <button
                   type="button"

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState';
 import { canUserViewApprovedRequest } from '../../lib/workflow';
+import { isDisbursementAssociated, isNonCashRequestType } from '../../types/database';
 import { useDirectory } from '../../lib/directory';
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
@@ -265,6 +266,10 @@ export const ApprovedRequestsPage: React.FC = () => {
               <option value="asset_below_20k">Asset Buying Below 20k</option>
               <option value="non_cash">Non Cash</option>
               <option value="stock_transfer">Stock Transfer</option>
+              <option value="petty_cash">Petty Cash</option>
+              <option value="agreement">Agreement</option>
+              <option value="statutory_payment">Statutory Payment</option>
+              <option value="audit_report">Audit Report</option>
             </select>
 
             <select
@@ -368,7 +373,7 @@ export const ApprovedRequestsPage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map((req) => {
             const t = typeOf(req);
-            const isNonCash = t === 'non_cash';
+            const isNonCash = isNonCashRequestType(t);
             const isPaid = req.status === 'paid';
 
             return (
@@ -437,7 +442,7 @@ export const ApprovedRequestsPage: React.FC = () => {
                   </div>
 
                   {/* Disbursement Entry Account row for payment-needed requests */}
-                  {t !== 'discount' && t !== 'non_cash' && t !== 'stock_transfer' && (
+                  {isDisbursementAssociated(t) && (
                     <div className="mb-3 px-3 py-2 bg-indigo-50/70 border border-indigo-100 rounded-xl flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2 min-w-0">
                         <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />

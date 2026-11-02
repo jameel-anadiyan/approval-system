@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import type { AppRole, Profile, Region, RequestType, Shop, WorkCategory } from '../../types/database';
+import { isSpecialRequestType, type AppRole, type Profile, type Region, type RequestType, type Shop, type WorkCategory } from '../../types/database';
 import { REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
+import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../common/Modal';
-import { KeyRound, UserCheck, Tags, Users, Globe } from 'lucide-react';
+import { KeyRound, UserCheck, Tags, Users, Globe, Sparkles } from 'lucide-react';
 
 export const rolesWithTypes: AppRole[] = ['employee', 'clerk', 'head', 'regional_head'];
 
@@ -57,7 +58,10 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
   role, shops, regions = [], shopId, onShopChange, types, onTypesChange,
   departmentId, users = [], categories = [], extra = EMPTY_EXTRA, onExtraChange,
 }) => {
+  const { user: me } = useAuth();
   if (!rolesWithTypes.includes(role)) return null;
+  const meLive = users.find((u) => u.id === me?.id) ?? me;
+  const callerAllowed = meLive?.allowed_types ?? [];
   const shopRequired = role === 'employee';
   const isRegional = role === 'regional_head';
   const activeShops = shops.filter((s) => s.is_active || s.id === shopId || extra.shopIds.includes(s.id));
@@ -65,6 +69,13 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
   const toggle = (t: RequestType) =>
     onTypesChange(types.includes(t) ? types.filter((x) => x !== t) : REQUEST_TYPES.filter((x) => x === t || types.includes(x)));
   const setExtra = (patch: Partial<ExtraAccess>) => onExtraChange?.({ ...extra, ...patch });
+
+  const standardTypes = REQUEST_TYPES.filter((t) => !isSpecialRequestType(t));
+  const specialTypes = REQUEST_TYPES.filter(
+    (t) =>
+      isSpecialRequestType(t) &&
+      (meLive?.role === 'admin' || callerAllowed.includes(t) || types.includes(t))
+  );
 
   const covering = role === 'employee' ? coveringRegionalHeads(users, departmentId, shopId) : [];
   const deptCategories = categories.filter(
@@ -346,8 +357,13 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
         <legend className="text-xs font-bold text-slate-700 mb-1.5">
           Request types this user can raise <span className="text-rose-500">*</span>
         </legend>
+        {role === 'head' && (
+          <p className="text-[11px] text-slate-500 mb-2">
+            Standard request types remain available to Department Heads. Enable special request types below to grant dedicated tab &amp; raising access.
+          </p>
+        )}
         <div className="grid gap-2">
-          {REQUEST_TYPES.map((t) => {
+          {standardTypes.map((t) => {
             const on = types.includes(t);
             return (
               <label
@@ -371,6 +387,56 @@ export const AccessFields: React.FC<AccessFieldsProps> = ({
             );
           })}
         </div>
+
+        {specialTypes.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-violet-900 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-violet-600" />
+                Special Request Types &amp; Dedicated Tabs
+              </span>
+              <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-full">
+                Adds Separate Tab
+              </span>
+            </div>
+            <div className="grid gap-2">
+              {specialTypes.map((t) => {
+                const on = types.includes(t);
+                const metaTag =
+                  t === 'agreement'
+                    ? 'Non-Cash · Head Approval Only'
+                    : t === 'statutory_payment'
+                      ? 'Payable · Head Approval Only'
+                      : 'Non-Cash · Admin Approval Only';
+                return (
+                  <label
+                    key={t}
+                    className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors ${
+                      on ? 'border-violet-300 bg-violet-50/70' : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      id={`access-type-${t}`}
+                      checked={on}
+                      onChange={() => toggle(t)}
+                      className="mt-0.5 w-4 h-4 accent-violet-600"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900">{TYPE_LABELS[t]}</span>
+                        <span className="text-[10px] font-bold text-violet-800 bg-white border border-violet-200 px-1.5 py-0.5 rounded-md">
+                          {metaTag}
+                        </span>
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">{TYPE_DESCRIPTIONS[t]}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </fieldset>
     </div>
   );

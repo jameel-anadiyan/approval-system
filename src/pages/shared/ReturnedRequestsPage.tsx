@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState';
 import { canUserViewReturnedRequest } from '../../lib/workflow';
-import type { RequestRecord } from '../../types/database';
+import { isNonCashRequestType, type RequestRecord } from '../../types/database';
 
 export const ReturnedRequestsPage: React.FC = () => {
   const { user } = useAuth();
@@ -253,6 +253,10 @@ export const ReturnedRequestsPage: React.FC = () => {
               <option value="asset_below_20k">Asset Buying Below 20k</option>
               <option value="non_cash">Non Cash</option>
               <option value="stock_transfer">Stock Transfer</option>
+              <option value="petty_cash">Petty Cash</option>
+              <option value="agreement">Agreement</option>
+              <option value="statutory_payment">Statutory Payment</option>
+              <option value="audit_report">Audit Report</option>
             </select>
 
             <select
@@ -286,7 +290,7 @@ export const ReturnedRequestsPage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map((req) => {
             const t = typeOf(req);
-            const isNonCash = t === 'non_cash';
+            const isNonCash = isNonCashRequestType(t);
             const isOwner = req.requester_id === user?.id;
             const retAction = getReturnAction(req);
 

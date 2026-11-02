@@ -51,6 +51,9 @@ const TYPE_LABEL: Record<string, string> = {
   general: "General", petty_cash: "Petty Cash (Below 1000)", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
   asset: "Asset buying", asset_below_20k: "Asset buying below 20k", non_cash: "Non-cash request",
   stock_transfer: "Stock transfer",
+  agreement: "Agreement",
+  statutory_payment: "Statutory payment",
+  audit_report: "Audit report",
 };
 const PROVIDES: Record<string, string> = {
   stall_space: "Stall space", table_chairs: "Table & chairs", electricity_lights: "Electricity & lights",
@@ -235,6 +238,79 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
       ],
     };
   }
+  if (r.request_type === "agreement") {
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("agreement_approval_form")
+    );
+    if (alreadyUploaded) return null;
+    return {
+      subtitle: "AGREEMENT APPROVAL FORM",
+      sections: [
+        { title: "Agreement Request Details", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)],
+          ["Agreement Title", txt(r.title)],
+          ["Consideration", "Non-Cash Item (No Disbursement Required)"],
+          ["Approval Route", "Route B — Department Head Approval Only"],
+        ] },
+        { title: "Description", text: r.notes ?? d.description ?? "-" },
+      ],
+    };
+  }
+  if (r.request_type === "statutory_payment") {
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("statutory_payment_approval_form")
+    );
+    if (alreadyUploaded) return null;
+    return {
+      subtitle: "STATUTORY PAYMENT APPROVAL FORM",
+      sections: [
+        { title: "Statutory Payment Details", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)],
+          ["Title", txt(r.title)],
+          ["Payment Amount", money(d.payment_amount ?? r.amount)],
+          ["Payment Date", txt(d.payment_date)],
+          ["Due Date", txt(d.due_date)],
+          ["Approval Route", "Route B — Department Head Approval Only"],
+        ] },
+        { title: "Description", text: r.notes ?? d.description ?? "-" },
+      ],
+    };
+  }
+  if (r.request_type === "audit_report") {
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("audit_report_approval_form")
+    );
+    if (alreadyUploaded) return null;
+    return {
+      subtitle: "AUDIT REPORT APPROVAL FORM",
+      sections: [
+        { title: "Audit Report Details", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)],
+          ["Report Title", txt(r.title)],
+          ["Audit Report of Which Firm", txt(d.audit_firm)],
+          ["Audit Period", `${txt(d.audit_from_date)} to ${txt(d.audit_to_date)}`],
+          ["Consideration", "Non-Cash Item (No Disbursement Required)"],
+          ["Approval Authority", "Administrator Approval Only"],
+        ] },
+        { title: "Description", text: r.notes ?? d.description ?? "-" },
+      ],
+    };
+  }
   return null;
 }
 
@@ -273,7 +349,11 @@ Deno.serve(handle(async (req) => {
         ? `Stock Transfer (MRP: ${inr(Number(r.amount))})`
         : r.request_type === "non_cash"
           ? "Non-Cash (No payment)"
-          : inr(Number(r.amount)),
+          : r.request_type === "agreement"
+            ? "Agreement (Non-Cash)"
+            : r.request_type === "audit_report"
+              ? "Audit Report (Non-Cash)"
+              : inr(Number(r.amount)),
       reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at
         ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
       verifyUrl: origin ? `${origin}/verify/${r.verify_token}` : null,
@@ -320,13 +400,19 @@ Deno.serve(handle(async (req) => {
           ? "discount_form"
           : r.request_type === "petty_cash"
             ? "petty_cash_form_below_1000"
-            : (r.request_type === "asset" || r.request_type === "asset_below_20k")
-              ? "asset_purchase_form"
-              : r.request_type === "stock_transfer"
-                ? "stock_transfer_form"
-                : r.request_type === "non_cash"
-                  ? "non_cash_form"
-                  : "exhibition_form",
+            : r.request_type === "agreement"
+              ? "agreement_approval_form"
+              : r.request_type === "statutory_payment"
+                ? "statutory_payment_approval_form"
+                : r.request_type === "audit_report"
+                  ? "audit_report_approval_form"
+                  : (r.request_type === "asset" || r.request_type === "asset_below_20k")
+                    ? "asset_purchase_form"
+                    : r.request_type === "stock_transfer"
+                      ? "stock_transfer_form"
+                      : r.request_type === "non_cash"
+                        ? "non_cash_form"
+                        : "exhibition_form",
         null,
         out.pageCount
       );
@@ -361,7 +447,7 @@ Deno.serve(handle(async (req) => {
         ["Approval No", b.approval_no],
         ["Request No", r.request_no],
         ["Type", TYPE_LABEL[r.request_type] ?? "General"],
-        ["Amount", r.request_type === "stock_transfer" ? `Total MRP: ${inr(Number(r.amount))} (Stock Transfer)` : r.request_type === "non_cash" ? "Non-Cash (No payment)" : inr(Number(r.amount))],
+        ["Amount", r.request_type === "stock_transfer" ? `Total MRP: ${inr(Number(r.amount))} (Stock Transfer)` : r.request_type === "non_cash" ? "Non-Cash (No payment)" : r.request_type === "agreement" ? "Agreement (Non-Cash · No Disbursement)" : r.request_type === "audit_report" ? "Audit Report (Non-Cash · No Disbursement)" : inr(Number(r.amount))],
         ["Department", r.department ?? "—"],
         ["Shop", r.request_type === "exhibition"
           ? ((typeof r.details?.conducting_shop_name === "string" && r.details.conducting_shop_name.trim()) ? r.details.conducting_shop_name.trim() : "Not Assigned")

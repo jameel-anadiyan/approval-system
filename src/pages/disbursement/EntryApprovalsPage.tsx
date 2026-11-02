@@ -12,6 +12,7 @@ import {
   Profile,
   entryOutstanding,
   entryHasBalanceAwaitingApproval,
+  isDisbursementAssociated,
 } from '../../types/database';
 import { formatINR, formatISTDate, getTodayIST, toISTDateKey, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
@@ -186,7 +187,7 @@ export const EntryApprovalsPage: React.FC = () => {
 
     // 1. Primary source: requests from RequestContext
     requests.forEach((r) => {
-      if (typeOf(r) === 'discount' || typeOf(r) === 'stock_transfer' || typeOf(r) === 'non_cash') return;
+      if (!isDisbursementAssociated(typeOf(r))) return;
       (r.disbursement_entries || []).forEach((e) => {
         if (e.status !== 'cancelled' && !seenEntryIds.has(e.id)) {
           seenEntryIds.add(e.id);
@@ -200,7 +201,7 @@ export const EntryApprovalsPage: React.FC = () => {
       if (e.status === 'cancelled' || seenEntryIds.has(e.id)) return;
       const r = requests.find((req) => req.id === e.request_id) || directRequests.get(e.request_id);
       if (r) {
-        if (typeOf(r) === 'discount' || typeOf(r) === 'stock_transfer' || typeOf(r) === 'non_cash') return;
+        if (!isDisbursementAssociated(typeOf(r))) return;
         seenEntryIds.add(e.id);
         list.push({ entry: e, request: r });
       }

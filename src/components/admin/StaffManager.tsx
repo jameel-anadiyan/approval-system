@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck, MessageSquare } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck, MessageSquare, FileSignature, Landmark, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { cleanWhatsAppNumber, formatWhatsAppDisplay } from '../../lib/whatsapp';
@@ -209,6 +209,26 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
       res.success
         ? `${u.full_name} ${nextEnabled ? 'enabled as Petty Cash Dealer' : 'removed from Petty Cash Dealers'}.`
         : res.error || 'Failed to update Petty Cash Dealer setting',
+      res.success
+    );
+  };
+
+  const toggleDeptSpecialRequest = async (
+    u: Profile,
+    reqType: 'agreement' | 'statutory_payment' | 'audit_report'
+  ) => {
+    setBusyId(u.id);
+    const currentlyOn = (u.allowed_types || []).includes(reqType);
+    const nextEnabled = !currentlyOn;
+    const res = await dir.setDepartmentSpecialRequestAccess(u.id, reqType, nextEnabled, true);
+    setBusyId(null);
+    const label = TYPE_LABELS[reqType];
+    show(
+      res.success
+        ? `${label} ${nextEnabled ? 'enabled' : 'disabled'} for ${u.full_name} and related department staff${
+            res.updatedCount ? ` (${res.updatedCount} account${res.updatedCount === 1 ? '' : 's'} updated)` : ''
+          }.`
+        : res.error || `Failed to update ${label} access`,
       res.success
     );
   };
@@ -750,6 +770,76 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         }`} />
                     </button>
                   </label>
+
+                  <div className="p-3 rounded-xl border border-violet-200/90 bg-violet-50/60 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-extrabold text-violet-950">
+                        Special Request Types (Head + Related Clerks &amp; Employees)
+                      </span>
+                      <span className="text-[10px] font-semibold text-violet-700 bg-white border border-violet-200 px-2 py-0.5 rounded-full">
+                        Adds Separate Tabs
+                      </span>
+                    </div>
+                    {(
+                      [
+                        {
+                          key: 'agreement' as const,
+                          label: 'Agreement Request',
+                          sub: 'Non-cash · Head approval only',
+                          icon: FileSignature,
+                          activeBg: 'bg-violet-600',
+                        },
+                        {
+                          key: 'statutory_payment' as const,
+                          label: 'Statutory Payment Request',
+                          sub: 'Payable · Head approval only',
+                          icon: Landmark,
+                          activeBg: 'bg-amber-600',
+                        },
+                        {
+                          key: 'audit_report' as const,
+                          label: 'Audit Report Request',
+                          sub: 'Non-cash · Admin approval only',
+                          icon: ClipboardCheck,
+                          activeBg: 'bg-slate-800',
+                        },
+                      ]
+                    ).map((item) => {
+                      const SpecIcon = item.icon;
+                      const isOn = (u.allowed_types || []).includes(item.key);
+                      return (
+                        <label
+                          key={item.key}
+                          className="flex items-center justify-between gap-3 p-2 rounded-lg bg-white/90 border border-violet-200/70 cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <SpecIcon className="w-3.5 h-3.5 text-violet-700 shrink-0" />
+                            <span className="min-w-0">
+                              <strong className="text-xs text-slate-900 block truncate">{item.label}</strong>
+                              <span className="text-[10px] text-slate-500 block">{item.sub}</span>
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            role="switch"
+                            id={`dept-special-${item.key}-${u.id}`}
+                            aria-checked={isOn}
+                            disabled={busyId === u.id}
+                            onClick={() => toggleDeptSpecialRequest(u, item.key)}
+                            className={`relative w-10 h-6 min-h-0 rounded-full shrink-0 transition-colors disabled:opacity-50 ${
+                              isOn ? item.activeBg : 'bg-slate-300'
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                                isOn ? 'translate-x-4' : ''
+                              }`}
+                            />
+                          </button>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

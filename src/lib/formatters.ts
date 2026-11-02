@@ -296,7 +296,19 @@ export function isEntryCheckingUser(u?: {
   );
 }
 
-export const REQUEST_TYPES: RequestType[] = ['general', 'petty_cash', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'];
+export const REQUEST_TYPES: RequestType[] = [
+  'general',
+  'petty_cash',
+  'discount',
+  'exhibition',
+  'asset',
+  'asset_below_20k',
+  'non_cash',
+  'stock_transfer',
+  'agreement',
+  'statutory_payment',
+  'audit_report',
+];
 
 export const TYPE_LABELS: Record<RequestType, string> = {
   general: 'General',
@@ -307,6 +319,9 @@ export const TYPE_LABELS: Record<RequestType, string> = {
   asset_below_20k: 'Asset Buying Below 20k',
   non_cash: 'Non Cash',
   stock_transfer: 'Stock Transfer',
+  agreement: 'Agreement',
+  statutory_payment: 'Statutory Payment',
+  audit_report: 'Audit Report',
 };
 
 export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
@@ -318,6 +333,9 @@ export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
   asset_below_20k: 'Asset purchases up to ₹20,000. 1 bill or quote mandatory.',
   non_cash: 'Operational or administrative request without cash involved (no disbursement needed).',
   stock_transfer: 'Transfer stock between shops. Head approval (no disbursement step).',
+  agreement: 'Agreements & contracts (Excel, Word, PDF, Images). Non-cash item, no disbursement. Department Head approval only.',
+  statutory_payment: 'Statutory payment with payment amount, payment date & due date. Department Head approval only, then disbursed.',
+  audit_report: 'Firm audit report with From–To audit period and supporting documents. Non-cash item, Admin approval only.',
 };
 
 export const TYPE_BADGES: Record<RequestType, string> = {
@@ -329,15 +347,20 @@ export const TYPE_BADGES: Record<RequestType, string> = {
   asset_below_20k: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   non_cash: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   stock_transfer: 'bg-blue-50 text-blue-800 border-blue-200',
+  agreement: 'bg-violet-50 text-violet-800 border-violet-200 font-semibold',
+  statutory_payment: 'bg-orange-50 text-orange-800 border-orange-200 font-semibold',
+  audit_report: 'bg-cyan-50 text-cyan-900 border-cyan-300 font-semibold',
 };
 
 export const typeOf = (r: { request_type?: RequestType | null }): RequestType => r.request_type ?? 'general';
 
-/** Status label that knows Discount, Non-Cash, and Stock Transfer approvals have no payment step. */
+/** Status label that knows Discount, Non-Cash, Stock Transfer, Agreement, and Audit Report approvals have no payment step. */
 export function statusLabel(r: { status: RequestStatus; request_type?: RequestType | null; selected_quote_id?: string | null }): string {
   if (r.status === 'approved') {
     const t = typeOf(r);
-    if (t === 'discount' || t === 'non_cash' || t === 'stock_transfer') return 'Approved';
+    if (t === 'discount' || t === 'non_cash' || t === 'stock_transfer' || t === 'agreement' || t === 'audit_report') {
+      return 'Approved';
+    }
     return 'Approved (Awaiting Disbursement)';
   }
   if (r.status === 'pending_head_review' && (typeOf(r) === 'asset' || typeOf(r) === 'asset_below_20k') && !r.selected_quote_id) {

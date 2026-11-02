@@ -2,7 +2,16 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests, errMsg } from '../../context/RequestContext';
-import { RequestFile, RequestType, RequestDetails, Profile, DisbursementMode, PettyCashDealer } from '../../types/database';
+import {
+  RequestFile,
+  RequestType,
+  RequestDetails,
+  Profile,
+  DisbursementMode,
+  PettyCashDealer,
+  isDisbursementAssociated,
+  isSpecialRequestType,
+} from '../../types/database';
 import { FileUploader } from '../../components/requests/FileUploader';
 import { VoiceRecorder } from '../../components/requests/VoiceRecorder';
 import {
@@ -10,6 +19,9 @@ import {
   validateDiscount, validateExhibition, toDiscountDetails, toExhibitionDetails,
   DiscountForm, ExhibitionForm,
   NonCashFields, NonCashForm, emptyNonCash, toNonCashDetails,
+  AgreementBanner, toAgreementDetails,
+  StatutoryPaymentFields, StatutoryPaymentForm, emptyStatutoryPayment, validateStatutoryPayment, toStatutoryPaymentDetails,
+  AuditReportFields, AuditReportForm, emptyAuditReport, validateAuditReport, toAuditReportDetails,
 } from '../../components/requests/TypedRequestFields';
 import { GstSelector } from '../../components/requests/GstSelector';
 import {
@@ -21,7 +33,7 @@ import {
   toStockTransferDetails, validateStockTransfer, stockTransferCalc,
 } from '../../components/requests/StockTransferFields';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2, Wallet } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2, Wallet, FileSignature, Landmark, ClipboardCheck } from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
@@ -38,6 +50,9 @@ const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   asset_below_20k: <Package className="w-5 h-5" />,
   non_cash: <FileCheck className="w-5 h-5" />,
   stock_transfer: <ArrowLeftRight className="w-5 h-5" />,
+  agreement: <FileSignature className="w-5 h-5" />,
+  statutory_payment: <Landmark className="w-5 h-5" />,
+  audit_report: <ClipboardCheck className="w-5 h-5" />,
 };
 
 export const NewRequestPage: React.FC = () => {
@@ -63,7 +78,7 @@ export const NewRequestPage: React.FC = () => {
     null;
 
   const allowed = useMemo<RequestType[]>(() => {
-    const raw = user?.allowed_types ?? ['general'];
+    const raw = activeProfile?.allowed_types ?? user?.allowed_types ?? ['general'];
     const list = new Set<RequestType>(raw);
     if (list.has('asset')) {
       list.add('asset_below_20k');
@@ -71,19 +86,31 @@ export const NewRequestPage: React.FC = () => {
     if (user?.role === 'employee' || user?.role === 'regional_head' || user?.role === 'clerk' || user?.role === 'head' || user?.role === 'admin') {
       list.add('petty_cash');
     }
-    if (user?.role === 'admin' || user?.role === 'head') {
+    if (user?.role === 'admin') {
       return REQUEST_TYPES;
     }
+    if (user?.role === 'head') {
+      // Standard types are always available to Heads; special restricted types (Agreement, Statutory Payment, Audit Report) only when enabled for this Head
+      return REQUEST_TYPES.filter((t) => !isSpecialRequestType(t) || list.has(t));
+    }
     return REQUEST_TYPES.filter((t) => list.has(t));
-  }, [user?.allowed_types, user?.role]);
+  }, [activeProfile?.allowed_types, user?.allowed_types, user?.role]);
   const requestedDefaultType = (location.state as { defaultType?: RequestType } | null)?.defaultType;
   const initialType: RequestType =
     requestedDefaultType && allowed.includes(requestedDefaultType)
       ? requestedDefaultType
       : (allowed[0] ?? 'general');
   const [type, setType] = useState<RequestType>(initialType);
+
+  useEffect(() => {
+    if (requestedDefaultType && allowed.includes(requestedDefaultType)) {
+      setType(requestedDefaultType);
+    }
+  }, [requestedDefaultType, allowed]);
+
   const isAsset = type === 'asset' || type === 'asset_below_20k';
   const isPettyCash = type === 'petty_cash';
+  const isSpecial = isSpecialRequestType(type);
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [hasGst, setHasGst] = useState<boolean>(true);
@@ -91,6 +118,8 @@ export const NewRequestPage: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
   const [nonCash, setNonCash] = useState<NonCashForm>(emptyNonCash);
+  const [statutoryPayment, setStatutoryPayment] = useState<StatutoryPaymentForm>(emptyStatutoryPayment);
+  const [auditReport, setAuditReport] = useState<AuditReportForm>(emptyAuditReport);
   const [exhibition, setExhibition] = useState<ExhibitionForm>(emptyExhibition);
   const [asset, setAsset] = useState<AssetForm>(emptyAsset);
   const [stockTransfer, setStockTransfer] = useState<StockTransferForm>(() =>
@@ -113,7 +142,7 @@ export const NewRequestPage: React.FC = () => {
   const [shopId, setShopId] = useState('');
   const [shopName, setShopName] = useState('');
   const pickShop = needsShopPick(type);
-  const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
+  const isPaymentNeeded = isDisbursementAssociated(type);
   const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>(initialType === 'petty_cash' ? 'cash' : 'bank');
   const [enterBankDetailsLater, setEnterBankDetailsLater] = useState<boolean>(false);
   const [bankAccountNo, setBankAccountNo] = useState<string>('');
@@ -207,10 +236,12 @@ export const NewRequestPage: React.FC = () => {
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
+  const statutoryAmt = parseFloat(statutoryPayment.payment_amount) || 0;
   const quoteInfo = quoteSummary(quotes);
   const stockCalc = stockTransferCalc(stockTransfer);
   const amount =
-    type === 'non_cash' ? 0
+    type === 'non_cash' || type === 'agreement' || type === 'audit_report' ? 0
+      : type === 'statutory_payment' ? statutoryAmt
       : type === 'petty_cash' ? baseAmount
       : type === 'discount' ? discountCalc(discount).value
       : type === 'stock_transfer' ? stockCalc.totalMrp
@@ -218,7 +249,12 @@ export const NewRequestPage: React.FC = () => {
       : isAsset ? quoteInfo.amount
       : generalTotal;
   const isHighValue = type === 'general' && amount > threshold;
-  const docsRequired = type === 'general' || type === 'discount';
+  const docsRequired =
+    type === 'general' ||
+    type === 'discount' ||
+    type === 'agreement' ||
+    type === 'statutory_payment' ||
+    type === 'audit_report';
   const hasPdf = files.some((f) => f.mime_type === 'application/pdf');
 
   const allFiles = isAsset
@@ -258,6 +294,9 @@ export const NewRequestPage: React.FC = () => {
   const details = (): RequestDetails | null => {
     let d: RequestDetails | null = null;
     if (type === 'non_cash') d = toNonCashDetails(nonCash, shopChoice());
+    else if (type === 'agreement') d = toAgreementDetails(notes, shopChoice());
+    else if (type === 'statutory_payment') d = toStatutoryPaymentDetails(statutoryPayment, notes, shopChoice());
+    else if (type === 'audit_report') d = toAuditReportDetails(auditReport, notes, shopChoice());
     else if (type === 'petty_cash') {
       d = {
         petty_cash_form: 'petty_cash_form_below_1000',
@@ -363,6 +402,25 @@ export const NewRequestPage: React.FC = () => {
     if (type === 'non_cash') {
       return null;
     }
+    if (type === 'agreement') {
+      if (!forDraft && !notes.trim()) return 'Please enter the Agreement description.';
+      if (!forDraft && files.length === 0) return 'Please attach at least one agreement document (Excel, Word, PDF, or image).';
+      return null;
+    }
+    if (type === 'statutory_payment') {
+      const sv = validateStatutoryPayment(statutoryPayment);
+      if (!forDraft && sv) return sv;
+      if (!forDraft && !notes.trim()) return 'Please enter the Statutory Payment description.';
+      if (!forDraft && files.length === 0) return 'Please attach at least one supporting document.';
+      return null;
+    }
+    if (type === 'audit_report') {
+      const av = validateAuditReport(auditReport);
+      if (!forDraft && av) return av;
+      if (!forDraft && !notes.trim()) return 'Please enter the Audit Report description.';
+      if (!forDraft && files.length === 0) return 'Please attach the audit report document (Excel, Word, PDF, or image).';
+      return null;
+    }
     if (type === 'exhibition') {
       return validateExhibition(exhibition, {
         requireShop: exhibitionShopState.options.length > 0,
@@ -386,8 +444,10 @@ export const NewRequestPage: React.FC = () => {
         type,
         title: effectiveTitle(),
         amount:
-          type === 'non_cash'
+          type === 'non_cash' || type === 'agreement' || type === 'audit_report'
             ? 0
+            : type === 'statutory_payment'
+            ? statutoryAmt || 1
             : type === 'petty_cash'
             ? Math.min(baseAmount || 1, 1000)
             : type === 'general'
@@ -472,7 +532,9 @@ export const NewRequestPage: React.FC = () => {
         {user?.role === 'head' && (
           <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-purple-800 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1">
             <UserCheck className="w-3.5 h-3.5 text-purple-600" />
-            Department Head request: Bypasses clerk routing and goes directly to Admin for approval.
+            {type === 'agreement' || type === 'statutory_payment'
+              ? 'Department Head request: Approved directly by Department Head (Admin approval is not required).'
+              : 'Department Head request: Bypasses clerk routing and goes directly to Admin for approval.'}
           </p>
         )}
         {user?.role === 'clerk' && (
@@ -574,6 +636,12 @@ export const NewRequestPage: React.FC = () => {
                   : 'Asset Purchase Details'
                 : type === 'non_cash'
                 ? 'Non-Cash Request Details'
+                : type === 'agreement'
+                ? 'Agreement Request Details'
+                : type === 'statutory_payment'
+                ? 'Statutory Payment Request Details'
+                : type === 'audit_report'
+                ? 'Audit Report Request Details'
                 : 'Request Information'}
             </h2>
             {type === 'petty_cash' && (
@@ -809,11 +877,32 @@ export const NewRequestPage: React.FC = () => {
                     : type === 'stock_transfer' ? 'Optional – origin and destination shops are used if empty'
                     : isAsset ? 'Optional – asset name is used if empty'
                     : type === 'non_cash' ? 'e.g. Branch maintenance clearance / Administrative approval'
+                    : type === 'agreement' ? 'e.g. Showroom Lease Renewal Agreement – Calicut'
+                    : type === 'statutory_payment' ? 'e.g. Monthly GST / TDS / PF Statutory Remittance'
+                    : type === 'audit_report' ? 'e.g. Q3 Internal Stock & Financial Audit Report'
                     : 'e.g. Vendor invoice for showroom lighting'
                 }
                 className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
               />
             </div>
+          )}
+
+          {type === 'agreement' && <AgreementBanner />}
+
+          {type === 'statutory_payment' && (
+            <StatutoryPaymentFields
+              value={statutoryPayment}
+              onChange={setStatutoryPayment}
+              disabled={isSubmitting || isSavingDraft}
+            />
+          )}
+
+          {type === 'audit_report' && (
+            <AuditReportFields
+              value={auditReport}
+              onChange={setAuditReport}
+              disabled={isSubmitting || isSavingDraft}
+            />
           )}
 
           {type === 'non_cash' && (
@@ -899,6 +988,8 @@ export const NewRequestPage: React.FC = () => {
             <label className="block text-xs font-bold text-slate-700 mb-1">
               {isPettyCash ? (
                 <>Note <span className="text-rose-500">*</span></>
+              ) : isSpecial ? (
+                <>Description <span className="text-rose-500">*</span></>
               ) : type === 'general' ? (
                 'Notes & Purpose (Optional)'
               ) : (
@@ -910,7 +1001,17 @@ export const NewRequestPage: React.FC = () => {
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder={isPettyCash ? 'Describe the petty cash purpose / expense (mandatory)…' : 'Any extra context for the approvers…'}
+              placeholder={
+                isPettyCash
+                  ? 'Describe the petty cash purpose / expense (mandatory)…'
+                  : type === 'agreement'
+                  ? 'Enter agreement summary, parties involved, key terms…'
+                  : type === 'statutory_payment'
+                  ? 'Enter statutory payment nature, period, challan / compliance details…'
+                  : type === 'audit_report'
+                  ? 'Enter audit scope, key observations, or summary notes…'
+                  : 'Any extra context for the approvers…'
+              }
               className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
             />
           </div>
@@ -948,12 +1049,19 @@ export const NewRequestPage: React.FC = () => {
                 : 'Document Attachments'}{' '}
               {docsRequired ? <span className="text-rose-500">*</span> : <span className="text-slate-400 font-normal text-xs">(optional)</span>}
             </h2>
-            <span className="text-[11px] text-slate-400">{type === 'discount' ? 'PDF required' : 'PDF, JPG, PNG'}</span>
+            <span className="text-[11px] text-slate-400">
+              {type === 'discount'
+                ? 'PDF required'
+                : isSpecial
+                ? 'Excel, Word, CSV, PDF, PNG, JPG & any Image'
+                : 'PDF, JPG, PNG'}
+            </span>
           </div>
           <FileUploader
             files={files}
             onAddFiles={(nf) => setFiles((p) => [...p, ...nf])}
             onRemoveFile={(id) => setFiles((p) => p.filter((f) => f.id !== id))}
+            allowExtendedDocs={isSpecial}
           />
           {type === 'discount' && !hasPdf && (
             <p className="text-[11px] text-amber-700 font-semibold">A PDF is mandatory for discount approvals.</p>
@@ -988,7 +1096,12 @@ export const NewRequestPage: React.FC = () => {
         <div className="action-bar">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
             <div className="hidden sm:block text-xs text-slate-500">
-              {TYPE_LABELS[type]} · <span className="font-bold text-slate-800">{formatINR(amount)}</span>
+              {TYPE_LABELS[type]} ·{' '}
+              <span className="font-bold text-slate-800">
+                {type === 'non_cash' || type === 'agreement' || type === 'audit_report'
+                  ? 'Non-Cash (No Disbursement)'
+                  : formatINR(amount)}
+              </span>
             </div>
             <div className="action-bar-buttons flex flex-1 sm:flex-none items-center gap-2 sm:gap-3">
               <button

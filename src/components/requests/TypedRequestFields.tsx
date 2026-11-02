@@ -4,7 +4,7 @@
 import React from 'react';
 import { RequestDetails, ExhibitionProvide, RequestShopChoice, RequestShopOption } from '../../types/database';
 import { formatINR, PROVIDE_LABELS } from '../../lib/formatters';
-import { Percent, CalendarDays, Megaphone, Target, IndianRupee, AlertOctagon, CheckCircle2, AlertTriangle, Clock, FileCheck, Store } from 'lucide-react';
+import { Percent, CalendarDays, Megaphone, Target, IndianRupee, CheckCircle2, AlertTriangle, FileCheck, Store, Building2, ShieldCheck } from 'lucide-react';
 import { GstSelector } from './GstSelector';
 import type { ExhibitionQuotaStatus } from '../../lib/exhibitionQuota';
 
@@ -645,6 +645,279 @@ export const NonCashFields: React.FC<{
               value={value.associated_notes}
               onChange={set('associated_notes')}
               placeholder="e.g. Adjusted against advance, barter, or write-off"
+              disabled={disabled}
+              className={inputCls}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ───────────────────────── Agreement ─────────────────────────
+
+export const toAgreementDetails = (
+  description: string,
+  shopChoice?: RequestShopChoice
+): RequestDetails => ({
+  ...(shopChoice || {}),
+  description: description.trim() || null,
+});
+
+export const AgreementBanner: React.FC = () => (
+  <div className="p-3.5 bg-violet-50 border border-violet-200/80 rounded-xl text-xs text-violet-950 leading-relaxed flex items-start gap-2.5">
+    <FileCheck className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />
+    <div>
+      <span className="font-bold text-violet-950 block mb-0.5">
+        Agreement Request · Non-Cash · Department Head Approval Only
+      </span>
+      <p className="text-violet-800">
+        No cash payout or disbursement is needed. Supports Excel, Word, CSV, PDF, PNG, JPG, and any image file. Approved directly by the Department Head (Admin approval is not required).
+      </p>
+    </div>
+  </div>
+);
+
+// ───────────────────────── Statutory Payment ─────────────────────────
+
+export interface StatutoryPaymentForm {
+  payment_amount: string;
+  payment_date: string;
+  due_date: string;
+}
+
+export const emptyStatutoryPayment: StatutoryPaymentForm = {
+  payment_amount: '',
+  payment_date: '',
+  due_date: '',
+};
+
+export const statutoryPaymentFromDetails = (
+  d?: RequestDetails | null,
+  fallbackAmount?: number | null
+): StatutoryPaymentForm => ({
+  payment_amount:
+    d?.payment_amount !== undefined && d?.payment_amount !== null
+      ? String(d.payment_amount)
+      : fallbackAmount && fallbackAmount > 0
+      ? String(fallbackAmount)
+      : '',
+  payment_date: str(d?.payment_date),
+  due_date: str(d?.due_date),
+});
+
+export function validateStatutoryPayment(f: StatutoryPaymentForm): string | null {
+  if (num(f.payment_amount) <= 0) return 'Enter a valid payment amount greater than zero.';
+  if (!f.payment_date.trim()) return 'Select the Payment Date.';
+  if (!f.due_date.trim()) return 'Select the Due Date.';
+  return null;
+}
+
+export const toStatutoryPaymentDetails = (
+  f: StatutoryPaymentForm,
+  description: string,
+  shopChoice?: RequestShopChoice
+): RequestDetails => ({
+  ...(shopChoice || {}),
+  payment_amount: num(f.payment_amount),
+  payment_date: f.payment_date.trim() || null,
+  due_date: f.due_date.trim() || null,
+  description: description.trim() || null,
+});
+
+export const StatutoryPaymentFields: React.FC<{
+  value: StatutoryPaymentForm;
+  onChange: (v: StatutoryPaymentForm) => void;
+  disabled?: boolean;
+}> = ({ value, onChange, disabled = false }) => {
+  const set = (k: keyof StatutoryPaymentForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...value, [k]: e.target.value });
+  const amt = num(value.payment_amount);
+
+  return (
+    <div className="space-y-4">
+      <div className="p-3.5 bg-orange-50 border border-orange-200/80 rounded-xl text-xs text-orange-950 leading-relaxed flex items-start gap-2.5">
+        <ShieldCheck className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
+        <div>
+          <span className="font-bold text-orange-950 block mb-0.5">
+            Statutory Payment · Department Head Approval Only
+          </span>
+          <p className="text-orange-800">
+            Approved directly by the Department Head (Admin approval is not required), then forwarded for payment disbursement.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label htmlFor="stat-payment-amount" className={labelCls}>
+            Payment Amount (₹) <span className="text-rose-500">*</span>
+          </label>
+          <div className="relative">
+            <span className="absolute left-3.5 top-3 font-bold text-slate-400 text-sm">₹</span>
+            <input
+              id="stat-payment-amount"
+              type="number"
+              step="0.01"
+              min="0"
+              inputMode="decimal"
+              value={value.payment_amount}
+              onChange={set('payment_amount')}
+              placeholder="0.00"
+              disabled={disabled}
+              className={`${inputCls} pl-8 font-bold`}
+            />
+          </div>
+          {amt > 0 && (
+            <span className="text-[11px] font-semibold text-orange-700 mt-1 block">
+              {formatINR(amt)}
+            </span>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="stat-payment-date" className={labelCls}>
+            Payment Date <span className="text-rose-500">*</span>
+          </label>
+          <input
+            id="stat-payment-date"
+            type="date"
+            value={value.payment_date}
+            onChange={set('payment_date')}
+            disabled={disabled}
+            className={inputCls}
+          />
+        </div>
+
+        <div>
+          <label htmlFor="stat-due-date" className={labelCls}>
+            Due Date <span className="text-rose-500">*</span>
+          </label>
+          <input
+            id="stat-due-date"
+            type="date"
+            value={value.due_date}
+            onChange={set('due_date')}
+            disabled={disabled}
+            className={inputCls}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ───────────────────────── Audit Report ─────────────────────────
+
+export interface AuditReportForm {
+  audit_from_date: string;
+  audit_to_date: string;
+  audit_firm: string;
+}
+
+export const emptyAuditReport: AuditReportForm = {
+  audit_from_date: '',
+  audit_to_date: '',
+  audit_firm: '',
+};
+
+export const auditReportFromDetails = (d?: RequestDetails | null): AuditReportForm => ({
+  audit_from_date: str(d?.audit_from_date),
+  audit_to_date: str(d?.audit_to_date),
+  audit_firm: str(d?.audit_firm),
+});
+
+export function validateAuditReport(f: AuditReportForm): string | null {
+  if (!f.audit_firm.trim()) return 'Enter the firm name (Audit Report of Which Firm).';
+  if (!f.audit_from_date.trim()) return 'Select the Audit Period From date.';
+  if (!f.audit_to_date.trim()) return 'Select the Audit Period To date.';
+  if (f.audit_to_date < f.audit_from_date) {
+    return 'Audit Period To date cannot be earlier than From date.';
+  }
+  return null;
+}
+
+export const toAuditReportDetails = (
+  f: AuditReportForm,
+  description: string,
+  shopChoice?: RequestShopChoice
+): RequestDetails => ({
+  ...(shopChoice || {}),
+  audit_from_date: f.audit_from_date.trim() || null,
+  audit_to_date: f.audit_to_date.trim() || null,
+  audit_firm: f.audit_firm.trim() || null,
+  description: description.trim() || null,
+});
+
+export const AuditReportFields: React.FC<{
+  value: AuditReportForm;
+  onChange: (v: AuditReportForm) => void;
+  disabled?: boolean;
+}> = ({ value, onChange, disabled = false }) => {
+  const set = (k: keyof AuditReportForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...value, [k]: e.target.value });
+
+  return (
+    <div className="space-y-4">
+      <div className="p-3.5 bg-cyan-50 border border-cyan-200/80 rounded-xl text-xs text-cyan-950 leading-relaxed flex items-start gap-2.5">
+        <Building2 className="w-4 h-4 text-cyan-700 shrink-0 mt-0.5" />
+        <div>
+          <span className="font-bold text-cyan-950 block mb-0.5">
+            Audit Report · Non-Cash · Administrator Approval Only
+          </span>
+          <p className="text-cyan-800">
+            Supports Excel, Word, CSV, PDF, PNG, JPG, and any image file. Non-cash request (no disbursement). Final approval is performed exclusively by the Administrator.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label htmlFor="audit-firm" className={labelCls}>
+            Audit Report of Which Firm <span className="text-rose-500">*</span>
+          </label>
+          <input
+            id="audit-firm"
+            type="text"
+            value={value.audit_firm}
+            onChange={set('audit_firm')}
+            placeholder="Enter the firm / entity name for this audit report"
+            disabled={disabled}
+            className={`${inputCls} font-semibold`}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="audit-from-date" className={labelCls}>
+              Audit Period — From Date <span className="text-rose-500">*</span>
+            </label>
+            <input
+              id="audit-from-date"
+              type="date"
+              value={value.audit_from_date}
+              onChange={(e) => {
+                const from = e.target.value;
+                const to =
+                  value.audit_to_date && value.audit_to_date < from ? from : value.audit_to_date;
+                onChange({ ...value, audit_from_date: from, audit_to_date: to });
+              }}
+              disabled={disabled}
+              className={inputCls}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="audit-to-date" className={labelCls}>
+              Audit Period — To Date <span className="text-rose-500">*</span>
+            </label>
+            <input
+              id="audit-to-date"
+              type="date"
+              value={value.audit_to_date}
+              min={value.audit_from_date || undefined}
+              onChange={set('audit_to_date')}
               disabled={disabled}
               className={inputCls}
             />

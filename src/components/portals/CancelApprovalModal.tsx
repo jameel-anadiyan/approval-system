@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { RequestRecord, paymentSummary } from '../../types/database';
+import { RequestRecord, paymentSummary, isDisbursementAssociated } from '../../types/database';
 import { ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { formatINR } from '../../lib/formatters';
@@ -22,7 +22,7 @@ export const CancelApprovalModal: React.FC<CancelApprovalModalProps> = ({ isOpen
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pay = paymentSummary(request);
-  const isNoPayment = request.request_type === 'discount' || request.request_type === 'stock_transfer' || request.request_type === 'non_cash';
+  const isNoPayment = !isDisbursementAssociated(request.request_type);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

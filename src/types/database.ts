@@ -22,7 +22,30 @@ export type HeadConsultationStatus = 'pending' | 'agreed' | 'disagreed';
 
 export type FileKind = 'document' | 'voice_note';
 
-export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'asset_below_20k' | 'non_cash' | 'stock_transfer' | 'petty_cash';
+export type RequestType =
+  | 'general'
+  | 'discount'
+  | 'exhibition'
+  | 'asset'
+  | 'asset_below_20k'
+  | 'non_cash'
+  | 'stock_transfer'
+  | 'petty_cash'
+  | 'agreement'
+  | 'statutory_payment'
+  | 'audit_report';
+
+export const SPECIAL_REQUEST_TYPES: RequestType[] = ['agreement', 'statutory_payment', 'audit_report'];
+
+export const isSpecialRequestType = (type?: RequestType | string | null): boolean =>
+  type === 'agreement' || type === 'statutory_payment' || type === 'audit_report';
+
+export const isNonCashRequestType = (type?: RequestType | string | null): boolean =>
+  type === 'discount' ||
+  type === 'non_cash' ||
+  type === 'stock_transfer' ||
+  type === 'agreement' ||
+  type === 'audit_report';
 
 export type QuoteStatus = 'pending' | 'selected' | 'rejected';
 
@@ -153,6 +176,24 @@ export interface PettyCashDetails {
   total_amount?: number | null;
 }
 
+export interface AgreementDetails {
+  description?: string | null;
+}
+
+export interface StatutoryPaymentDetails {
+  payment_amount?: number | null;
+  payment_date?: string | null;
+  due_date?: string | null;
+  description?: string | null;
+}
+
+export interface AuditReportDetails {
+  audit_from_date?: string | null;
+  audit_to_date?: string | null;
+  audit_firm?: string | null;
+  description?: string | null;
+}
+
 export interface PettyCashDealer {
   head_id: string;
   head_name: string;
@@ -185,10 +226,11 @@ export interface BankAccountDetails {
 }
 
 export const isDisbursementAssociated = (type?: RequestType | string | null): boolean =>
-  Boolean(type && type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer');
+  Boolean(type && !isNonCashRequestType(type));
 
 export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>
   & Partial<AssetDetails> & Partial<StockTransferDetails> & Partial<NonCashDetails> & Partial<PettyCashDetails>
+  & Partial<AgreementDetails> & Partial<StatutoryPaymentDetails> & Partial<AuditReportDetails>
   & RequestShopChoice & Partial<BankAccountDetails>;
 
 export interface Department {

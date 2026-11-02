@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { supabase } from './supabase';
 import { errMsg } from './errorUtils';
-import type { RequestRecord, WhatsAppConfig } from '../types/database';
+import { isNonCashRequestType, type RequestRecord, type WhatsAppConfig } from '../types/database';
 import { formatINR } from './formatters';
 import { MOCK_USERS } from './mockData';
 
@@ -1475,7 +1475,7 @@ export async function sendApprovalWhatsAppNotification(
   const amountStr =
     request.request_type === 'stock_transfer'
       ? `Stock Transfer (MRP: ${formatINR(request.amount || 0)})`
-      : request.request_type === 'non_cash'
+      : isNonCashRequestType(request.request_type)
       ? 'Non-Cash (No direct disbursement)'
       : formatINR(request.amount || 0);
 

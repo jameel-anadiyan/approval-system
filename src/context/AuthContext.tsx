@@ -27,8 +27,18 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const SANDBOX_USER_KEY = 'approval_app_sandbox_user';
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
+let ayishaAuthBootstrapped = false;
 
 async function loadProfile(userId: string): Promise<Profile | null> {
+  if (!ayishaAuthBootstrapped) {
+    ayishaAuthBootstrapped = true;
+    try {
+      await supabase.rpc('ensure_ayisha_special_requests_enabled');
+    } catch {
+      /* ignore if migration 0080 not yet applied */
+    }
+  }
+
   const { data, error } = await supabase
     .from('profiles')
     .select('*, department:departments(*), shop:shops(*), region:regions(*)')

@@ -16,6 +16,9 @@ import {
   entryAvailable,
   DisbursementMode,
   BankAccountDetails,
+  isDisbursementAssociated,
+  isNonCashRequestType,
+  isSpecialRequestType,
 } from '../types/database';
 import { supabase, invokeEdgeFunction } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -35,6 +38,10 @@ import {
   isOwningDepartmentHead,
 } from '../lib/workflow';
 import { generatePettyCashFormPdf } from '../lib/pettyCashFormPdf';
+import {
+  generateSpecialRequestFormPdf,
+  specialRequestFormFileName,
+} from '../lib/specialRequestFormPdf';
 
 type Result = { success: boolean; error?: string; warning?: string };
 
@@ -703,10 +710,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           p_type: type,
           p_title: data.title,
           p_amount:
-            type === 'non_cash'
+            isNonCashRequestType(type)
               ? 0
               : type === 'general' ||
                 type === 'petty_cash' ||
+                type === 'statutory_payment' ||
                 type === 'asset' ||
                 type === 'asset_below_20k' ||
                 type === 'stock_transfer'
@@ -1446,6 +1454,55 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  const syncSpecialFormToStorage = async (id: string, fallback?: RequestRecord) => {
+    const cached = fallback || getRequestById(id);
+    const { data: liveRow } = await supabase
+      .from('requests')
+      .select(
+        'id, request_no, request_type, title, requester_name, shop_name, owner_head_name, assigned_entry_user_name, disbursement_mode, amount, notes, details, submitted_at, created_at, bank_account_holder_name, bank_account_no, bank_ifsc, bank_name, enter_bank_details_later, files:request_files(*)'
+      )
+      .eq('id', id)
+      .maybeSingle();
+
+    const source = ((liveRow as unknown as RequestRecord | null) || cached) as RequestRecord | undefined;
+    if (!source || !isSpecialRequestType(source.request_type)) return;
+
+    const { blob, pageCount, fileName } = await generateSpecialRequestFormPdf({
+      ...source,
+      files: source.files || cached?.files || [],
+    });
+    const formPath = `${id}/${crypto.randomUUID()}-${fileName}`;
+    const { error: upFormErr } = await supabase.storage
+      .from('request-files')
+      .upload(formPath, blob, { contentType: 'application/pdf', upsert: false });
+    if (upFormErr) {
+      throw new Error(`Could not upload ${fileName}: ${upFormErr.message}`);
+    }
+    const { error: syncErr } = await supabase.rpc('sync_special_request_form_file', {
+      p_request_id: id,
+      p_storage_path: formPath,
+      p_original_name: fileName,
+      p_size_bytes: blob.size,
+      p_page_count: pageCount,
+    });
+    if (syncErr) {
+      const { error: regFallbackErr } = await supabase.rpc('register_file', {
+        p_request_id: id,
+        p_kind: 'document',
+        p_storage_path: formPath,
+        p_original_name: fileName,
+        p_mime_type: 'application/pdf',
+        p_size_bytes: blob.size,
+        p_page_count: pageCount,
+        p_duration_sec: null,
+      });
+      if (regFallbackErr) {
+        await supabase.storage.from('request-files').remove([formPath]);
+        throw new Error(`Could not attach ${fileName}: ${regFallbackErr.message}`);
+      }
+    }
+  };
+
   const submitRequest = async (
     id: string,
     entryUserId?: string | null
@@ -1480,7 +1537,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
 
         if (submitError) throw submitError;
-        const { data: row } = await supabase.from('requests').select('request_no').eq('id', id).maybeSingle();
+        const { data: row } = await supabase
+          .from('requests')
+          .select('request_no, request_type')
+          .eq('id', id)
+          .maybeSingle();
+
+        const submittedType = (row?.request_type as RequestType | undefined) || getRequestById(id)?.request_type;
+        if (isSpecialRequestType(submittedType)) {
+          try {
+            await syncSpecialFormToStorage(id);
+          } catch (formErr) {
+            console.warn('Special request form sync on submit warning:', formErr);
+          }
+        }
+
         try {
           await loadRequests();
         } catch (loadErr) {
@@ -1499,7 +1570,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const isHead = user.role === 'head';
     const isClerk = user.role === 'clerk';
     const isPettyCash = current.request_type === 'petty_cash';
-    const isPaymentNeeded = current.request_type !== 'discount' && current.request_type !== 'non_cash' && current.request_type !== 'stock_transfer';
+    const isHeadOnlySpecial =
+      current.request_type === 'agreement' || current.request_type === 'statutory_payment';
+    const isAuditReport = current.request_type === 'audit_report';
+    const isPaymentNeeded = isDisbursementAssociated(current.request_type);
     const needsEntryAccount = isHead || isClerk || isPettyCash;
     if (needsEntryAccount && isPaymentNeeded && !current.assigned_entry_user_id && !entryUserId) {
       return { success: false, error: 'Please select a Disbursement Entry Account before submitting.' };
@@ -1527,6 +1601,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         : isHead && (!current.owner_head_id || current.owner_head_id === user.id)
         ? 'pending_admin_approval'
         : 'pending_head_approval'
+      : isHeadOnlySpecial
+      ? isHead || isClerk
+        ? 'pending_head_approval'
+        : mockEmpRh
+        ? 'pending_regional_review'
+        : 'submitted'
+      : isAuditReport
+      ? isHead
+        ? 'pending_admin_approval'
+        : isClerk
+        ? 'pending_head_review'
+        : mockEmpRh
+        ? 'pending_regional_review'
+        : 'submitted'
       : isHead
       ? 'pending_admin_approval'
       : isClerk
@@ -1541,6 +1629,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         : toStatus === 'pending_head_approval'
         ? 'B'
         : undefined
+      : isHeadOnlySpecial && (isHead || isClerk)
+      ? 'B'
+      : isAuditReport && (isHead || isClerk)
+      ? 'A'
       : isClerk
       ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'A' : 'B')
       : undefined;
@@ -1558,6 +1650,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? toStatus === 'pending_regional_review'
           ? `Petty Cash submitted to Regional Head (Target Head: ${current.owner_head_name || 'Petty Cash Head'}).`
           : `Petty Cash routed directly to ${current.owner_head_name || 'Petty Cash Head'} (clerk skipped).`
+        : isHeadOnlySpecial && (isHead || isClerk)
+        ? 'Routed directly for Department Head approval (Route B — Admin approval not required).'
+        : isAuditReport && isHead
+        ? 'Audit Report routed directly to Administrator for final approval.'
+        : isAuditReport && isClerk
+        ? 'Audit Report routed on Route A for Department Head review & Administrator approval.'
         : isHead
         ? 'Department Head request routed directly to Admin for approval.'
         : isClerk
@@ -1662,15 +1760,44 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const current = getRequestById(id);
     if (!current) return { success: false, error: 'Request not found' };
 
-    // High-value rule: Route B is not allowed above the configured threshold (Discount & Stock Transfer are always B)
-    if (route === 'B' && current.request_type !== 'discount' && current.request_type !== 'stock_transfer' && current.amount > threshold) {
+    if (
+      route === 'A' &&
+      (current.request_type === 'agreement' || current.request_type === 'statutory_payment')
+    ) {
+      return {
+        success: false,
+        error: `${current.request_type === 'agreement' ? 'Agreement' : 'Statutory Payment'} requests only require Department Head approval (Route B).`,
+      };
+    }
+
+    if (route === 'B' && current.request_type === 'audit_report') {
+      return {
+        success: false,
+        error: 'Audit Report requests are approved exclusively by the Administrator (Route A).',
+      };
+    }
+
+    // High-value rule: Route B is not allowed above the configured threshold (Discount, Stock Transfer, Agreement & Statutory Payment are always B)
+    if (
+      route === 'B' &&
+      current.request_type !== 'discount' &&
+      current.request_type !== 'stock_transfer' &&
+      current.request_type !== 'agreement' &&
+      current.request_type !== 'statutory_payment' &&
+      current.amount > threshold
+    ) {
       return {
         success: false,
         error: `Requests above ₹${threshold.toLocaleString('en-IN')} must take Route A (Admin approval required).`,
       };
     }
 
-    if (route === 'B' && current.requester_role === 'head') {
+    if (
+      route === 'B' &&
+      current.requester_role === 'head' &&
+      current.request_type !== 'agreement' &&
+      current.request_type !== 'statutory_payment'
+    ) {
       return { success: false, error: 'A Department Head cannot approve their own request.' };
     }
 
@@ -1760,6 +1887,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (newRoute === 'A') {
+      if (current.request_type === 'agreement' || current.request_type === 'statutory_payment') {
+        return {
+          success: false,
+          error: `${current.request_type === 'agreement' ? 'Agreement' : 'Statutory Payment'} requests do not require Admin approval and must stay on Route B.`,
+        };
+      }
       if (current.status === 'pending_head_review') {
         return { success: false, error: 'This request is already in To Review (Route A).' };
       }
@@ -1770,6 +1903,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         };
       }
     } else {
+      if (current.request_type === 'audit_report') {
+        return {
+          success: false,
+          error: 'Audit Report requests are approved exclusively by the Administrator and must stay on Route A.',
+        };
+      }
       if (
         (current.request_type === 'asset' || current.request_type === 'asset_below_20k') &&
         !current.selected_quote_id
@@ -1779,7 +1918,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (current.status === 'pending_head_approval') {
         return { success: false, error: 'This request is already in To Approve (Route B).' };
       }
-      if (current.requester_role === 'head') {
+      if (
+        current.requester_role === 'head' &&
+        current.request_type !== 'agreement' &&
+        current.request_type !== 'statutory_payment'
+      ) {
         return {
           success: false,
           error: 'A Department Head request must stay on Route A (Admin approval required).',
@@ -1795,6 +1938,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         current.request_type !== 'discount' &&
         current.request_type !== 'stock_transfer' &&
         current.request_type !== 'non_cash' &&
+        current.request_type !== 'agreement' &&
+        current.request_type !== 'statutory_payment' &&
         Number(current.amount) > threshold
       ) {
         return {
@@ -2443,6 +2588,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               throw new Error(`Could not attach Petty Cash Form Below 1000: ${regFallbackErr.message}`);
             }
           }
+        } else if (pettySource && isSpecialRequestType(pettySource.request_type)) {
+          await syncSpecialFormToStorage(id, pettySource);
         }
 
         const { data, error } = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
@@ -2603,7 +2750,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           file_name: `${approvalNo}_packet.pdf`,
           storage_path: `signed/${approvalNo}_packet.pdf`,
           sha256: 'a9f24e7821bc19e3489d71fa90bce32148b598710fa982341209bca3482910fa',
-          page_count: (current.files?.length || 1) + (current.request_type === 'petty_cash' ? 2 : 1),
+          page_count:
+            (current.files?.length || 1) +
+            (current.request_type === 'petty_cash' || isSpecialRequestType(current.request_type) ? 2 : 1),
           created_at: new Date().toISOString(),
         },
         ...(current.request_type === 'petty_cash'
@@ -2616,6 +2765,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 file_name: `${approvalNo}_01_petty_cash_form_below_1000.pdf`,
                 storage_path: `signed/${approvalNo}_01_petty_cash_form_below_1000.pdf`,
                 sha256: 'b4e93c6120ad88f13290e44718bc01129044ab3219fc882341209bca3482910fb',
+                page_count: 1,
+                created_at: new Date().toISOString(),
+              },
+            ]
+          : isSpecialRequestType(current.request_type)
+          ? [
+              {
+                id: `signed-sp-form-${Date.now()}`,
+                request_id: id,
+                source_file_id: null,
+                is_packet: false,
+                file_name: `${approvalNo}_01_${specialRequestFormFileName(current.request_type)}`,
+                storage_path: `signed/${approvalNo}_01_${specialRequestFormFileName(current.request_type)}`,
+                sha256: 'c7a12f5820ad88f13290e44718bc01129044ab3219fc882341209bca3482910fc',
                 page_count: 1,
                 created_at: new Date().toISOString(),
               },
@@ -3767,7 +3930,26 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (isBackendConnected) {
       for (const file of files) {
-        const contentType = file.type || 'application/pdf';
+        const lowerName = file.name.toLowerCase();
+        const inferredMime =
+          lowerName.endsWith('.xlsx')
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : lowerName.endsWith('.xls')
+            ? 'application/vnd.ms-excel'
+            : lowerName.endsWith('.csv')
+            ? 'text/csv'
+            : lowerName.endsWith('.docx')
+            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : lowerName.endsWith('.doc')
+            ? 'application/msword'
+            : lowerName.match(/\.(jpe?g)$/i)
+            ? 'image/jpeg'
+            : lowerName.endsWith('.png')
+            ? 'image/png'
+            : lowerName.endsWith('.webp')
+            ? 'image/webp'
+            : 'application/pdf';
+        const contentType = file.type || inferredMime;
         const safe = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);
         const path = `${requestId}/${crypto.randomUUID()}-${safe}`;
         const { error: upErr } = await supabase.storage

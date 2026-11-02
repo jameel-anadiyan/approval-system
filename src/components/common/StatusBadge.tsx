@@ -1,5 +1,5 @@
 import React from 'react';
-import { RequestStatus, RequestType } from '../../types/database';
+import { RequestStatus, RequestType, isDisbursementAssociated } from '../../types/database';
 import { STATUS_META, TYPE_BADGES, TYPE_LABELS } from '../../lib/formatters';
 
 interface StatusBadgeProps {
@@ -21,10 +21,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
     description: '',
   };
-  const isNoDisbursement =
-    requestType === 'discount' ||
-    requestType === 'non_cash' ||
-    requestType === 'stock_transfer';
+  const isNoDisbursement = Boolean(requestType && !isDisbursementAssociated(requestType));
 
   const meta =
     status === 'approved'
@@ -35,6 +32,10 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
             description:
               requestType === 'stock_transfer'
                 ? 'Stock transfer approved and signed. Internal movement complete.'
+                : requestType === 'agreement'
+                ? 'Agreement approved and signed by Department Head. No disbursement needed.'
+                : requestType === 'audit_report'
+                ? 'Audit Report approved and signed by Administrator. No disbursement needed.'
                 : requestType === 'non_cash'
                 ? 'Non-cash request approved. No disbursement needed.'
                 : 'Discount approved and signed. No payment step.',

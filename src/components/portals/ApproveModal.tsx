@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Modal } from '../common/Modal';
-import { RequestRecord } from '../../types/database';
+import { RequestRecord, isDisbursementAssociated, isNonCashRequestType } from '../../types/database';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests, type ActionVoice } from '../../context/RequestContext';
 import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
@@ -212,6 +212,8 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
       description={
         rType === 'stock_transfer'
           ? `Stock Transfer ${request.request_no || ''} · Total MRP: ${formatINR(request.amount)}`
+          : isNonCashRequestType(rType)
+          ? `${request.request_no || 'Request'} · Non-Cash (No Disbursement)`
           : `Request ${request.request_no || ''} for ${formatINR(request.amount)}`
       }
       maxWidth="md"
@@ -416,7 +418,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             <p className="text-xs text-slate-500 mt-1">
               {rType === 'stock_transfer'
                 ? 'Stock transfer approved and signed. Internal movement complete (no disbursement).'
-                : rType === 'discount' || rType === 'non_cash'
+                : !isDisbursementAssociated(rType)
                 ? 'Request approved and signed. No disbursement is needed for this request.'
                 : 'All documents stamped and ready for disbursement.'}
             </p>
