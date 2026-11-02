@@ -1466,17 +1466,17 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
 
         let submitError = null;
-        try {
-          const { error } = await supabase.rpc('submit_request', {
-            p_request_id: id,
-            p_entry_user_id: entryUserId || null,
-          });
-          submitError = error;
-        } catch {
-          const { error } = await supabase.rpc('submit_request', {
+        const { error: firstErr } = await supabase.rpc('submit_request', {
+          p_request_id: id,
+          p_entry_user_id: entryUserId || null,
+        });
+        if (firstErr && (firstErr.code === 'PGRST202' || firstErr.message?.includes('schema cache'))) {
+          const { error: secondErr } = await supabase.rpc('submit_request', {
             p_request_id: id,
           });
-          submitError = error;
+          submitError = secondErr;
+        } else {
+          submitError = firstErr;
         }
 
         if (submitError) throw submitError;

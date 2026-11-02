@@ -180,6 +180,8 @@ export interface BankAccountDetails {
   bank_account_holder_name?: string | null;
   bank_verified?: boolean;
   bank_verification_message?: string | null;
+  assigned_entry_user_id?: string | null;
+  assigned_entry_user_name?: string | null;
 }
 
 export const isDisbursementAssociated = (type?: RequestType | string | null): boolean =>

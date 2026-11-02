@@ -99,18 +99,22 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
 
   useEffect(() => {
-    if (!isOpen || !isPettyCash) return;
+    if (!isOpen) return;
     let alive = true;
-    fetchPettyCashDealers(isBackendConnected, dir.users).then((dealers) => {
-      if (alive) setPettyCashDealers(dealers);
-    });
-    fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
-      if (alive) setEntryOfficers(officers);
-    });
+    if (isPettyCash) {
+      fetchPettyCashDealers(isBackendConnected, dir.users).then((dealers) => {
+        if (alive) setPettyCashDealers(dealers);
+      });
+    }
+    if (isPaymentNeeded) {
+      fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
+        if (alive) setEntryOfficers(officers);
+      });
+    }
     return () => {
       alive = false;
     };
-  }, [isOpen, isPettyCash, isBackendConnected, dir.users]);
+  }, [isOpen, isPettyCash, isPaymentNeeded, isBackendConnected, dir.users]);
   const shopState = useRequestShops();
   const exhibitionShopState = useExhibitionShops(shopState, request.requester_id);
   const pickShop = needsShopPick(type);
@@ -248,6 +252,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         bank_account_holder_name: disbursementMode === 'bank' && !enterBankDetailsLater ? accountHolderName.trim() || null : null,
         bank_verified: disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerified : false,
         bank_verification_message: disbursementMode === 'bank' && !enterBankDetailsLater ? bankVerificationMessage : null,
+        assigned_entry_user_id: assignedEntryUserId || null,
       };
     }
     return d;
@@ -325,7 +330,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
             ? null
             : targetHeadId || undefined,
         assigned_entry_user_id:
-          isPettyCash && entryAccountChanged
+          entryAccountChanged
             ? assignedEntryUserId || null
             : undefined,
       });
@@ -513,6 +518,33 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
             onVerificationMessageChange={setBankVerificationMessage}
             disabled={busy}
           />
+        )}
+        {!isPettyCash && isPaymentNeeded && (user?.role === 'head' || user?.role === 'clerk' || user?.role === 'admin' || user?.role === 'regional_head') && (
+          <div className="p-3.5 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-1.5">
+            <label htmlFor="edit-payment-entry" className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+              <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Disbursement Entry Account {(user?.role === 'head' || user?.role === 'clerk') && <span className="text-rose-500">*</span>}</span>
+            </label>
+            <select
+              id="edit-payment-entry"
+              value={assignedEntryUserId}
+              onChange={(e) => setAssignedEntryUserId(e.target.value)}
+              disabled={busy}
+              className="w-full text-xs sm:text-sm font-semibold p-2.5 rounded-xl border border-indigo-300 bg-white text-slate-800 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-hidden"
+            >
+              <option value="">-- Choose Disbursement Entry Account --</option>
+              {entryOfficers.map((officer) => (
+                <option key={officer.id} value={officer.id}>
+                  {officer.full_name} (@{officer.username}){officer.designation ? ` – ${officer.designation}` : ''}
+                </option>
+              ))}
+              {request.assigned_entry_user_id && !entryOfficers.some((o) => o.id === request.assigned_entry_user_id) && (
+                <option value={request.assigned_entry_user_id}>
+                  {request.assigned_entry_user_name || 'Assigned Entry Account'} (Current)
+                </option>
+              )}
+            </select>
+          </div>
         )}
         {type === 'general' && (
           <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80">

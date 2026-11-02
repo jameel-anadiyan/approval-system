@@ -880,7 +880,7 @@ export const RequestDetailPage: React.FC = () => {
                       return;
                     }
                     runInline(async () => {
-                      const res = await submitRequest(request.id);
+                      const res = await submitRequest(request.id, request.assigned_entry_user_id);
                       return res;
                     }, 'Request resubmitted.');
                   }}
@@ -2133,7 +2133,7 @@ export const RequestDetailPage: React.FC = () => {
                     return;
                   }
                   runInline(async () => {
-                    const res = await submitRequest(request.id);
+                    const res = await submitRequest(request.id, request.assigned_entry_user_id);
                     return res;
                   }, request.status === 'returned' ? 'Request resubmitted.' : 'Request submitted.');
                 }}
