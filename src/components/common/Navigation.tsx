@@ -176,14 +176,23 @@ export const Navigation: React.FC = () => {
       (users.find((u) => u.id === user.id)?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
   );
 
-  const pettyCashCount = isPettyCashDealerHead
-    ? requests.filter(
-        (r) =>
-          typeOf(r) === 'petty_cash' &&
-          (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
-          isOwningDepartmentHead(r, user)
-      ).length
-    : 0;
+  const pettyCashCount =
+    role === 'admin'
+      ? requests.filter(
+          (r) =>
+            typeOf(r) === 'petty_cash' &&
+            (r.status === 'pending_admin_approval' ||
+              (r.status === 'approving' &&
+                (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000)))
+        ).length
+      : isPettyCashDealerHead
+      ? requests.filter(
+          (r) =>
+            typeOf(r) === 'petty_cash' &&
+            (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
+            isOwningDepartmentHead(r, user)
+        ).length
+      : 0;
 
   const pettyCashNavItem: NavItem = {
     label: 'Petty Cash',
@@ -274,6 +283,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
+        pettyCashNavItem,
         billMissingNavItem,
         { label: 'Regions', path: '/admin/regions', icon: MapPin },
         { label: 'Regional Heads', path: '/admin/regional-heads', icon: Globe },

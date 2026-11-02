@@ -15,9 +15,14 @@ export const PettyCashPage: React.FC = () => {
   const { requests } = useRequests();
   const navigate = useNavigate();
 
+  const canRaise = role === 'head';
+
   const scopedPettyCash = useMemo<RequestRecord[]>(() => {
-    if (!user || role !== 'head') return [];
+    if (!user || (role !== 'head' && role !== 'admin')) return [];
     const allPetty = requests.filter((r) => typeOf(r) === 'petty_cash');
+    if (role === 'admin') {
+      return allPetty.filter((r) => r.status !== 'draft' || r.requester_id === user.id);
+    }
     return allPetty.filter(
       (r) =>
         (r.status !== 'draft' || r.requester_id === user.id) &&
@@ -29,12 +34,23 @@ export const PettyCashPage: React.FC = () => {
   }, [requests, user, role]);
 
   const actionItems = useMemo<RequestRecord[]>(() => {
-    if (!user || role !== 'head') return [];
-    return scopedPettyCash.filter(
-      (r) =>
-        (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
-        isOwningDepartmentHead(r, user)
-    );
+    if (!user) return [];
+    if (role === 'admin') {
+      return scopedPettyCash.filter(
+        (r) =>
+          r.status === 'pending_admin_approval' ||
+          (r.status === 'approving' &&
+            (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
+      );
+    }
+    if (role === 'head') {
+      return scopedPettyCash.filter(
+        (r) =>
+          (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
+          isOwningDepartmentHead(r, user)
+      );
+    }
+    return [];
   }, [scopedPettyCash, user, role]);
 
   const inProgressItems = useMemo(
@@ -80,7 +96,9 @@ export const PettyCashPage: React.FC = () => {
         <div>
           <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-800 bg-teal-50 px-2.5 py-1 rounded-full border border-teal-200 mb-1.5">
             <Wallet className="w-3.5 h-3.5 text-teal-600" />
-            <span>Petty Cash Dealing Head · Below 1000</span>
+            <span>
+              {role === 'admin' ? 'Administrator · Petty Cash Below 1000' : 'Petty Cash Dealing Head · Below 1000'}
+            </span>
           </span>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display flex items-center gap-2.5">
             <span>Petty Cash Requests</span>
@@ -91,19 +109,23 @@ export const PettyCashPage: React.FC = () => {
             )}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Expenses up to ₹1,000 routed directly to you as a Petty Cash Dealing Department Head.
+            {role === 'admin'
+              ? 'All Petty Cash requests (up to ₹1,000) across departments and regions.'
+              : 'Expenses up to ₹1,000 routed directly to you as a Petty Cash Dealing Department Head.'}
           </p>
         </div>
 
-        <button
-          type="button"
-          id="raise-petty-cash-btn"
-          onClick={() => navigate('/new', { state: { defaultType: 'petty_cash' } })}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-md shadow-teal-200 transition-all self-start sm:self-auto cursor-pointer"
-        >
-          <PlusCircle className="w-4 h-4" />
-          <span>Raise Petty Cash</span>
-        </button>
+        {canRaise && (
+          <button
+            type="button"
+            id="raise-petty-cash-btn"
+            onClick={() => navigate('/new', { state: { defaultType: 'petty_cash' } })}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-md shadow-teal-200 transition-all self-start sm:self-auto cursor-pointer"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>Raise Petty Cash</span>
+          </button>
+        )}
       </div>
 
       {/* Summary Strip */}
@@ -195,6 +217,8 @@ export const PettyCashPage: React.FC = () => {
         emptyDescription={
           tab === 'action'
             ? 'All Petty Cash requests requiring your action have been cleared.'
+            : role === 'admin'
+            ? 'All Petty Cash requests (up to ₹1,000) across the organization will appear here.'
             : 'Petty Cash requests (up to ₹1,000) assigned to you will appear here.'
         }
       />

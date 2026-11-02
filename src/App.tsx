@@ -119,10 +119,11 @@ const RequireExhibitionWaitlist: React.FC = () => {
   return <Outlet />;
 };
 
-/** Department Head enabled as a Petty Cash Dealer. */
-const RequirePettyCashDealerHead: React.FC = () => {
+/** Admin, or Department Head enabled as a Petty Cash Dealer. */
+const RequirePettyCashTabAccess: React.FC = () => {
   const { user, role } = useAuth();
   const dir = useDirectory();
+  if (role === 'admin' && user) return <Outlet />;
   const dirMe = dir.users.find((u) => u.id === user?.id);
   const isPettyCashDealer = Boolean(
     user && role === 'head' && (dirMe?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
@@ -228,8 +229,8 @@ export const App: React.FC = () => {
                 <Route path="returned" element={<ReturnedRequestsPage />} />
                 <Route path="bill-missing" element={<BillMissingPage />} />
 
-                {/* Petty Cash tab (Petty Cash Dealing Department Heads only) */}
-                <Route element={<RequirePettyCashDealerHead />}>
+                {/* Petty Cash tab (Admin + Petty Cash Dealing Department Heads) */}
+                <Route element={<RequirePettyCashTabAccess />}>
                   <Route path="petty-cash" element={<PettyCashPage />} />
                 </Route>
 
