@@ -94,13 +94,23 @@ export const AdminSettingsPage: React.FC = () => {
     }
   }, [waConfig.access_token, waConfig.phone_number_id]);
 
+  // Auto-refresh Meta template status while any template is in PENDING review
+  const hasPendingTemplates = Object.values(templatesMap).some((t) => t.status === 'PENDING');
+  useEffect(() => {
+    if (!hasPendingTemplates || !waConfig.access_token) return;
+    const timer = setInterval(() => {
+      checkTemplateStatus(waConfig);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [hasPendingTemplates, waConfig.access_token]);
+
   const handleRegisterTemplate = async (templateKey: string) => {
     setCreatingTemplate(true);
     try {
       const res = await createMetaApprovalTemplate(waConfig, templateKey);
       if (res.success) {
         setFlash({
-          text: `Template "${templateKey}" submitted to Meta WABA (${res.status}).`,
+          text: `Template "${templateKey}" synced in Meta WABA (${res.status}).`,
           ok: true,
         });
         await checkTemplateStatus(waConfig);
@@ -118,11 +128,24 @@ export const AdminSettingsPage: React.FC = () => {
     setRegisteringAll(true);
     try {
       const res = await registerAllMetaTemplates(waConfig);
-      setFlash({
-        text: `Submitted standard templates to Meta WABA (${res.registeredCount} active/registered).`,
-        ok: true,
-      });
       await checkTemplateStatus(waConfig);
+      const failed = res.results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        const reason = failed.map((f) => `${f.name}: ${f.error || 'failed'}`).join('; ');
+        setFlash({
+          text: `Synced ${res.registeredCount}/${res.results.length} templates. Errors: ${reason}`,
+          ok: false,
+        });
+      } else {
+        const pendingCount = res.results.filter((r) => r.status === 'PENDING').length;
+        setFlash({
+          text:
+            pendingCount > 0
+              ? `All ${res.registeredCount}/${res.results.length} templates synced in Meta WABA (${pendingCount} under Meta auto-review).`
+              : `All ${res.registeredCount}/${res.results.length} templates synced and Meta Approved!`,
+          ok: true,
+        });
+      }
     } catch (e: unknown) {
       setFlash({ text: String(e), ok: false });
     } finally {

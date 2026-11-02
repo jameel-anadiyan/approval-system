@@ -777,8 +777,37 @@ export async function createMetaApprovalTemplate(
   if (!token || !wabaId) return { success: false, error: 'Missing access token or WABA ID' };
 
   const spec = META_TEMPLATES[templateKey] || META_TEMPLATE_SPEC;
+  const targetLang = cfg.template_language || spec.language || 'en';
 
-  // 1. Use /api/whatsapp-meta server proxy first (required for DOCUMENT header resumable uploads)
+  // 0. Check Meta WABA directly first (CORS-allowed) — if already registered, return immediately
+  try {
+    const checkRes = await fetch(
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaId)}/message_templates?name=${encodeURIComponent(spec.name)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+    if (checkRes.ok) {
+      const checkJson = (await checkRes.json()) as {
+        data?: { id: string; name: string; status: string; language: string }[];
+      };
+      const list = Array.isArray(checkJson?.data) ? checkJson.data : [];
+      const approved = list.find((t) => t.name === spec.name && t.status === 'APPROVED');
+      const exact = list.find((t) => t.name === spec.name && t.language === targetLang);
+      const found = approved || exact || list.find((t) => t.name === spec.name);
+      if (found) {
+        return {
+          success: true,
+          templateId: found.id,
+          status: found.status || 'PENDING',
+        };
+      }
+    }
+  } catch {
+    /* continue to proxy / creation */
+  }
+
+  // 1. Use /api/whatsapp-meta server proxy (handles DOCUMENT header resumable uploads)
   try {
     const proxyRes = await fetch('/api/whatsapp-meta', {
       method: 'POST',
@@ -791,13 +820,19 @@ export async function createMetaApprovalTemplate(
         name: spec.name,
         title: spec.title,
         category: spec.category,
-        language: cfg.template_language || spec.language,
+        language: targetLang,
         header_format: spec.headerFormat || null,
         body_text: spec.bodyText,
         sample_values: spec.variables.map((v) => v.sample),
       }),
     });
-    const proxyData = await proxyRes.json();
+    const proxyText = await proxyRes.text();
+    let proxyData: { success?: boolean; templateId?: string; status?: string; error?: string } = {};
+    try {
+      proxyData = JSON.parse(proxyText);
+    } catch {
+      /* non-json error response */
+    }
     if (proxyRes.ok && proxyData?.success) {
       return {
         success: true,
@@ -998,7 +1033,7 @@ export async function sendWhatsAppDirect(
         },
       };
 
-      const tRes = await fetch(url, {
+      let tRes = await fetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -1007,9 +1042,32 @@ export async function sendWhatsAppDirect(
         body: JSON.stringify(templatePayload),
       });
 
-      const tData = await tRes.json();
+      let tData = await tRes.json();
       if (tRes.ok) {
         return { success: true, messageId: tData?.messages?.[0]?.id };
+      }
+
+      // Try alternate English locale (en <-> en_US) in case the other variant was approved first
+      if (templateLanguage === 'en' || templateLanguage === 'en_US') {
+        const altLang = templateLanguage === 'en' ? 'en_US' : 'en';
+        tRes = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...templatePayload,
+            template: {
+              ...templatePayload.template,
+              language: { code: altLang },
+            },
+          }),
+        });
+        tData = await tRes.json();
+        if (tRes.ok) {
+          return { success: true, messageId: tData?.messages?.[0]?.id };
+        }
       }
 
       console.warn(
