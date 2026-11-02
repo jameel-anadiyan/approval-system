@@ -17,6 +17,8 @@ import {
   FileText,
   Copy,
   RefreshCw,
+  Bot,
+  Link2,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { loadThreshold, saveThreshold } from '../../lib/directory';
@@ -31,6 +33,11 @@ import {
   createMetaApprovalTemplate,
   registerAllMetaTemplates,
   ensureDocumentTemplatesRegistered,
+  loadWhatsAppWebhookSettings,
+  saveWhatsAppWebhookSettings,
+  fetchMetaWebhookStatus,
+  activateMetaWebhookOverride,
+  type WhatsAppWebhookBotSettings,
   META_TEMPLATES,
   META_TEMPLATE_SPEC,
   DEFAULT_WHATSAPP_CONFIG,
@@ -64,6 +71,34 @@ export const AdminSettingsPage: React.FC = () => {
   const [templateTestResult, setTemplateTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [copiedTemplate, setCopiedTemplate] = useState(false);
 
+  // Interactive WhatsApp Bot ("all" Command) Webhook State
+  const [botSettings, setBotSettings] = useState<WhatsAppWebhookBotSettings>({
+    bot_secret: '',
+    verify_token: 'swa_approval_verify_2026',
+    forward_webhook_url: 'https://whatsapp.swaloyalty.com/api/webhooks/whatsapp',
+    migration_ready: false,
+  });
+  const [webhookStatus, setWebhookStatus] = useState<{
+    loading: boolean;
+    phoneCallback?: string;
+    applicationCallback?: string;
+    error?: string;
+  }>({ loading: false });
+  const [connectingWebhook, setConnectingWebhook] = useState(false);
+  const [copiedCallbackUrl, setCopiedCallbackUrl] = useState(false);
+
+  const checkWebhookStatus = async (cfg = waConfig) => {
+    if (!cfg.access_token || !cfg.phone_number_id) return;
+    setWebhookStatus((prev) => ({ ...prev, loading: true, error: undefined }));
+    const res = await fetchMetaWebhookStatus(cfg);
+    setWebhookStatus({
+      loading: false,
+      phoneCallback: res.phoneCallback,
+      applicationCallback: res.applicationCallback,
+      error: res.success ? undefined : res.error,
+    });
+  };
+
   const checkTemplateStatus = async (cfg = waConfig) => {
     setLoadingTemplateStatus(true);
     try {
@@ -88,6 +123,7 @@ export const AdminSettingsPage: React.FC = () => {
   useEffect(() => {
     if (waConfig.access_token && waConfig.phone_number_id) {
       checkTemplateStatus(waConfig);
+      checkWebhookStatus(waConfig);
       ensureDocumentTemplatesRegistered(waConfig)
         .then(() => checkTemplateStatus(waConfig))
         .catch(() => {});
@@ -189,7 +225,74 @@ export const AdminSettingsPage: React.FC = () => {
   useEffect(() => {
     loadThreshold(isBackendConnected).then(setThreshold);
     loadWhatsAppConfig(isBackendConnected).then(setWaConfig);
+    loadWhatsAppWebhookSettings(isBackendConnected).then(setBotSettings);
   }, [isBackendConnected]);
+
+  const botCallbackUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/api/whatsapp-webhook${
+          botSettings.bot_secret ? `?key=${encodeURIComponent(botSettings.bot_secret)}` : ''
+        }`
+      : '/api/whatsapp-webhook';
+
+  const isWebhookConnected = Boolean(
+    (webhookStatus.phoneCallback && webhookStatus.phoneCallback.includes('/api/whatsapp-webhook')) ||
+      (webhookStatus.applicationCallback && webhookStatus.applicationCallback.includes('/api/whatsapp-webhook'))
+  );
+
+  const handleConnectWebhook = async () => {
+    if (!botSettings.migration_ready || !botSettings.bot_secret) {
+      setFlash({
+        text: 'Please run SQL migration 0077_whatsapp_admin_approval_bot.sql in Supabase SQL Editor first, then reload this page.',
+        ok: false,
+      });
+      return;
+    }
+    if (typeof window !== 'undefined' && !window.location.origin.startsWith('https://')) {
+      setFlash({
+        text: 'Open this page on your deployed HTTPS URL to connect the live Meta Webhook.',
+        ok: false,
+      });
+      return;
+    }
+
+    setConnectingWebhook(true);
+    try {
+      await saveWhatsAppConfig(isBackendConnected, waConfig);
+      const savedBot = await saveWhatsAppWebhookSettings({
+        forward_webhook_url: botSettings.forward_webhook_url,
+        verify_token: botSettings.verify_token,
+      });
+      const activeSettings = savedBot.settings || botSettings;
+      if (savedBot.settings) setBotSettings(savedBot.settings);
+
+      const targetUrl = `${window.location.origin}/api/whatsapp-webhook?key=${encodeURIComponent(
+        activeSettings.bot_secret
+      )}`;
+      const res = await activateMetaWebhookOverride({
+        config: waConfig,
+        callbackUrl: targetUrl,
+        verifyToken: activeSettings.verify_token,
+      });
+
+      if (res.success) {
+        await checkWebhookStatus(waConfig);
+        setFlash({
+          text: 'WhatsApp Interactive Approval Bot connected in Meta! Send "all" to +91 80893 04002 from Admin WhatsApp.',
+          ok: true,
+        });
+      } else {
+        setFlash({
+          text: res.error || 'Could not set Meta webhook override.',
+          ok: false,
+        });
+      }
+    } catch (e: unknown) {
+      setFlash({ text: e instanceof Error ? e.message : String(e), ok: false });
+    } finally {
+      setConnectingWebhook(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -415,18 +518,147 @@ export const AdminSettingsPage: React.FC = () => {
         {/* Admin Notification Copy */}
         <div>
           <label className="block text-xs font-bold text-slate-700 mb-1">
-            Admin Notification WhatsApp Number (Optional)
+            Admin Notification &amp; Bot Authorized WhatsApp Number
           </label>
           <input
             type="tel"
             value={waConfig.admin_phone_number || ''}
             onChange={(e) => setWaConfig({ ...waConfig, admin_phone_number: e.target.value })}
-            placeholder="e.g. +91 98468 80713 (receives copy of every approved document)"
+            placeholder="e.g. +91 98468 80713 (receives approved copies & can use 'all' bot)"
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
           />
           <span className="text-[10px] text-slate-400 mt-0.5 block">
-            If provided, a duplicate copy of all approved document attachments will be sent to this phone number.
+            Receives duplicate approved PDFs AND is authorized (along with any active Admin user&apos;s WhatsApp number) to message <span className="font-mono font-bold text-slate-600">all</span> on WhatsApp to approve requests.
           </span>
+        </div>
+
+        {/* Interactive WhatsApp Admin Approval Bot ("all" Command) */}
+        <div className="p-4 rounded-xl bg-indigo-50/60 border border-indigo-200/80 space-y-3.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-indigo-600" />
+                <span className="text-xs font-bold text-slate-900">
+                  WhatsApp Interactive Admin Approval Bot (<span className="font-mono">&quot;all&quot;</span> Command)
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
+                Message <span className="font-mono font-bold text-indigo-800">all</span> from Admin WhatsApp to{' '}
+                <span className="font-mono font-semibold">{waConfig.display_phone_number || '+91 80893 04002'}</span> to get a serial-numbered list of all To-Approve requests with{' '}
+                <span className="font-semibold">Approve All</span> &amp; <span className="font-semibold">Selected Only</span> options. Approvals automatically stamp PDFs and update the Web App live.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {isWebhookConnected ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                  Webhook Active
+                </span>
+              ) : botSettings.migration_ready ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Ready to Connect
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700 border border-slate-300">
+                  Run SQL 0077 First
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  loadWhatsAppWebhookSettings(isBackendConnected).then(setBotSettings);
+                  checkWebhookStatus(waConfig);
+                }}
+                disabled={webhookStatus.loading}
+                className="p-1.5 text-slate-500 hover:text-slate-800 rounded-lg bg-white border border-slate-200 transition-colors"
+                title="Refresh Webhook Status"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${webhookStatus.loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="sm:col-span-2">
+              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                Webhook Callback URL
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={botCallbackUrl}
+                  className="flex-1 text-[11px] p-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-mono outline-hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(botCallbackUrl);
+                    setCopiedCallbackUrl(true);
+                    setTimeout(() => setCopiedCallbackUrl(false), 2500);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-[11px] font-semibold text-slate-700 shrink-0"
+                >
+                  {copiedCallbackUrl ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                  <span>{copiedCallbackUrl ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                Verify Token
+              </label>
+              <input
+                type="text"
+                value={botSettings.verify_token}
+                onChange={(e) => setBotSettings({ ...botSettings, verify_token: e.target.value })}
+                className="w-full text-[11px] p-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-mono outline-hidden focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                Upstream Pass-Through Webhook (Non-Bot Traffic)
+              </label>
+              <input
+                type="url"
+                value={botSettings.forward_webhook_url}
+                onChange={(e) => setBotSettings({ ...botSettings, forward_webhook_url: e.target.value })}
+                placeholder="https://whatsapp.swaloyalty.com/api/webhooks/whatsapp"
+                className="w-full text-[11px] p-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-mono outline-hidden focus:border-indigo-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
+            <div className="text-[10px] text-slate-500 font-mono truncate max-w-md">
+              {webhookStatus.phoneCallback
+                ? `Meta Phone Webhook: ${webhookStatus.phoneCallback.split('?')[0]}`
+                : webhookStatus.applicationCallback
+                ? `Meta App Webhook: ${webhookStatus.applicationCallback}`
+                : 'Checking Meta webhook configuration…'}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleConnectWebhook}
+              disabled={connectingWebhook || !botSettings.migration_ready}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs disabled:opacity-50 transition-colors cursor-pointer"
+            >
+              {connectingWebhook ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+              <span>
+                {connectingWebhook
+                  ? 'Connecting Webhook…'
+                  : isWebhookConnected
+                  ? 'Re-Sync Webhook in Meta'
+                  : 'Connect Webhook in Meta'}
+              </span>
+            </button>
+          </div>
         </div>
 
         {/* WhatsApp Multi-Template Configuration Section */}

@@ -294,6 +294,116 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    if (action === 'get_webhook_status') {
+      const phoneId = String(body.phone_number_id || DEFAULT_PHONE_ID).trim();
+      const statusRes = await fetch(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(phoneId)}?fields=display_phone_number,verified_name,webhook_configuration`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+      const statusData = (await statusRes.json()) as any;
+      if (!statusRes.ok) {
+        return res.status(400).json({
+          success: false,
+          error: statusData?.error?.message || `Failed to inspect webhook (${statusRes.status})`,
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        display_phone_number: statusData?.display_phone_number || null,
+        verified_name: statusData?.verified_name || null,
+        webhook_configuration: statusData?.webhook_configuration || {},
+      });
+    }
+
+    if (action === 'configure_webhook') {
+      const phoneId = String(body.phone_number_id || DEFAULT_PHONE_ID).trim();
+      const wabaId = String(body.waba_id || DEFAULT_WABA_ID).trim();
+      const callbackUrl = String(body.callback_url || '').trim();
+      const verifyToken = String(body.verify_token || 'swa_approval_verify_2026').trim();
+
+      if (!callbackUrl || !callbackUrl.startsWith('https://')) {
+        return res.status(400).json({
+          success: false,
+          error: 'A public HTTPS callback_url is required by Meta Cloud API',
+        });
+      }
+
+      // 1. Set Phone-Number-Level Webhook Override on Meta Cloud API
+      const overrideRes = await fetch(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(phoneId)}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            webhook_configuration: {
+              override_callback_uri: callbackUrl,
+              verify_token: verifyToken,
+            },
+          }),
+        }
+      );
+      let overrideData = (await overrideRes.json().catch(() => ({}))) as any;
+
+      if (!overrideRes.ok) {
+        // Fallback: WABA-level subscribed_apps override if phone-level override is restricted
+        const wabaRes = await fetch(
+          `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(wabaId)}/subscribed_apps`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              override_callback_uri: callbackUrl,
+              verify_token: verifyToken,
+            }),
+          }
+        );
+        const wabaData = (await wabaRes.json().catch(() => ({}))) as any;
+        if (!wabaRes.ok) {
+          return res.status(400).json({
+            success: false,
+            error:
+              overrideData?.error?.message ||
+              wabaData?.error?.message ||
+              `Meta webhook override failed (${overrideRes.status})`,
+            raw: overrideData,
+          });
+        }
+        overrideData = wabaData;
+      }
+
+      // 2. Ensure WABA app subscription is active
+      await fetch(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(wabaId)}/subscribed_apps`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      ).catch(() => {});
+
+      // 3. Re-read live webhook_configuration
+      const verifyRes = await fetch(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(phoneId)}?fields=display_phone_number,verified_name,webhook_configuration`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+      const verifyJson = (await verifyRes.json().catch(() => ({}))) as any;
+
+      return res.status(200).json({
+        success: true,
+        result: overrideData,
+        webhook_configuration: verifyJson?.webhook_configuration || {},
+      });
+    }
+
     return res.status(400).json({ success: false, error: `Unknown action: ${action}` });
   } catch (err: any) {
     return res.status(500).json({

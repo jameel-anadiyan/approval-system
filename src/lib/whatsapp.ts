@@ -2097,3 +2097,147 @@ export async function sendTestWhatsAppTemplate(
     config: cfg,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Interactive Admin WhatsApp Bot ("all" Command) Webhook Helpers
+// ---------------------------------------------------------------------------
+
+export interface WhatsAppWebhookBotSettings {
+  bot_secret: string;
+  verify_token: string;
+  forward_webhook_url: string;
+  migration_ready: boolean;
+}
+
+export async function loadWhatsAppWebhookSettings(
+  isBackendConnected: boolean
+): Promise<WhatsAppWebhookBotSettings> {
+  if (isBackendConnected) {
+    try {
+      const { data, error } = await supabase.rpc('get_whatsapp_webhook_settings');
+      if (!error && data && typeof data === 'object') {
+        const d = data as Record<string, unknown>;
+        return {
+          bot_secret: String(d.bot_secret || ''),
+          verify_token: String(d.verify_token || 'swa_approval_verify_2026'),
+          forward_webhook_url: String(
+            d.forward_webhook_url || 'https://whatsapp.swaloyalty.com/api/webhooks/whatsapp'
+          ),
+          migration_ready: Boolean(d.bot_secret),
+        };
+      }
+    } catch {
+      /* SQL migration 0077 may not be applied yet */
+    }
+  }
+
+  return {
+    bot_secret: '',
+    verify_token: 'swa_approval_verify_2026',
+    forward_webhook_url: 'https://whatsapp.swaloyalty.com/api/webhooks/whatsapp',
+    migration_ready: false,
+  };
+}
+
+export async function saveWhatsAppWebhookSettings(params: {
+  forward_webhook_url: string;
+  verify_token: string;
+}): Promise<{ success: boolean; settings?: WhatsAppWebhookBotSettings; error?: string }> {
+  try {
+    const { data, error } = await supabase.rpc('update_whatsapp_webhook_settings', {
+      p_forward_webhook_url: params.forward_webhook_url,
+      p_verify_token: params.verify_token,
+    });
+    if (error) throw error;
+    const d = (data || {}) as Record<string, unknown>;
+    return {
+      success: true,
+      settings: {
+        bot_secret: String(d.bot_secret || ''),
+        verify_token: String(d.verify_token || 'swa_approval_verify_2026'),
+        forward_webhook_url: String(
+          d.forward_webhook_url || 'https://whatsapp.swaloyalty.com/api/webhooks/whatsapp'
+        ),
+        migration_ready: Boolean(d.bot_secret),
+      },
+    };
+  } catch (err: unknown) {
+    return { success: false, error: errMsg(err) };
+  }
+}
+
+export async function fetchMetaWebhookStatus(config: WhatsAppConfig): Promise<{
+  success: boolean;
+  applicationCallback?: string;
+  phoneCallback?: string;
+  error?: string;
+}> {
+  if (!config.access_token || !config.phone_number_id) {
+    return { success: false, error: 'Missing WhatsApp access token or Phone Number ID' };
+  }
+  try {
+    const res = await fetch('/api/whatsapp-meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'get_webhook_status',
+        access_token: config.access_token,
+        phone_number_id: config.phone_number_id,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.success) {
+      return { success: false, error: data?.error || `HTTP ${res.status}` };
+    }
+    const wc = data.webhook_configuration || {};
+    return {
+      success: true,
+      applicationCallback: wc.application || undefined,
+      phoneCallback: wc.phone_number || wc.whatsapp_business_account || undefined,
+    };
+  } catch (err: unknown) {
+    return { success: false, error: errMsg(err) };
+  }
+}
+
+export async function activateMetaWebhookOverride(params: {
+  config: WhatsAppConfig;
+  callbackUrl: string;
+  verifyToken: string;
+}): Promise<{
+  success: boolean;
+  phoneCallback?: string;
+  applicationCallback?: string;
+  error?: string;
+}> {
+  const { config, callbackUrl, verifyToken } = params;
+  if (!config.access_token || !config.phone_number_id) {
+    return { success: false, error: 'Missing WhatsApp access token or Phone Number ID' };
+  }
+  try {
+    const res = await fetch('/api/whatsapp-meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'configure_webhook',
+        access_token: config.access_token,
+        phone_number_id: config.phone_number_id,
+        waba_id: config.waba_id || DEFAULT_WHATSAPP_CONFIG.waba_id,
+        callback_url: callbackUrl,
+        verify_token: verifyToken,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.success) {
+      return { success: false, error: data?.error || `HTTP ${res.status}` };
+    }
+    const wc = data.webhook_configuration || {};
+    return {
+      success: true,
+      phoneCallback: wc.phone_number || wc.whatsapp_business_account || callbackUrl,
+      applicationCallback: wc.application || undefined,
+    };
+  } catch (err: unknown) {
+    return { success: false, error: errMsg(err) };
+  }
+}

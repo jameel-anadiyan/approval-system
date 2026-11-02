@@ -562,16 +562,34 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     reloadThreshold();
   }, [reloadThreshold, user?.id]);
 
-  // Live refresh: every workflow step notifies the next actor, so a new
-  // notification for me means some request I can see has changed.
+  // Live refresh: subscribes to notifications + direct request/signed_files updates
+  // so approvals performed via WhatsApp or other devices reflect automatically in real time.
   useEffect(() => {
     if (!isBackendConnected || !user) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleLiveRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadRequests(true);
+      }, 250);
+    };
+
     const channel = supabase
       .channel(`req-refresh-${user.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        () => loadRequests(true)
+        scheduleLiveRefresh
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'requests' },
+        scheduleLiveRefresh
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'signed_files' },
+        scheduleLiveRefresh
       )
       .subscribe();
     const onVisible = () => {
@@ -579,6 +597,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', onVisible);
     };

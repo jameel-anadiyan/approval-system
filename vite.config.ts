@@ -2,6 +2,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vite';
 import whatsappMetaHandler from './api/whatsapp-meta.ts';
+import whatsappWebhookHandler from './api/whatsapp-webhook.ts';
 
 const SANDBOX_API_KEY = process.env.SANDBOX_API_KEY || 'key_live_e7e42f3954444f1db9418f64d16ccad1';
 const SANDBOX_API_SECRET = process.env.SANDBOX_API_SECRET || 'secret_live_f2c8e2f27dca4ca8bfa1653389d4bd61';
@@ -194,6 +195,38 @@ function sandboxVerificationPlugin(): Plugin {
           }),
         };
         await whatsappMetaHandler(fakeReq, fakeRes);
+      });
+
+      server.middlewares.use('/api/whatsapp-webhook', async (req, res) => {
+        const chunks: Buffer[] = [];
+        if (req.method === 'POST') {
+          for await (const chunk of req) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+          }
+        }
+        const rawBuf = Buffer.concat(chunks);
+        const fakeReq = {
+          method: req.method,
+          url: `/api/whatsapp-webhook${req.url || ''}`,
+          headers: req.headers,
+          rawBody: rawBuf,
+          body: rawBuf.toString('utf8'),
+        };
+        const fakeRes = {
+          setHeader: (k: string, v: string) => res.setHeader(k, v),
+          status: (code: number) => ({
+            json: (payload: unknown) => {
+              res.statusCode = code;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(payload));
+            },
+            end: (msg?: string) => {
+              res.statusCode = code;
+              res.end(msg || '');
+            },
+          }),
+        };
+        await whatsappWebhookHandler(fakeReq, fakeRes);
       });
     },
   };
