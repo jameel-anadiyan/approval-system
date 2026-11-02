@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal } from '../common/Modal';
-import type { RequestRecord, UserTargetHead } from '../../types/database';
-import { ArrowRightLeft, Send, UserCheck } from 'lucide-react';
+import type { PettyCashDealer, Profile, RequestRecord, UserTargetHead } from '../../types/database';
+import { ArrowRightLeft, Loader2, Send, UserCheck, Wallet } from 'lucide-react';
 import { useRequests, type ActionVoice } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
-import { useDirectory } from '../../lib/directory';
+import { useDirectory, fetchActiveEntryOfficers, fetchPettyCashDealers } from '../../lib/directory';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { useCategoryOptions, WorkCategoryField } from '../requests/WorkCategoryField';
 import { errMsg } from '../../lib/errorUtils';
@@ -13,6 +13,7 @@ export interface RegionalForwardSelection {
   targetHeadId?: string | null;
   targetHeadName?: string | null;
   categoryId?: string | null;
+  assignedEntryUserId?: string | null;
   headChanged?: boolean;
 }
 
@@ -31,20 +32,25 @@ interface HeadOption extends UserTargetHead {
   is_current_request_head?: boolean;
 }
 
-/** Regional Head checks an employee's request and passes it to the clerk (no approval). */
+/** Regional Head checks an employee's request and passes it to the clerk (or directly to Head for Petty Cash). */
 export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
   isOpen,
   onClose,
   request,
   onForward,
 }) => {
-  const { user } = useAuth();
+  const { user, isBackendConnected } = useAuth();
   const { getUserTargetHeads } = useRequests();
   const dir = useDirectory();
 
+  const isPettyCash = request.request_type === 'petty_cash';
   const canSelectHead = user?.role === 'regional_head' && request.request_type !== 'exhibition';
 
   const [rpcHeads, setRpcHeads] = useState<UserTargetHead[]>([]);
+  const [pettyCashDealers, setPettyCashDealers] = useState<PettyCashDealer[]>([]);
+  const [entryOfficers, setEntryOfficers] = useState<Profile[]>([]);
+  const [loadingEntryOfficers, setLoadingEntryOfficers] = useState(false);
+  const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>(request.assigned_entry_user_id || '');
   const [pickedHeadId, setPickedHeadId] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState<string>(request.category_id || '');
   const [remarks, setRemarks] = useState('');
@@ -54,19 +60,70 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isOpen) {
+      setAssignedEntryUserId(request.assigned_entry_user_id || '');
+    }
+  }, [isOpen, request.id, request.assigned_entry_user_id]);
+
+  useEffect(() => {
     if (!isOpen || !canSelectHead || !user?.id) return;
     let alive = true;
-    getUserTargetHeads(user.id).then((list) => {
-      if (!alive) return;
-      setRpcHeads(list);
-    });
+    if (isPettyCash) {
+      fetchPettyCashDealers(isBackendConnected, dir.users).then((dealers) => {
+        if (!alive) return;
+        setPettyCashDealers(dealers);
+      });
+      setLoadingEntryOfficers(true);
+      fetchActiveEntryOfficers(isBackendConnected)
+        .then((officers) => {
+          if (alive) setEntryOfficers(officers);
+        })
+        .finally(() => {
+          if (alive) setLoadingEntryOfficers(false);
+        });
+    } else {
+      getUserTargetHeads(user.id).then((list) => {
+        if (!alive) return;
+        setRpcHeads(list);
+      });
+    }
     return () => {
       alive = false;
     };
-  }, [isOpen, canSelectHead, getUserTargetHeads, user?.id]);
+  }, [isOpen, canSelectHead, isPettyCash, isBackendConnected, dir.users, getUserTargetHeads, user?.id]);
 
   const headOptions = useMemo<HeadOption[]>(() => {
     if (!canSelectHead || !user) return [];
+
+    if (isPettyCash) {
+      const byId = new Map<string, HeadOption>();
+      for (const d of pettyCashDealers) {
+        byId.set(d.head_id, {
+          head_id: d.head_id,
+          head_name: d.head_name,
+          department_id: d.department_id || '',
+          department_name: d.department_name,
+          is_default: false,
+          is_current_request_head: d.head_id === request.owner_head_id,
+        });
+      }
+      if (request.owner_head_id && !byId.has(request.owner_head_id)) {
+        const reqHeadUser = dir.users.find((u) => u.id === request.owner_head_id);
+        byId.set(request.owner_head_id, {
+          head_id: request.owner_head_id,
+          head_name: request.owner_head_name || reqHeadUser?.full_name || 'Assigned Petty Cash Head',
+          department_id: request.department_id,
+          department_name:
+            request.department?.name ||
+            reqHeadUser?.department?.name ||
+            dir.departments.find((dep) => dep.id === request.department_id)?.name ||
+            'Department',
+          is_default: false,
+          is_current_request_head: true,
+        });
+      }
+      return Array.from(byId.values());
+    }
 
     const byId = new Map<string, HeadOption>();
     for (const h of rpcHeads) {
@@ -146,8 +203,10 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
     return allowedList;
   }, [
     canSelectHead,
+    isPettyCash,
     user,
     rpcHeads,
+    pettyCashDealers,
     dir.users,
     dir.departments,
     request.owner_head_id,
@@ -168,7 +227,9 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
     return preferred?.head_id || request.owner_head_id || '';
   }, [canSelectHead, pickedHeadId, headOptions, request.owner_head_id]);
 
-  const categoryOptions = useCategoryOptions(canSelectHead ? selectedHeadId || null : null);
+  const categoryOptions = useCategoryOptions(
+    canSelectHead && !isPettyCash ? selectedHeadId || null : null
+  );
 
   const selectedHead = headOptions.find((h) => h.head_id === selectedHeadId) || null;
   const headChanged = Boolean(
@@ -200,7 +261,17 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
       setError('Please stop your voice recording first before forwarding.');
       return;
     }
-    if (canSelectHead && categoryOptions.required) {
+    if (isPettyCash) {
+      if (!selectedHeadId) {
+        setError('Please select a Petty Cash Dealing Head before forwarding.');
+        return;
+      }
+      if (!assignedEntryUserId) {
+        setError('Please select a Disbursement Entry Account before forwarding.');
+        return;
+      }
+    }
+    if (canSelectHead && !isPettyCash && categoryOptions.required) {
       const validCat = Boolean(
         categoryId && categoryOptions.categories.some((c) => c.id === categoryId)
       );
@@ -217,7 +288,8 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
         targetHeadName: selectedHead
           ? `${selectedHead.head_name} (${selectedHead.department_name})`
           : null,
-        categoryId: canSelectHead ? categoryId || null : null,
+        categoryId: canSelectHead && !isPettyCash ? categoryId || null : null,
+        assignedEntryUserId: isPettyCash ? assignedEntryUserId || null : null,
         headChanged,
       });
       setRemarks('');
@@ -233,34 +305,53 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Forward to Clerk"
+      title={isPettyCash ? 'Forward Petty Cash to Head' : 'Forward to Clerk'}
       description={`Request ${request.request_no || ''} · ${request.requester_name}${request.shop_name ? ` · ${request.shop_name}` : ''}${
         request.category_name ? ` · ${request.category_name}` : ''
       }`}
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-xl text-xs text-cyan-900 leading-relaxed">
-          You have checked this request and are passing it to the{' '}
-          {selectedCategoryName ? <strong>{selectedCategoryName}</strong> : 'department'} clerk
-          {selectedHead ? (
-            <>
-              {' '}
-              under <strong>{selectedHead.head_name}</strong> ({selectedHead.department_name})
-            </>
-          ) : null}{' '}
-          for routing. This is not an approval — the Department Head or Admin approves it later.
-        </div>
+        {isPettyCash ? (
+          <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-900 leading-relaxed">
+            Petty Cash requests <strong>skip clerk routing</strong> and go directly to{' '}
+            {selectedHead ? (
+              <>
+                <strong>{selectedHead.head_name}</strong> ({selectedHead.department_name})
+              </>
+            ) : (
+              'the selected Petty Cash Dealing Head'
+            )}{' '}
+            for approval. You can keep or change the Petty Cash Dealing Head and Disbursement Entry Account below.
+          </div>
+        ) : (
+          <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-xl text-xs text-cyan-900 leading-relaxed">
+            You have checked this request and are passing it to the{' '}
+            {selectedCategoryName ? <strong>{selectedCategoryName}</strong> : 'department'} clerk
+            {selectedHead ? (
+              <>
+                {' '}
+                under <strong>{selectedHead.head_name}</strong> ({selectedHead.department_name})
+              </>
+            ) : null}{' '}
+            for routing. This is not an approval — the Department Head or Admin approves it later.
+          </div>
+        )}
 
         {canSelectHead && headOptions.length > 0 && (
-          <div className="bg-sky-50/60 border border-sky-200/80 rounded-xl p-4 space-y-2">
+          <div className={`${isPettyCash ? 'bg-teal-50/60 border-teal-200/80' : 'bg-sky-50/60 border-sky-200/80'} border rounded-xl p-4 space-y-2`}>
             <label
               htmlFor="regional-forward-target-head"
               className="text-xs font-bold text-slate-800 flex items-center gap-1.5"
             >
-              <UserCheck className="w-4 h-4 text-sky-600" />
+              {isPettyCash ? (
+                <Wallet className="w-4 h-4 text-teal-600" />
+              ) : (
+                <UserCheck className="w-4 h-4 text-sky-600" />
+              )}
               <span>
-                Approving Department Head <span className="text-rose-500">*</span>
+                {isPettyCash ? 'Petty Cash Dealing Head' : 'Approving Department Head'}{' '}
+                <span className="text-rose-500">*</span>
               </span>
             </label>
             <select
@@ -286,13 +377,24 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
               <div className="flex items-start gap-2 pt-1 text-[11px] font-medium text-amber-800">
                 <ArrowRightLeft className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <span>
-                  Redirecting this request to <strong>{selectedHead.head_name}</strong> (
-                  {selectedHead.department_name}). It will go to their clerk queue for routing.
+                  {isPettyCash ? (
+                    <>
+                      Redirecting this Petty Cash request directly to{' '}
+                      <strong>{selectedHead.head_name}</strong> ({selectedHead.department_name}), skipping clerk routing.
+                    </>
+                  ) : (
+                    <>
+                      Redirecting this request to <strong>{selectedHead.head_name}</strong> (
+                      {selectedHead.department_name}). It will go to their clerk queue for routing.
+                    </>
+                  )}
                 </span>
               </div>
             ) : (
               <p className="text-[11px] text-slate-500">
-                {headOptions.length > 1
+                {isPettyCash
+                  ? 'Keep the employee’s chosen Petty Cash Dealing Head or select any enabled Petty Cash Dealer.'
+                  : headOptions.length > 1
                   ? 'Keep the current Head or choose another Admin-allowed Department Head assigned to you.'
                   : 'Forwarded to your assigned Main Department Head. Admin can allow additional Heads in Staff Access.'}
               </p>
@@ -300,7 +402,53 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
           </div>
         )}
 
-        {canSelectHead && categoryOptions.required && (
+        {isPettyCash && (
+          <div className="bg-teal-50/50 border border-teal-200 rounded-xl p-4 space-y-2">
+            <label
+              htmlFor="regional-forward-entry-account"
+              className="text-xs font-bold text-teal-950 flex items-center gap-1.5"
+            >
+              <UserCheck className="w-4 h-4 text-teal-600" />
+              <span>
+                Disbursement Entry Account <span className="text-rose-500">*</span>
+              </span>
+            </label>
+            {loadingEntryOfficers ? (
+              <div className="flex items-center gap-2 text-xs text-teal-700 py-1.5 font-medium">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Loading active entry accounts…</span>
+              </div>
+            ) : (
+              <select
+                id="regional-forward-entry-account"
+                value={assignedEntryUserId}
+                onChange={(e) => {
+                  setAssignedEntryUserId(e.target.value);
+                  setError(null);
+                }}
+                disabled={isSubmitting}
+                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-teal-300 bg-white text-slate-800 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 outline-hidden font-semibold"
+              >
+                <option value="">-- Choose Disbursement Entry Account --</option>
+                {entryOfficers.map((officer) => (
+                  <option key={officer.id} value={officer.id}>
+                    {officer.full_name} (@{officer.username}){officer.designation ? ` – ${officer.designation}` : ''}
+                  </option>
+                ))}
+                {request.assigned_entry_user_id && !entryOfficers.some((o) => o.id === request.assigned_entry_user_id) && (
+                  <option value={request.assigned_entry_user_id}>
+                    {request.assigned_entry_user_name || 'Assigned Entry Account'} (Current)
+                  </option>
+                )}
+              </select>
+            )}
+            <p className="text-[11px] text-teal-900/80">
+              You can keep the employee’s chosen Entry Account or change it before forwarding to the Petty Cash Dealing Head.
+            </p>
+          </div>
+        )}
+
+        {canSelectHead && !isPettyCash && categoryOptions.required && (
           <WorkCategoryField
             options={categoryOptions}
             value={categoryId}
@@ -314,14 +462,14 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
 
         <div>
           <label htmlFor="regional-remarks" className="text-xs font-bold text-slate-700 block mb-1">
-            Remarks for the clerk (optional)
+            {isPettyCash ? 'Remarks for the Petty Cash Dealing Head (optional)' : 'Remarks for the clerk (optional)'}
           </label>
           <textarea
             id="regional-remarks"
             rows={3}
             value={remarks}
             onChange={(e) => setRemarks(e.target.value)}
-            placeholder="e.g. Checked the bills with the shop manager."
+            placeholder={isPettyCash ? 'e.g. Verified petty cash expense with shop.' : 'e.g. Checked the bills with the shop manager.'}
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-hidden"
           />
         </div>
@@ -329,7 +477,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
         <ActionVoiceField
           onChange={setVoice}
           onRecordingStateChange={setIsRecording}
-          label="Voice message for the clerk (optional)"
+          label={isPettyCash ? 'Voice message for the Head (optional)' : 'Voice message for the clerk (optional)'}
         />
 
         {error && (
@@ -350,10 +498,18 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
             type="submit"
             id="regional-forward-confirm"
             disabled={isSubmitting}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
+            className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md text-white disabled:opacity-50 ${
+              isPettyCash ? 'bg-teal-600 hover:bg-teal-700' : 'bg-cyan-600 hover:bg-cyan-700'
+            }`}
           >
             <Send className="w-3.5 h-3.5" />
-            <span>{isSubmitting ? 'Forwarding…' : 'Forward to Clerk'}</span>
+            <span>
+              {isSubmitting
+                ? 'Forwarding…'
+                : isPettyCash
+                ? 'Forward to Head'
+                : 'Forward to Clerk'}
+            </span>
           </button>
         </div>
       </form>

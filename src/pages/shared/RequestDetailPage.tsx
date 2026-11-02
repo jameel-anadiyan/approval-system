@@ -1066,6 +1066,11 @@ export const RequestDetailPage: React.FC = () => {
             onEditExhibitionShop={
               canEditExhibitionShop ? () => setIsEditExhibitionShopOpen(true) : undefined
             }
+            onEditEntryAccount={
+              canManageEntryAccount && entries.length === 0
+                ? () => setModalState('assign_entry_user')
+                : undefined
+            }
           />
 
           {/* Disbursement & Bank Details Card (for all disbursement-associated requests) */}
@@ -2178,10 +2183,20 @@ export const RequestDetailPage: React.FC = () => {
                   type="button"
                   id="regional-forward"
                   onClick={() => setModalState('regional_forward')}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-cyan-600 text-white font-semibold text-xs shadow-md hover:bg-cyan-700"
+                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-white font-semibold text-xs shadow-md ${
+                    rType === 'petty_cash'
+                      ? 'bg-teal-600 hover:bg-teal-700'
+                      : 'bg-cyan-600 hover:bg-cyan-700'
+                  }`}
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{role === 'head' ? 'Forward to Clerk (Regional Head inactive)' : 'Forward to Clerk'}</span>
+                  <span>
+                    {rType === 'petty_cash'
+                      ? 'Forward to Petty Cash Head'
+                      : role === 'head'
+                      ? 'Forward to Clerk (Regional Head inactive)'
+                      : 'Forward to Clerk'}
+                  </span>
                 </button>
               </>
             )}
@@ -2705,9 +2720,14 @@ export const RequestDetailPage: React.FC = () => {
                 rm,
                 v,
                 sel?.targetHeadId ?? null,
-                sel?.categoryId ?? null
+                sel?.categoryId ?? null,
+                sel?.assignedEntryUserId ?? null
               ),
-              sel?.headChanged && sel?.targetHeadName
+              rType === 'petty_cash'
+                ? sel?.targetHeadName
+                  ? `Forwarded directly to ${sel.targetHeadName} (skipping clerk).`
+                  : 'Forwarded directly to Petty Cash Dealing Head (skipping clerk).'
+                : sel?.headChanged && sel?.targetHeadName
                 ? `Forwarded to clerk under ${sel.targetHeadName}.`
                 : 'Forwarded to the clerk.'
             )

@@ -6,7 +6,7 @@ import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
 import { canHeadChangeRoute } from '../../lib/workflow';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote, AlertTriangle, ArrowLeftRight } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote, AlertTriangle, ArrowLeftRight, Clock, Users } from 'lucide-react';
 import { BillMissingBanner } from './BillMissingBanner';
 import { ChangeRouteModal } from '../portals/ChangeRouteModal';
 
@@ -31,10 +31,19 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   const { threshold, deleteSpecificRequest, headChangeRoute } = useRequests();
   const [showChangeRouteModal, setShowChangeRouteModal] = useState(false);
   const rType = typeOf(request);
+  const isPettyCash = rType === 'petty_cash';
   const isHighValue = rType === 'general' && request.amount > threshold;
   const showHeadChangeRoute = canHeadChangeRoute(request, user, threshold);
 
-  const docCount = request.files?.filter((f) => f.kind === 'document').length || 0;
+  const isApprovalQueueStage = ['pending_head_approval', 'pending_head_review', 'pending_admin_approval'].includes(
+    request.status
+  );
+  const pendingConsultations = (request.consultations || []).filter((c) => c.status === 'pending');
+  const hasPendingConsultationInApproval = isApprovalQueueStage && pendingConsultations.length > 0;
+
+  const docCount =
+    request.files?.filter((f) => f.kind === 'document' && f.original_name !== 'Petty_Cash_Form_Below_1000.pdf')
+      .length || 0;
   const hasVoiceNote = request.files?.some((f) => f.kind === 'voice_note');
   const latestClarification = (request.disbursement_clarifications || [])[0];
   const isPendingClarification = latestClarification?.status === 'pending_head';
@@ -48,12 +57,18 @@ export const RequestCard: React.FC<RequestCardProps> = ({
     await deleteSpecificRequest(request.id);
   };
 
+  const cardSurfaceClass = selected
+    ? 'bg-white border-brand-500 ring-2 ring-brand-200'
+    : hasPendingConsultationInApproval
+    ? 'bg-amber-50/90 border-2 border-amber-400 hover:border-amber-500 ring-2 ring-amber-200/50'
+    : isPettyCash
+    ? 'bg-teal-50/55 border-2 border-teal-300 hover:border-teal-500'
+    : 'bg-white border-slate-200/90 hover:border-brand-300';
+
   return (
     <div
       onClick={() => navigate(`/requests/${request.id}`)}
-      className={`bg-white rounded-2xl border p-4 sm:p-5 hover:border-brand-300 hover:shadow-md transition-all cursor-pointer relative group flex flex-col justify-between gap-3 ${
-        selected ? 'border-brand-500 ring-2 ring-brand-200' : 'border-slate-200/90'
-      }`}
+      className={`rounded-2xl border p-4 sm:p-5 hover:shadow-md transition-all cursor-pointer relative group flex flex-col justify-between gap-3 ${cardSurfaceClass}`}
     >
       {/* Top Header: Request No & Status Badge */}
       <div className="flex items-start justify-between gap-2">
@@ -88,6 +103,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
               <ShieldAlert className="w-3 h-3 text-amber-600" />
               Above {formatINRWhole(threshold)}
+            </span>
+          )}
+          {hasPendingConsultationInApproval && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-200/90 text-amber-950 border border-amber-400">
+              <Users className="w-3 h-3 text-amber-800" />
+              Consultation Pending ({pendingConsultations.length})
             </span>
           )}
           {isPendingClarification && (
@@ -170,7 +191,13 @@ export const RequestCard: React.FC<RequestCardProps> = ({
 
       {/* Main Content: Title & Notes preview */}
       <div>
-        <h3 className="font-semibold text-slate-900 text-sm sm:text-base group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">
+        <h3
+          className={`text-sm sm:text-base transition-colors line-clamp-2 leading-snug ${
+            isPettyCash
+              ? 'font-extrabold text-teal-800 group-hover:text-teal-950'
+              : 'font-semibold text-slate-900 group-hover:text-indigo-600'
+          }`}
+        >
           {request.title}
         </h3>
         {request.notes && (
@@ -179,6 +206,33 @@ export const RequestCard: React.FC<RequestCardProps> = ({
           </p>
         )}
       </div>
+
+      {/* Consultation Pending list in tile details */}
+      {hasPendingConsultationInApproval && (
+        <div className="p-2.5 rounded-xl bg-amber-100/80 border border-amber-300 space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-amber-950 uppercase tracking-wide">
+            <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+            <span>Consultation Pending ({pendingConsultations.length})</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {pendingConsultations.map((c) => {
+              const hName = c.head_name || c.head?.full_name || 'Department Head';
+              return (
+                <span
+                  key={c.id}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/95 border border-amber-300 text-[11px] font-semibold text-amber-950 shadow-2xs"
+                >
+                  <UserCheck className="w-3 h-3 text-amber-700 shrink-0" />
+                  <span>{hName}</span>
+                  {c.department_name && (
+                    <span className="text-[10px] font-normal text-amber-800">({c.department_name})</span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {request.is_bill_missing && (
         <div onClick={(e) => e.stopPropagation()}>

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests, errMsg } from '../../context/RequestContext';
-import { RequestFile, RequestType, RequestDetails, Profile, DisbursementMode } from '../../types/database';
+import { RequestFile, RequestType, RequestDetails, Profile, DisbursementMode, PettyCashDealer } from '../../types/database';
 import { FileUploader } from '../../components/requests/FileUploader';
 import { VoiceRecorder } from '../../components/requests/VoiceRecorder';
 import {
@@ -21,16 +21,17 @@ import {
   toStockTransferDetails, validateStockTransfer, stockTransferCalc,
 } from '../../components/requests/StockTransferFields';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2 } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2, Wallet } from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
-import { useDirectory, fetchActiveEntryOfficers } from '../../lib/directory';
+import { useDirectory, fetchActiveEntryOfficers, fetchPettyCashDealers } from '../../lib/directory';
 import { RequestShopField, useRequestShops, useExhibitionShops, needsShopPick } from '../../components/requests/RequestShopField';
 import { DisbursementModeSelector } from '../../components/requests/DisbursementModeSelector';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
+  petty_cash: <Wallet className="w-5 h-5" />,
   discount: <BadgePercent className="w-5 h-5" />,
   exhibition: <Store className="w-5 h-5" />,
   asset: <Package className="w-5 h-5" />,
@@ -44,6 +45,7 @@ export const NewRequestPage: React.FC = () => {
   const dir = useDirectory();
   const { createDraft, submitRequest, threshold, requests } = useRequests();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const activeProfile = dir.users.find((u) => u.id === user?.id) || user;
   const effectiveRegionId =
@@ -66,13 +68,22 @@ export const NewRequestPage: React.FC = () => {
     if (list.has('asset')) {
       list.add('asset_below_20k');
     }
+    if (user?.role === 'employee' || user?.role === 'regional_head' || user?.role === 'clerk' || user?.role === 'head' || user?.role === 'admin') {
+      list.add('petty_cash');
+    }
     if (user?.role === 'admin' || user?.role === 'head') {
       return REQUEST_TYPES;
     }
     return REQUEST_TYPES.filter((t) => list.has(t));
   }, [user?.allowed_types, user?.role]);
-  const [type, setType] = useState<RequestType>(allowed[0] ?? 'general');
+  const requestedDefaultType = (location.state as { defaultType?: RequestType } | null)?.defaultType;
+  const initialType: RequestType =
+    requestedDefaultType && allowed.includes(requestedDefaultType)
+      ? requestedDefaultType
+      : (allowed[0] ?? 'general');
+  const [type, setType] = useState<RequestType>(initialType);
   const isAsset = type === 'asset' || type === 'asset_below_20k';
+  const isPettyCash = type === 'petty_cash';
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [hasGst, setHasGst] = useState<boolean>(true);
@@ -93,7 +104,9 @@ export const NewRequestPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef<boolean>(false);
   const [targetHeadId, setTargetHeadId] = useState('');
-  const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
+  const [pettyCashDealers, setPettyCashDealers] = useState<PettyCashDealer[]>([]);
+  const [loadingPettyDealers, setLoadingPettyDealers] = useState(false);
+  const categoryOptions = useCategoryOptions(type === 'exhibition' || type === 'petty_cash' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState('');
   const shopState = useRequestShops();
   const exhibitionShopState = useExhibitionShops(shopState);
@@ -101,7 +114,7 @@ export const NewRequestPage: React.FC = () => {
   const [shopName, setShopName] = useState('');
   const pickShop = needsShopPick(type);
   const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
-  const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>('bank');
+  const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>(initialType === 'petty_cash' ? 'cash' : 'bank');
   const [enterBankDetailsLater, setEnterBankDetailsLater] = useState<boolean>(false);
   const [bankAccountNo, setBankAccountNo] = useState<string>('');
   const [bankIfsc, setBankIfsc] = useState<string>('');
@@ -111,11 +124,33 @@ export const NewRequestPage: React.FC = () => {
   const [bankVerified, setBankVerified] = useState<boolean>(false);
   const [bankVerificationMessage, setBankVerificationMessage] = useState<string | null>(null);
 
-  // Head and Clerk raise requests that go straight up for approval, so they pick the Entry Account up front.
-  const needsEntryAccount = user?.role === 'head' || user?.role === 'clerk';
+  // Head, Clerk, and Petty Cash requests select the Disbursement Entry Account up front.
+  const needsEntryAccount = user?.role === 'head' || user?.role === 'clerk' || isPettyCash;
   const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>('');
   const [entryOfficers, setEntryOfficers] = useState<Profile[]>([]);
   const [loadingOfficers, setLoadingOfficers] = useState(false);
+
+  useEffect(() => {
+    if (!isPettyCash) return;
+    let cancelled = false;
+    setLoadingPettyDealers(true);
+    fetchPettyCashDealers(isBackendConnected, dir.users)
+      .then((dealers) => {
+        if (cancelled) return;
+        setPettyCashDealers(dealers);
+        if (user?.role !== 'head') {
+          setTargetHeadId((prev) =>
+            prev && dealers.some((d) => d.head_id === prev) ? prev : (dealers[0]?.head_id || '')
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPettyDealers(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPettyCash, isBackendConnected, dir.users, user?.role]);
 
   useEffect(() => {
     if (needsEntryAccount) {
@@ -176,6 +211,7 @@ export const NewRequestPage: React.FC = () => {
   const stockCalc = stockTransferCalc(stockTransfer);
   const amount =
     type === 'non_cash' ? 0
+      : type === 'petty_cash' ? baseAmount
       : type === 'discount' ? discountCalc(discount).value
       : type === 'stock_transfer' ? stockCalc.totalMrp
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
@@ -209,7 +245,9 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const effectiveTitle = () =>
-    title.trim()
+    (type === 'petty_cash'
+      ? `Petty Cash: ${(notes.trim() || 'Expense').replace(/\s+/g, ' ').slice(0, 60)}`
+      : title.trim())
     || (type === 'non_cash' && nonCash.associated_notes.trim() ? `Non-Cash: ${nonCash.associated_notes.trim().slice(0, 50)}` : '')
     || (type === 'exhibition' && exhibition.event_name.trim() ? `Exhibition: ${exhibition.event_name.trim()}` : '')
     || (isAsset && asset.asset_name.trim() ? `Asset: ${asset.asset_name.trim()}` : '')
@@ -220,7 +258,14 @@ export const NewRequestPage: React.FC = () => {
   const details = (): RequestDetails | null => {
     let d: RequestDetails | null = null;
     if (type === 'non_cash') d = toNonCashDetails(nonCash, shopChoice());
-    else if (type === 'discount') d = toDiscountDetails(discount);
+    else if (type === 'petty_cash') {
+      d = {
+        petty_cash_form: 'petty_cash_form_below_1000',
+        max_limit: 1000,
+        total_amount: baseAmount,
+        ...shopChoice(),
+      };
+    } else if (type === 'discount') d = toDiscountDetails(discount);
     else if (type === 'stock_transfer') d = toStockTransferDetails(stockTransfer);
     else if (type === 'exhibition') {
       const exh = toExhibitionDetails(exhibition);
@@ -261,6 +306,31 @@ export const NewRequestPage: React.FC = () => {
   };
 
   const validate = (forDraft: boolean): string | null => {
+    if (type === 'petty_cash') {
+      if (baseAmount > 1000) return 'Maximum amount for Petty Cash is ₹1,000.';
+      if (!forDraft) {
+        if (user?.role !== 'head' && !targetHeadId) {
+          return 'Please select a Petty Cash Dealing Head.';
+        }
+        if (!assignedEntryUserId) {
+          return 'Please select a Disbursement Entry Account before submitting.';
+        }
+        if (baseAmount <= 0) {
+          return 'Please enter a valid Petty Cash amount greater than zero (up to ₹1,000).';
+        }
+        if (disbursementMode !== 'cash' && disbursementMode !== 'bank') {
+          return 'Please select Cash or Bank payment mode.';
+        }
+        if (disbursementMode === 'bank' && !enterBankDetailsLater) {
+          if (!bankAccountNo.trim()) return 'Please enter bank account number, or select "Enter bank details later".';
+          if (!bankIfsc.trim()) return 'Please enter bank IFSC code, or select "Enter bank details later".';
+        }
+        if (!notes.trim()) {
+          return 'Note is mandatory for Petty Cash requests.';
+        }
+      }
+      return null;
+    }
     if (!forDraft && user?.role !== 'head' && user?.role !== 'clerk' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
     if (!forDraft && needsEntryAccount && isPaymentNeeded && !assignedEntryUserId) {
       return 'Please select a Disbursement Entry Account before submitting.';
@@ -315,11 +385,20 @@ export const NewRequestPage: React.FC = () => {
       const draftRes = await createDraft({
         type,
         title: effectiveTitle(),
-        amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal || 1 : isAsset ? amount || 1 : amount),
+        amount:
+          type === 'non_cash'
+            ? 0
+            : type === 'petty_cash'
+            ? Math.min(baseAmount || 1, 1000)
+            : type === 'general'
+            ? generalTotal || 1
+            : isAsset
+            ? amount || 1
+            : amount,
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
-        category_id: user?.role !== 'head' && categoryOptions.required ? categoryId || null : null,
+        category_id: type !== 'petty_cash' && user?.role !== 'head' && categoryOptions.required ? categoryId || null : null,
         target_head_id: type === 'exhibition' ? null : (targetHeadId || null),
         assigned_entry_user_id: needsEntryAccount && isPaymentNeeded ? assignedEntryUserId || null : null,
         disbursement_mode: isPaymentNeeded ? disbursementMode : null,
@@ -405,7 +484,15 @@ export const NewRequestPage: React.FC = () => {
         {user?.role === 'employee' && user.regional_head_id && (
           <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 rounded-lg px-2.5 py-1">
             <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
-            Your request goes to your Regional Head first, who forwards it to the clerk.
+            {isPettyCash
+              ? 'Petty Cash: Goes to your Regional Head first, then directly to the chosen Petty Cash Dealing Head (skipping clerk).'
+              : 'Your request goes to your Regional Head first, who forwards it to the clerk.'}
+          </p>
+        )}
+        {isPettyCash && user?.role !== 'head' && !(user?.role === 'employee' && user.regional_head_id) && (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-teal-800 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1">
+            <Wallet className="w-3.5 h-3.5 text-teal-600" />
+            Petty Cash (Max ₹1,000): Skips clerk routing and goes directly to the selected Petty Cash Dealing Head.
           </p>
         )}
       </div>
@@ -426,8 +513,14 @@ export const NewRequestPage: React.FC = () => {
               type="button"
               id={`type-${t}`}
               onClick={() => {
+                const prev = type;
                 setType(t);
                 setError(null);
+                if (t === 'petty_cash') {
+                  setDisbursementMode('cash');
+                } else if (prev === 'petty_cash' && disbursementMode === 'cash') {
+                  setDisbursementMode('bank');
+                }
                 if (t === 'asset_below_20k') {
                   if (quotes.length < 1) setQuotes(initialQuotes(1));
                 } else if (t === 'asset') {
@@ -436,14 +529,28 @@ export const NewRequestPage: React.FC = () => {
               }}
               className={`text-left p-4 rounded-2xl border-2 transition-all ${
                 type === t
-                  ? 'border-indigo-600 bg-indigo-50 shadow-md shadow-indigo-100'
+                  ? t === 'petty_cash'
+                    ? 'border-teal-600 bg-teal-50 shadow-md shadow-teal-100'
+                    : 'border-indigo-600 bg-indigo-50 shadow-md shadow-indigo-100'
+                  : t === 'petty_cash'
+                  ? 'border-teal-200 bg-white hover:border-teal-400'
                   : 'border-slate-200 bg-white hover:border-indigo-200'
               }`}
             >
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${type === t ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                  type === t
+                    ? t === 'petty_cash'
+                      ? 'bg-teal-600 text-white'
+                      : 'bg-indigo-600 text-white'
+                    : t === 'petty_cash'
+                    ? 'bg-teal-100 text-teal-700'
+                    : 'bg-slate-100 text-slate-500'
+                }`}
+              >
                 {TYPE_ICONS[t]}
               </div>
-              <div className="font-bold text-sm text-slate-900 mt-2">{TYPE_LABELS[t]}</div>
+              <div className={`font-bold text-sm mt-2 ${t === 'petty_cash' ? 'text-teal-900' : 'text-slate-900'}`}>{TYPE_LABELS[t]}</div>
               <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">{TYPE_DESCRIPTIONS[t]}</div>
             </button>
           ))}
@@ -453,8 +560,28 @@ export const NewRequestPage: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
             <h2 className="text-sm font-bold text-slate-800 font-display">
-              {type === 'exhibition' ? 'Event Sponsorship & Promotion Form' : type === 'discount' ? 'Discount Details' : type === 'stock_transfer' ? 'Stock Transfer Details' : isAsset ? (type === 'asset_below_20k' ? 'Asset Purchase Details (< ₹20k)' : 'Asset Purchase Details') : type === 'non_cash' ? 'Non-Cash Request Details' : 'Request Information'}
+              {type === 'petty_cash'
+                ? 'Petty Cash Form Below 1000'
+                : type === 'exhibition'
+                ? 'Event Sponsorship & Promotion Form'
+                : type === 'discount'
+                ? 'Discount Details'
+                : type === 'stock_transfer'
+                ? 'Stock Transfer Details'
+                : isAsset
+                ? type === 'asset_below_20k'
+                  ? 'Asset Purchase Details (< ₹20k)'
+                  : 'Asset Purchase Details'
+                : type === 'non_cash'
+                ? 'Non-Cash Request Details'
+                : 'Request Information'}
             </h2>
+            {type === 'petty_cash' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 font-bold text-[11px] border border-teal-200">
+                <Wallet className="w-3.5 h-3.5 text-teal-600" />
+                <span>Max ₹1,000 · Cash Default · Skips Clerk</span>
+              </span>
+            )}
             {type === 'exhibition' && (
               <a
                 href="/calendar/exhibitions"
@@ -468,7 +595,56 @@ export const NewRequestPage: React.FC = () => {
             )}
           </div>
 
-          {type !== 'exhibition' ? (
+          {type === 'petty_cash' ? (
+            user?.role !== 'head' ? (
+              <div className="p-4 bg-teal-50/70 border border-teal-200 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label htmlFor="petty-cash-head" className="text-xs font-bold text-teal-950 flex items-center gap-1.5">
+                    <Wallet className="w-4 h-4 text-teal-600" />
+                    <span>Petty Cash Dealing Head <span className="text-rose-500">*</span></span>
+                  </label>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 bg-teal-100 px-2 py-0.5 rounded-md">
+                    Skips Clerk Routing
+                  </span>
+                </div>
+                {loadingPettyDealers ? (
+                  <div className="flex items-center gap-2 text-xs text-teal-700 py-1.5 font-medium">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Loading Petty Cash Dealing Heads…</span>
+                  </div>
+                ) : pettyCashDealers.length === 0 ? (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                    No Department Head has <strong>Petty Cash Dealer</strong> enabled yet. Ask Admin to enable a Petty Cash Dealer in <strong>Staff → Dept Heads</strong>.
+                  </div>
+                ) : (
+                  <select
+                    id="petty-cash-head"
+                    value={targetHeadId}
+                    onChange={(e) => setTargetHeadId(e.target.value)}
+                    disabled={isSubmitting || isSavingDraft}
+                    className="w-full text-xs sm:text-sm font-semibold p-3 rounded-xl border border-teal-300 bg-white text-slate-800 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 outline-hidden"
+                  >
+                    <option value="">-- Select Petty Cash Dealing Head --</option>
+                    {pettyCashDealers.map((dealer) => (
+                      <option key={dealer.head_id} value={dealer.head_id}>
+                        {dealer.head_name} ({dealer.department_name}){dealer.designation ? ` – ${dealer.designation}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <p className="text-[11px] text-teal-900/80 leading-relaxed">
+                  {user?.role === 'employee' && user.regional_head_id
+                    ? 'Forwarded to your Regional Head first (who can review or change the Petty Cash Dealing Head), then sent directly to the Head without clerk routing.'
+                    : 'Sent directly to this Petty Cash Dealing Head for approval without clerk routing.'}
+                </p>
+              </div>
+            ) : (
+              <div className="p-3.5 bg-purple-50/70 border border-purple-200/80 rounded-xl text-xs text-purple-900 flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-purple-600 shrink-0" />
+                <span>Department Head Petty Cash request: Goes directly to <strong>Admin</strong> for approval.</span>
+              </div>
+            )
+          ) : type !== 'exhibition' ? (
             <TargetHeadField
               value={targetHeadId}
               onChange={(newHeadId) => {
@@ -485,29 +661,33 @@ export const NewRequestPage: React.FC = () => {
             </div>
           )}
 
-          {user?.role !== 'head' && user?.role !== 'clerk' && (
+          {!isPettyCash && user?.role !== 'head' && user?.role !== 'clerk' && (
             <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId} />
           )}
 
-          {/* Head / Clerk raise: Disbursement Entry Account selection (required for disbursement needed requests) */}
+          {/* Disbursement Entry Account selection (required for Petty Cash, Clerk, and Head Direct requests) */}
           {needsEntryAccount && isPaymentNeeded && (
-            <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-2.5">
+            <div className={`p-4 rounded-2xl space-y-2.5 border ${isPettyCash ? 'bg-teal-50/50 border-teal-200' : 'bg-indigo-50/70 border-indigo-200'}`}>
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <label htmlFor="head-entry-account" className="block text-xs font-bold text-indigo-950 flex items-center gap-1.5">
-                  <UserCheck className="w-4 h-4 text-indigo-600" />
+                <label htmlFor="head-entry-account" className={`block text-xs font-bold flex items-center gap-1.5 ${isPettyCash ? 'text-teal-950' : 'text-indigo-950'}`}>
+                  <UserCheck className={`w-4 h-4 ${isPettyCash ? 'text-teal-600' : 'text-indigo-600'}`} />
                   <span>Disbursement Entry Account <span className="text-rose-500">*</span></span>
                 </label>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-md">
-                  Required for {user?.role === 'clerk' ? 'Clerk' : 'Head Direct'} Request
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${isPettyCash ? 'text-teal-700 bg-teal-100' : 'text-indigo-700 bg-indigo-100'}`}>
+                  {isPettyCash
+                    ? 'Editable by Regional Head & Head'
+                    : `Required for ${user?.role === 'clerk' ? 'Clerk' : 'Head Direct'} Request`}
                 </span>
               </div>
-              <p className="text-[11px] text-indigo-900/80 leading-relaxed">
-                {user?.role === 'clerk'
+              <p className={`text-[11px] leading-relaxed ${isPettyCash ? 'text-teal-900/80' : 'text-indigo-900/80'}`}>
+                {isPettyCash
+                  ? 'Select the Disbursement Entry Account for this Petty Cash request. Regional Head and Petty Cash Dealing Head can also edit this before payment.'
+                  : user?.role === 'clerk'
                   ? 'Please select the Disbursement Entry Account who will record the payment entries once this request is approved.'
                   : 'Because your request goes directly to Admin for approval, please select the Disbursement Entry Account who will record the payment entries.'}
               </p>
               {loadingOfficers ? (
-                <div className="flex items-center gap-2 text-xs text-indigo-600 py-1.5 font-medium">
+                <div className={`flex items-center gap-2 text-xs py-1.5 font-medium ${isPettyCash ? 'text-teal-700' : 'text-indigo-600'}`}>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   <span>Loading active entry accounts…</span>
                 </div>
@@ -520,7 +700,11 @@ export const NewRequestPage: React.FC = () => {
                   id="head-entry-account"
                   value={assignedEntryUserId}
                   onChange={(e) => setAssignedEntryUserId(e.target.value)}
-                  className="w-full text-xs font-semibold p-2.5 rounded-xl border border-indigo-300 bg-white text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                  className={`w-full text-xs font-semibold p-2.5 rounded-xl border bg-white text-slate-800 outline-hidden ${
+                    isPettyCash
+                      ? 'border-teal-300 focus:border-teal-600 focus:ring-1 focus:ring-teal-600'
+                      : 'border-indigo-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'
+                  }`}
                 >
                   <option value="">-- Choose Disbursement Entry Account --</option>
                   {entryOfficers.map((officer) => (
@@ -530,6 +714,45 @@ export const NewRequestPage: React.FC = () => {
                   ))}
                 </select>
               )}
+            </div>
+          )}
+
+          {isPettyCash && (
+            <div className="space-y-2 bg-teal-50/40 p-4 rounded-xl border border-teal-200/80">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="petty-cash-amount" className="block text-xs font-bold text-slate-800">
+                  Amount in Rupees (₹) <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-[11px] font-bold text-teal-700">Maximum ₹1,000.00</span>
+              </div>
+              <div className="relative">
+                <span className="absolute left-3.5 top-3.5 font-bold text-teal-600 text-base">₹</span>
+                <input
+                  id="petty-cash-amount"
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  max="1000"
+                  inputMode="decimal"
+                  value={amountStr}
+                  onChange={(e) => setAmountStr(e.target.value)}
+                  placeholder="0.00 (up to 1000)"
+                  className={`w-full text-base sm:text-sm pl-8 pr-4 py-3 rounded-xl border bg-white outline-hidden font-display font-semibold transition-colors ${
+                    baseAmount > 1000
+                      ? 'border-rose-400 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-rose-700'
+                      : 'border-teal-300 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 text-slate-900'
+                  }`}
+                />
+              </div>
+              {baseAmount > 1000 ? (
+                <p className="text-xs font-bold text-rose-600">
+                  Amount exceeds ₹1,000. Petty Cash requests are strictly for amounts up to ₹1,000.
+                </p>
+              ) : baseAmount > 0 ? (
+                <span className="text-xs font-semibold text-teal-800 block">
+                  Petty Cash amount: {formatINR(baseAmount)}
+                </span>
+              ) : null}
             </div>
           )}
 
@@ -570,26 +793,28 @@ export const NewRequestPage: React.FC = () => {
             />
           )}
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && type !== 'stock_transfer' && !isAsset && <span className="text-rose-500">*</span>}
-            </label>
-            <input
-              id="request-title"
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={
-                type === 'discount' ? 'e.g. Discount for bridal set – Mrs. Fathima'
-                  : type === 'exhibition' ? 'Optional – event name is used if empty'
-                  : type === 'stock_transfer' ? 'Optional – origin and destination shops are used if empty'
-                  : isAsset ? 'Optional – asset name is used if empty'
-                  : type === 'non_cash' ? 'e.g. Branch maintenance clearance / Administrative approval'
-                  : 'e.g. Vendor invoice for showroom lighting'
-              }
-              className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
-            />
-          </div>
+          {!isPettyCash && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                {type === 'discount' ? 'Subject' : 'Request Title'} {type !== 'exhibition' && type !== 'stock_transfer' && !isAsset && <span className="text-rose-500">*</span>}
+              </label>
+              <input
+                id="request-title"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={
+                  type === 'discount' ? 'e.g. Discount for bridal set – Mrs. Fathima'
+                    : type === 'exhibition' ? 'Optional – event name is used if empty'
+                    : type === 'stock_transfer' ? 'Optional – origin and destination shops are used if empty'
+                    : isAsset ? 'Optional – asset name is used if empty'
+                    : type === 'non_cash' ? 'e.g. Branch maintenance clearance / Administrative approval'
+                    : 'e.g. Vendor invoice for showroom lighting'
+                }
+                className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
+              />
+            </div>
+          )}
 
           {type === 'non_cash' && (
             <NonCashFields
@@ -672,14 +897,20 @@ export const NewRequestPage: React.FC = () => {
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              {type === 'general' ? 'Notes & Purpose (Optional)' : 'Remarks (Optional)'}
+              {isPettyCash ? (
+                <>Note <span className="text-rose-500">*</span></>
+              ) : type === 'general' ? (
+                'Notes & Purpose (Optional)'
+              ) : (
+                'Remarks (Optional)'
+              )}
             </label>
             <textarea
               id="request-notes"
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Any extra context for the approvers…"
+              placeholder={isPettyCash ? 'Describe the petty cash purpose / expense (mandatory)…' : 'Any extra context for the approvers…'}
               className="w-full text-base sm:text-sm p-3.5 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden transition-colors"
             />
           </div>
@@ -737,12 +968,19 @@ export const NewRequestPage: React.FC = () => {
               Documents are not mandatory. The filled stock transfer request form itself will be automatically generated, signed, and sealed. Any attached documents will be sealed together.
             </p>
           )}
+          {isPettyCash && (
+            <p className="text-[11px] text-teal-800 font-medium">
+              Supporting document is optional. <strong>Petty Cash Form Below 1000</strong> is generated and stamped automatically upon approval (along with any attached documents).
+            </p>
+          )}
         </div>
         )}
 
         {/* Voice note */}
         <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-800 font-display border-b border-slate-100 pb-2">Spoken Explanation</h2>
+          <h2 className="text-sm font-bold text-slate-800 font-display border-b border-slate-100 pb-2">
+            Spoken Explanation <span className="text-slate-400 font-normal text-xs">(optional)</span>
+          </h2>
           <VoiceRecorder onRecordingComplete={handleVoiceRecording} onClear={() => setVoiceFile(null)} />
         </div>
 

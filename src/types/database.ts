@@ -22,7 +22,7 @@ export type HeadConsultationStatus = 'pending' | 'agreed' | 'disagreed';
 
 export type FileKind = 'document' | 'voice_note';
 
-export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'asset_below_20k' | 'non_cash' | 'stock_transfer';
+export type RequestType = 'general' | 'discount' | 'exhibition' | 'asset' | 'asset_below_20k' | 'non_cash' | 'stock_transfer' | 'petty_cash';
 
 export type QuoteStatus = 'pending' | 'selected' | 'rejected';
 
@@ -147,6 +147,21 @@ export interface NonCashDetails {
   associated_notes?: string | null;
 }
 
+export interface PettyCashDetails {
+  petty_cash_form?: string | null;
+  max_limit?: number | null;
+  total_amount?: number | null;
+}
+
+export interface PettyCashDealer {
+  head_id: string;
+  head_name: string;
+  username?: string | null;
+  designation?: string | null;
+  department_id: string | null;
+  department_name: string;
+}
+
 /** Shop picked on General / Non-Cash requests (moved to requests.shop_id by the server). */
 export interface RequestShopChoice {
   shop_id?: string | null;
@@ -171,8 +186,8 @@ export const isDisbursementAssociated = (type?: RequestType | string | null): bo
   Boolean(type && type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer');
 
 export type RequestDetails = Partial<DiscountDetails> & Partial<ExhibitionDetails> & Partial<GeneralDetails>
-  & Partial<AssetDetails> & Partial<StockTransferDetails> & Partial<NonCashDetails> & RequestShopChoice
-  & Partial<BankAccountDetails>;
+  & Partial<AssetDetails> & Partial<StockTransferDetails> & Partial<NonCashDetails> & Partial<PettyCashDetails>
+  & RequestShopChoice & Partial<BankAccountDetails>;
 
 export interface Department {
   id: string;
@@ -212,6 +227,8 @@ export interface Profile {
   can_view_discount_report?: boolean;
   /** Head only — granted by Admin to view and decide the Special Waiting List tab */
   can_view_exhibition_waitlist?: boolean;
+  /** Head only — enabled by Admin as a Petty Cash Dealing Head */
+  is_petty_cash_dealer?: boolean;
   photo_path?: string | null;
   /** Regional Head only — assigned region from Region Master */
   region_id?: string | null;

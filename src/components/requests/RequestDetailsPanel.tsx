@@ -1,7 +1,7 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
 import { formatINR, formatISTDate, getExhibitionShopName, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
-import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store } from 'lucide-react';
+import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store, Wallet, UserCheck } from 'lucide-react';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -24,9 +24,70 @@ const money = (n?: number | null) => (n === undefined || n === null ? undefined 
 export const RequestDetailsPanel: React.FC<{
   request: RequestRecord;
   onEditExhibitionShop?: () => void;
-}> = ({ request, onEditExhibitionShop }) => {
+  onEditEntryAccount?: () => void;
+}> = ({ request, onEditExhibitionShop, onEditEntryAccount }) => {
   const t = typeOf(request);
   const d = request.details || {};
+  if (t === 'petty_cash') {
+    const modeLabel = (request.disbursement_mode || d.disbursement_mode || 'cash') === 'bank' ? 'Bank Transfer' : 'Cash';
+    return (
+      <div className="bg-white rounded-2xl border border-teal-200 p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-teal-100 pb-3">
+          <h3 className="text-sm font-bold text-teal-950 font-display flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-teal-600" />
+            <span>Petty Cash Form Below 1000</span>
+          </h3>
+          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
+            Max ₹1,000 · Skips Clerk
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="rounded-xl bg-teal-50/70 border border-teal-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-teal-700 font-bold block">Petty Cash Amount</span>
+            <span className="text-sm sm:text-base font-extrabold text-teal-950 font-display mt-0.5 block">
+              {money(request.amount)}
+            </span>
+          </div>
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Payment Mode</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5 block">{modeLabel}</span>
+          </div>
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Petty Cash Dealing Head</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5 block truncate">
+              {request.owner_head_name || '—'}
+            </span>
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-teal-50/40 border border-teal-200/80 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <span className="text-[11px] font-semibold text-slate-500 block">Disbursement Entry Account</span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5 mt-0.5">
+              <UserCheck className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+              <span className="truncate">{request.assigned_entry_user_name || 'Not assigned yet'}</span>
+            </span>
+          </div>
+          {onEditEntryAccount && (
+            <button
+              type="button"
+              id="edit-petty-entry-account-btn"
+              onClick={onEditEntryAccount}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-teal-50 text-teal-800 border border-teal-300 text-xs font-bold transition-colors cursor-pointer shrink-0"
+            >
+              <Pencil className="w-3 h-3" />
+              <span>{request.assigned_entry_user_id ? 'Edit Entry Account' : 'Assign Entry Account'}</span>
+            </button>
+          )}
+        </div>
+
+        <p className="text-[11px] text-slate-500">
+          Stamping is applied on <strong>Petty Cash Form Below 1000</strong> along with any attached supporting documents.
+        </p>
+      </div>
+    );
+  }
   if (t === 'general') {
     if (!d.has_gst && !d.base_amount) return null;
     return (

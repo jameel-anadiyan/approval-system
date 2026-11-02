@@ -46,7 +46,7 @@ import {
 } from '../../lib/workflow';
 import { canPaymentUserViewAwaitingRequest } from '../../lib/disbursementRouting';
 import { entryPayable, entryOutstanding, entryAvailable } from '../../types/database';
-import { isEntryCheckingUser } from '../../lib/formatters';
+import { isEntryCheckingUser, typeOf } from '../../lib/formatters';
 import { FileWarning } from 'lucide-react';
 
 interface NavItem {
@@ -54,10 +54,11 @@ interface NavItem {
   path: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: number;
-  badgeVariant?: 'rose' | 'amber';
+  badgeVariant?: 'rose' | 'amber' | 'teal';
   highlight?: boolean;
   isWaitlistTab?: boolean;
   isBillMissingTab?: boolean;
+  isPettyCashTab?: boolean;
 }
 
 export const Navigation: React.FC = () => {
@@ -169,10 +170,52 @@ export const Navigation: React.FC = () => {
     isBillMissingTab: true,
   };
 
+  const pettyCashCount = requests.filter((r) => {
+    if (typeOf(r) !== 'petty_cash') return false;
+    if (role === 'head') {
+      return (
+        (r.status === 'pending_head_approval' || r.status === 'pending_head_review') &&
+        isOwningDepartmentHead(r, user)
+      );
+    }
+    if (role === 'regional_head') {
+      return isMyRegionalRequest(r, user);
+    }
+    if (role === 'admin') {
+      return (
+        r.status === 'pending_admin_approval' ||
+        (r.status === 'approving' &&
+          (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000))
+      );
+    }
+    if (role === 'disbursement') {
+      if (r.status !== 'approved') return false;
+      if (isEntryOnlyUser) {
+        if (r.assigned_entry_user_id && r.assigned_entry_user_id !== user?.id) return false;
+        return entryAvailable(r) > 0;
+      }
+      if (isPaymentOnlyUser) {
+        return canPaymentUserViewAwaitingRequest(user, r, users);
+      }
+      return true;
+    }
+    return r.requester_id === user?.id && r.status === 'returned';
+  }).length;
+
+  const pettyCashNavItem: NavItem = {
+    label: 'Petty Cash',
+    path: '/petty-cash',
+    icon: Wallet,
+    badge: pettyCashCount,
+    badgeVariant: 'teal',
+    isPettyCashTab: true,
+  };
+
   switch (role) {
     case 'employee':
       mainNavItems = [
         { label: 'My Requests', path: '/my', icon: FileText },
+        pettyCashNavItem,
         billMissingNavItem,
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
         { label: 'Approved', path: '/approved', icon: CheckCircle2 },
@@ -188,6 +231,7 @@ export const Navigation: React.FC = () => {
     case 'regional_head':
       mainNavItems = [
         { label: 'To Forward', path: '/regional', icon: Inbox, badge: regionalToForwardCount },
+        pettyCashNavItem,
         billMissingNavItem,
         { label: 'Forwarded', path: '/regional/forwarded', icon: Send },
         ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
@@ -213,6 +257,7 @@ export const Navigation: React.FC = () => {
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
       ];
       moreNavItems = [
+        pettyCashNavItem,
         ...stockReportItem,
         { label: 'My Requests', path: '/my', icon: FileText },
         { label: 'Profile', path: '/profile', icon: UserCheck },
@@ -222,6 +267,7 @@ export const Navigation: React.FC = () => {
     case 'head':
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
+        pettyCashNavItem,
         billMissingNavItem,
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
         ...(user?.can_view_exhibition_waitlist
@@ -248,6 +294,7 @@ export const Navigation: React.FC = () => {
       mainNavItems = [
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
+        pettyCashNavItem,
         billMissingNavItem,
         { label: 'Regions', path: '/admin/regions', icon: MapPin },
         { label: 'Regional Heads', path: '/admin/regional-heads', icon: Globe },
@@ -291,6 +338,7 @@ export const Navigation: React.FC = () => {
       if (user?.disbursement_type === 'entry_approver' || isEntryCheckingUser(user)) {
         mainNavItems = [
           { label: 'Entry Approvals', path: '/entry-approvals', icon: FileCheck2, badge: entryApprovalsCount, badgeVariant: 'amber' },
+          pettyCashNavItem,
           billMissingNavItem,
           { label: 'Search', path: '/disbursement', icon: Search },
           { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
@@ -305,6 +353,7 @@ export const Navigation: React.FC = () => {
       }
       mainNavItems = [
         { label: 'Search', path: '/disbursement', icon: Search },
+        pettyCashNavItem,
         billMissingNavItem,
         isEntryOnlyUser
           ? { label: 'New Entry Wait', path: '/disbursement', icon: Clock, badge: disbNewEntryCount }
@@ -355,6 +404,10 @@ export const Navigation: React.FC = () => {
                       : (item.badge && item.badge > 0)
                       ? 'bg-linear-to-r from-rose-50 to-red-50 text-rose-800 border-2 border-rose-300 font-extrabold hover:bg-rose-100 hover:border-rose-400 shadow-md shadow-rose-500/20 ring-1 ring-rose-300/60'
                       : 'bg-rose-50/70 text-rose-700 border border-rose-200/90 font-bold hover:bg-rose-100/80'
+                    : item.isPettyCashTab
+                    ? isActive
+                      ? 'bg-teal-600 text-white shadow-xs font-semibold'
+                      : 'bg-teal-50/70 text-teal-800 border border-teal-200 hover:bg-teal-100 font-semibold'
                     : isActive
                     ? item.isWaitlistTab
                       ? 'bg-rose-600 text-white shadow-xs font-semibold'
@@ -376,6 +429,8 @@ export const Navigation: React.FC = () => {
                           ? 'text-white'
                           : item.isBillMissingTab
                           ? 'text-rose-600 animate-pulse'
+                          : item.isPettyCashTab
+                          ? 'text-teal-600'
                           : item.isWaitlistTab
                           ? 'text-rose-600'
                           : item.highlight
@@ -394,6 +449,8 @@ export const Navigation: React.FC = () => {
                             : 'bg-white/20 text-white'
                           : item.isBillMissingTab
                           ? 'bg-rose-600 text-white shadow-md shadow-rose-600/40 font-black animate-bounce'
+                          : item.badgeVariant === 'teal'
+                          ? 'bg-teal-600 text-white shadow-xs'
                           : item.badgeVariant === 'amber'
                           ? 'bg-amber-500 text-white shadow-xs'
                           : 'bg-rose-500 text-white shadow-xs'
@@ -427,7 +484,8 @@ export const Navigation: React.FC = () => {
                 item.path === '/regional' ||
                 item.path === '/approved' ||
                 item.path === '/returned' ||
-                item.path === '/bill-missing'
+                item.path === '/bill-missing' ||
+                item.path === '/petty-cash'
               }
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center shrink-0 min-w-[54px] sm:min-w-[64px] px-1 h-full relative transition-colors ${
@@ -435,6 +493,10 @@ export const Navigation: React.FC = () => {
                     ? isActive
                       ? 'text-rose-700 font-black bg-rose-100/90 rounded-xl my-1 border border-rose-400 shadow-sm shadow-rose-500/30'
                       : 'text-rose-700 font-bold bg-rose-50/90 rounded-xl my-1 border border-rose-200/90 shadow-xs'
+                    : item.isPettyCashTab
+                    ? isActive
+                      ? 'text-teal-700 font-bold bg-teal-50 rounded-xl my-1 border border-teal-300'
+                      : 'text-teal-700 font-semibold'
                     : isActive
                     ? item.isWaitlistTab ? 'text-rose-600 font-bold' : 'text-indigo-600 font-semibold'
                     : item.isWaitlistTab
@@ -450,6 +512,8 @@ export const Navigation: React.FC = () => {
                   className={`w-5 h-5 ${
                     item.isBillMissingTab
                       ? 'text-rose-600 animate-pulse'
+                      : item.isPettyCashTab
+                      ? 'text-teal-600'
                       : item.isWaitlistTab
                       ? 'text-rose-600'
                       : ''
@@ -460,6 +524,8 @@ export const Navigation: React.FC = () => {
                     className={`absolute -top-1.5 -right-2 min-w-4 h-4 px-1 rounded-full ${
                       item.isBillMissingTab
                         ? 'bg-rose-600 animate-bounce'
+                        : item.badgeVariant === 'teal'
+                        ? 'bg-teal-600'
                         : item.badgeVariant === 'amber'
                         ? 'bg-amber-500'
                         : 'bg-rose-500'
@@ -472,6 +538,8 @@ export const Navigation: React.FC = () => {
               <span className={`text-[10px] mt-1 tracking-tight truncate max-w-[62px] ${
                 item.isBillMissingTab
                   ? 'text-rose-700 font-bold'
+                  : item.isPettyCashTab
+                  ? 'text-teal-700 font-bold'
                   : item.isWaitlistTab
                   ? 'text-rose-700 font-bold'
                   : ''
@@ -527,6 +595,10 @@ export const Navigation: React.FC = () => {
                         ? isActive
                           ? 'bg-rose-600 text-white border-rose-500 shadow-md font-bold'
                           : 'border-2 border-rose-300 bg-rose-50 text-rose-800 font-bold shadow-xs hover:bg-rose-100'
+                        : item.isPettyCashTab
+                        ? isActive
+                          ? 'bg-teal-600 text-white border-teal-500 font-bold'
+                          : 'border-teal-200 bg-teal-50/70 text-teal-800 font-bold hover:bg-teal-100'
                         : isActive
                         ? item.isWaitlistTab
                           ? 'bg-rose-50 border-rose-200 text-rose-700 font-bold'
@@ -541,6 +613,8 @@ export const Navigation: React.FC = () => {
                     <item.icon className={`w-4 h-4 shrink-0 ${
                       item.isBillMissingTab
                         ? 'text-rose-600'
+                        : item.isPettyCashTab
+                        ? 'text-teal-600'
                         : item.isWaitlistTab
                         ? 'text-rose-600'
                         : 'text-slate-400'
@@ -552,6 +626,8 @@ export const Navigation: React.FC = () => {
                       className={`px-1.5 py-0.2 text-[10px] font-bold rounded-full ${
                         item.isBillMissingTab
                           ? 'bg-rose-600 text-white shadow-xs font-black'
+                          : item.badgeVariant === 'teal'
+                          ? 'bg-teal-600 text-white'
                           : item.badgeVariant === 'amber'
                           ? 'bg-amber-500 text-white'
                           : 'bg-rose-500 text-white'

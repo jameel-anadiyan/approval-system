@@ -34,6 +34,7 @@ import {
   canHeadChangeRouteToB,
   isOwningDepartmentHead,
 } from '../lib/workflow';
+import { generatePettyCashFormPdf } from '../lib/pettyCashFormPdf';
 
 type Result = { success: boolean; error?: string; warning?: string };
 
@@ -115,6 +116,7 @@ interface RequestContextType {
       details?: RequestDetails | null;
       category_id?: string | null;
       target_head_id?: string | null;
+      assigned_entry_user_id?: string | null;
     }
   ) => Promise<Result>;
   updateRequestBankDetails: (
@@ -136,13 +138,14 @@ interface RequestContextType {
   headChangeRoute: (id: string, newRoute: ApprovalRoute, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
   assignDisbursementEntryUser: (requestId: string, entryUserId: string) => Promise<{ success: boolean; error?: string }>;
   forwardRequest: (id: string, remarks?: string, voice?: ActionVoice | null) => Promise<{ success: boolean; error?: string }>;
-  /** Regional Head forwards an employee's request to the clerk (no approval), optionally redirecting to an Admin-allowed Department Head. */
+  /** Regional Head forwards an employee's request to the clerk (or directly to Petty Cash Head), optionally redirecting Head / Entry Account. */
   regionalForwardRequest: (
     id: string,
     remarks?: string,
     voice?: ActionVoice | null,
     targetHeadId?: string | null,
-    categoryId?: string | null
+    categoryId?: string | null,
+    assignedEntryUserId?: string | null
   ) => Promise<Result>;
   /** Work categories the current user can pick, and whether one is required. */
   loadCategoryOptions: (targetHeadId?: string | null) => Promise<CategoryOptions>;
@@ -659,9 +662,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isBackendConnected) {
       let requestId: string | undefined;
       try {
+        const defaultMode: DisbursementMode =
+          (data.disbursement_mode ??
+            (data.details?.disbursement_mode as any) ??
+            (type === 'petty_cash' ? 'cash' : null)) as DisbursementMode;
+
         const mergedDetails = {
           ...(data.details ?? {}),
-          disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? null) as DisbursementMode,
+          disbursement_mode: defaultMode,
           enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
           bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
           bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
@@ -675,7 +683,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const { data: newId, error } = await supabase.rpc('create_typed_draft', {
           p_type: type,
           p_title: data.title,
-          p_amount: type === 'non_cash' ? 0 : (type === 'general' || type === 'asset' || type === 'asset_below_20k' || type === 'stock_transfer' ? data.amount : null),
+          p_amount:
+            type === 'non_cash'
+              ? 0
+              : type === 'general' ||
+                type === 'petty_cash' ||
+                type === 'asset' ||
+                type === 'asset_below_20k' ||
+                type === 'stock_transfer'
+              ? data.amount
+              : null,
           p_notes: data.notes || null,
           p_details: mergedDetails,
           p_target_head_id: data.target_head_id || null,
@@ -718,7 +735,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         if (requestId) {
           const bankPayload: Record<string, any> = {
-            disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? null) as DisbursementMode,
+            disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? (type === 'petty_cash' ? 'cash' : null)) as DisbursementMode,
             enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
             bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
             bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
@@ -796,8 +813,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Mock create draft
     const newId = `req-draft-${Date.now()}`;
+    const explicitTargetHead = data.target_head_id
+      ? MOCK_USERS.find((u) => u.id === data.target_head_id && u.role === 'head')
+      : null;
     const mockDeptHead =
-      user.role === 'head'
+      explicitTargetHead
+        ? explicitTargetHead
+        : user.role === 'head'
         ? user
         : MOCK_USERS.find((u) => u.role === 'head' && u.department_id === (user.department_id || 'dept-fin-001'));
 
@@ -811,7 +833,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       requester_id: user.id,
       requester_name: user.full_name,
       requester_role: user.role,
-      department_id: user.department_id || 'dept-fin-001',
+      department_id: mockDeptHead?.department_id || user.department_id || 'dept-fin-001',
       owner_head_id: mockDeptHead?.id || null,
       owner_head_name: mockDeptHead?.full_name || null,
       owner_head: mockDeptHead
@@ -840,7 +862,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         type === 'exhibition'
           ? ((data.details as { conducting_shop_name?: string | null } | null)?.conducting_shop_name?.trim() || 'Not Assigned')
           : (data.details as { shop_name?: string | null } | null)?.shop_name ?? user.shop?.name ?? null,
-      disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? null) as DisbursementMode,
+      disbursement_mode: (data.disbursement_mode ?? (data.details?.disbursement_mode as any) ?? (type === 'petty_cash' ? 'cash' : null)) as DisbursementMode,
       enter_bank_details_later: Boolean(data.enter_bank_details_later ?? data.details?.enter_bank_details_later ?? false),
       bank_account_no: data.bank_account_no ?? data.details?.bank_account_no ?? null,
       bank_ifsc: data.bank_ifsc ? data.bank_ifsc.trim().toUpperCase() : (data.details?.bank_ifsc ?? null),
@@ -893,6 +915,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       details?: RequestDetails | null;
       category_id?: string | null;
       target_head_id?: string | null;
+      assigned_entry_user_id?: string | null;
     }
   ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
@@ -969,6 +992,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (headErr && !headErr.message?.toLowerCase().includes('not found')) {
           await loadRequests();
           return { success: false, error: headErr.message };
+        }
+      }
+      if (data.assigned_entry_user_id) {
+        const { error: entryErr } = await supabase.rpc('assign_disbursement_entry_user', {
+          p_request_id: id,
+          p_entry_user_id: data.assigned_entry_user_id,
+        });
+        if (entryErr && !entryErr.message?.toLowerCase().includes('not found')) {
+          await loadRequests();
+          return { success: false, error: entryErr.message };
         }
       }
       if (data.category_id !== undefined) {
@@ -1071,6 +1104,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             : bd.shop_name !== undefined
             ? bd.shop_name
             : r.shop_name;
+        const nextTargetHead = data.target_head_id
+          ? MOCK_USERS.find((u) => u.id === data.target_head_id && u.role === 'head')
+          : null;
+        const nextEntryUser = data.assigned_entry_user_id
+          ? MOCK_USERS.find((u) => u.id === data.assigned_entry_user_id)
+          : null;
         return {
           ...r,
           shop_id: nextShopId,
@@ -1079,6 +1118,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           amount: data.amount,
           notes: data.notes || null,
           details: data.details !== undefined ? data.details : r.details,
+          owner_head_id: nextTargetHead ? nextTargetHead.id : r.owner_head_id,
+          owner_head_name: nextTargetHead ? nextTargetHead.full_name : r.owner_head_name,
+          department_id: nextTargetHead?.department_id || r.department_id,
+          assigned_entry_user_id: data.assigned_entry_user_id || r.assigned_entry_user_id,
+          assigned_entry_user_name: nextEntryUser ? nextEntryUser.full_name : r.assigned_entry_user_name,
           region_id: regId,
           region_name: regName,
           is_waitlist: isWaitlist,
@@ -1435,18 +1479,50 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const isHead = user.role === 'head';
     const isClerk = user.role === 'clerk';
+    const isPettyCash = current.request_type === 'petty_cash';
     const isPaymentNeeded = current.request_type !== 'discount' && current.request_type !== 'non_cash' && current.request_type !== 'stock_transfer';
-    const needsEntryAccount = isHead || isClerk;
+    const needsEntryAccount = isHead || isClerk || isPettyCash;
     if (needsEntryAccount && isPaymentNeeded && !current.assigned_entry_user_id && !entryUserId) {
       return { success: false, error: 'Please select a Disbursement Entry Account before submitting.' };
     }
+    if (isPettyCash) {
+      if (Number(current.amount || 0) <= 0 || Number(current.amount || 0) > 1000) {
+        return { success: false, error: 'Petty Cash amount must be greater than ₹0 and at most ₹1,000.' };
+      }
+      if (!current.notes || !current.notes.trim()) {
+        return { success: false, error: 'Note is mandatory for Petty Cash requests.' };
+      }
+      if (!isHead && !current.owner_head_id) {
+        return { success: false, error: 'Please select a Petty Cash Dealing Head.' };
+      }
+    }
 
-    const toStatus = isHead
+    const mockEmpRh =
+      user.role === 'employee' && user.regional_head_id
+        ? MOCK_USERS.find((u) => u.id === user.regional_head_id && u.role === 'regional_head' && u.is_active)
+        : null;
+
+    const toStatus: RequestStatus = isPettyCash
+      ? user.role === 'employee' && mockEmpRh
+        ? 'pending_regional_review'
+        : isHead && (!current.owner_head_id || current.owner_head_id === user.id)
+        ? 'pending_admin_approval'
+        : 'pending_head_approval'
+      : isHead
       ? 'pending_admin_approval'
       : isClerk
       ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'pending_head_review' : 'pending_head_approval')
+      : mockEmpRh
+      ? 'pending_regional_review'
       : 'submitted';
-    const clkRoute = isClerk
+
+    const clkRoute: ApprovalRoute | undefined = isPettyCash
+      ? toStatus === 'pending_admin_approval'
+        ? 'A'
+        : toStatus === 'pending_head_approval'
+        ? 'B'
+        : undefined
+      : isClerk
       ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'A' : 'B')
       : undefined;
     const genNo = current.request_no || `REQ-2026-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1459,7 +1535,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       action: 'submitted',
       from_status: current.status,
       to_status: toStatus,
-      remarks: isHead
+      remarks: isPettyCash
+        ? toStatus === 'pending_regional_review'
+          ? `Petty Cash submitted to Regional Head (Target Head: ${current.owner_head_name || 'Petty Cash Head'}).`
+          : `Petty Cash routed directly to ${current.owner_head_name || 'Petty Cash Head'} (clerk skipped).`
+        : isHead
         ? 'Department Head request routed directly to Admin for approval.'
         : isClerk
         ? 'Clerk request routed directly to Department Head for review and approval.'
@@ -1476,16 +1556,19 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ? {
               ...r,
               status: toStatus,
-              route: isHead ? 'A' : clkRoute || r.route,
-              routed_by: isHead || isClerk ? user.id : r.routed_by,
-              routed_at: isHead || isClerk ? new Date().toISOString() : r.routed_at,
+              route: clkRoute ?? (isHead ? 'A' : r.route),
+              routed_by: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') ? user.id : r.routed_by,
+              routed_at: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') ? new Date().toISOString() : r.routed_at,
+              regional_head_id: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.id : r.regional_head_id,
+              regional_head_name: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.full_name : r.regional_head_name,
+              disbursement_mode: isPettyCash ? (r.disbursement_mode || 'cash') : r.disbursement_mode,
               assigned_entry_user_id: entryUserId || r.assigned_entry_user_id,
               assigned_entry_user_name: targetUser ? targetUser.full_name : r.assigned_entry_user_name,
               assigned_entry_at: entryUserId ? new Date().toISOString() : r.assigned_entry_at,
               assigned_entry_by: entryUserId ? user.id : r.assigned_entry_by,
-              reviewed_by: isHead ? user.id : r.reviewed_by,
-              reviewed_by_name: isHead ? user.full_name : r.reviewed_by_name,
-              reviewed_at: isHead ? new Date().toISOString() : r.reviewed_at,
+              reviewed_by: isHead && toStatus === 'pending_admin_approval' ? user.id : r.reviewed_by,
+              reviewed_by_name: isHead && toStatus === 'pending_admin_approval' ? user.full_name : r.reviewed_by_name,
+              reviewed_at: isHead && toStatus === 'pending_admin_approval' ? new Date().toISOString() : r.reviewed_at,
               request_no: genNo,
               submitted_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -1790,8 +1873,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     entryUserId: string
   ): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
-    if (!['clerk', 'head', 'regional_head', 'admin'].includes(user.role)) {
-      return { success: false, error: 'Only Clerk, Head, or Admin can assign an Entry account.' };
+    const currentReq = getRequestById(requestId);
+    const isRequesterDraft =
+      Boolean(currentReq) &&
+      currentReq!.requester_id === user.id &&
+      (currentReq!.status === 'draft' || currentReq!.status === 'returned');
+    if (!isRequesterDraft && !['clerk', 'head', 'regional_head', 'admin'].includes(user.role)) {
+      return { success: false, error: 'Only the requester (before submit), Regional Head, Clerk, Head, or Admin can assign an Entry account.' };
     }
 
     if (isBackendConnected) {
@@ -1902,13 +1990,16 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     remarks?: string,
     voice?: ActionVoice | null,
     targetHeadId?: string | null,
-    categoryId?: string | null
+    categoryId?: string | null,
+    assignedEntryUserId?: string | null
   ): Promise<Result> => {
     if (!user) return { success: false, error: 'Must be logged in' };
     const currentReq = getRequestById(id);
+    const isPettyCash = currentReq?.request_type === 'petty_cash';
     const cleanRemarks = remarks?.trim() || null;
     const cleanTargetHeadId = targetHeadId?.trim() || null;
     const cleanCategoryId = categoryId?.trim() || null;
+    const cleanEntryUserId = assignedEntryUserId?.trim() || null;
     const headChanged = Boolean(
       cleanTargetHeadId &&
         currentReq?.request_type !== 'exhibition' &&
@@ -1920,24 +2011,39 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const chosenHead = cleanTargetHeadId
         ? MOCK_USERS.find((u) => u.id === cleanTargetHeadId && u.role === 'head')
         : null;
+      const chosenEntry = cleanEntryUserId
+        ? MOCK_USERS.find((u) => u.id === cleanEntryUserId)
+        : null;
       const now = new Date().toISOString();
-      const actionNote =
-        headChanged && chosenHead
-          ? cleanRemarks
-            ? `[Directed to ${chosenHead.full_name}] ${cleanRemarks}`
-            : `Directed to ${chosenHead.full_name}`
-          : cleanRemarks;
+      const nextStatus: RequestStatus = isPettyCash ? 'pending_head_approval' : 'submitted';
+      const finalHeadName = (headChanged && chosenHead ? chosenHead.full_name : currentReq.owner_head_name) || 'Department Head';
+      const actionNote = isPettyCash
+        ? cleanRemarks
+          ? `[Forwarded directly to Petty Cash Head ${finalHeadName} · clerk skipped] ${cleanRemarks}`
+          : `Forwarded directly to Petty Cash Head ${finalHeadName} (clerk skipped)`
+        : headChanged && chosenHead
+        ? cleanRemarks
+          ? `[Directed to ${chosenHead.full_name}] ${cleanRemarks}`
+          : `Directed to ${chosenHead.full_name}`
+        : cleanRemarks;
       setRequests((prev) =>
         prev.map((r) =>
           r.id === id
             ? {
                 ...r,
-                status: 'submitted',
+                status: nextStatus,
+                route: isPettyCash ? 'B' : r.route,
+                routed_by: isPettyCash ? user.id : r.routed_by,
+                routed_at: isPettyCash ? now : r.routed_at,
                 owner_head_id: headChanged && chosenHead ? chosenHead.id : r.owner_head_id,
                 owner_head_name: headChanged && chosenHead ? chosenHead.full_name : r.owner_head_name,
                 department_id:
                   headChanged && chosenHead?.department_id ? chosenHead.department_id : r.department_id,
-                category_id: cleanCategoryId !== null ? cleanCategoryId : headChanged ? null : r.category_id,
+                category_id: isPettyCash ? null : cleanCategoryId !== null ? cleanCategoryId : headChanged ? null : r.category_id,
+                assigned_entry_user_id: cleanEntryUserId || r.assigned_entry_user_id,
+                assigned_entry_user_name: chosenEntry ? chosenEntry.full_name : r.assigned_entry_user_name,
+                assigned_entry_at: cleanEntryUserId ? now : r.assigned_entry_at,
+                assigned_entry_by: cleanEntryUserId ? user.id : r.assigned_entry_by,
                 regional_forwarded_at: now,
                 updated_at: now,
                 actions: [
@@ -1949,7 +2055,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
                     actor_role: user.role,
                     action: 'regional_forwarded',
                     from_status: r.status,
-                    to_status: 'submitted',
+                    to_status: nextStatus,
                     remarks: actionNote,
                     visible_to_requester: true,
                     created_at: now,
@@ -1970,12 +2076,36 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_remarks: cleanRemarks,
         p_target_head_id: cleanTargetHeadId,
         p_category_id: cleanCategoryId,
+        p_assigned_entry_user_id: cleanEntryUserId,
       });
       if (error) {
         const isMissingNewSignature =
           error.code === 'PGRST202' ||
           (error.message && error.message.includes('regional_forward_request'));
         if (isMissingNewSignature) {
+          if (isPettyCash) {
+            return {
+              success: false,
+              error:
+                'Database update required for Petty Cash forwarding: please run supabase/manual/apply_0075_petty_cash.sql in Supabase SQL Editor.',
+            };
+          }
+          if (cleanEntryUserId) {
+            await supabase.rpc('assign_disbursement_entry_user', {
+              p_request_id: id,
+              p_entry_user_id: cleanEntryUserId,
+            });
+          }
+          const { error: fallback4Err } = await supabase.rpc('regional_forward_request', {
+            p_request_id: id,
+            p_remarks: cleanRemarks,
+            p_target_head_id: cleanTargetHeadId,
+            p_category_id: cleanCategoryId,
+          });
+          if (!fallback4Err) {
+            await loadRequests();
+            return { success: true };
+          }
           if (!headChanged) {
             const { error: fallbackErr } = await supabase.rpc('regional_forward_request', {
               p_request_id: id,
@@ -1988,7 +2118,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           return {
             success: false,
             error:
-              'Database update required to redirect to another Department Head: please run supabase/manual/apply_0073_regional_forward_target_head.sql in Supabase SQL Editor.',
+              'Database update required: please run supabase/manual/apply_0075_petty_cash.sql in Supabase SQL Editor.',
           };
         }
         throw error;
@@ -2250,6 +2380,52 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isBackendConnected) {
       try {
         await uploadActionVoice(id, voice);
+
+        // Ensure "Petty Cash Form Below 1000" PDF is generated with latest fields & synced on request_files
+        // so both the Petty Cash Form Below 1000 and any optional supporting documents are stamped!
+        const cachedReq = getRequestById(id);
+        const { data: liveRow } = await supabase
+          .from('requests')
+          .select(
+            'id, request_no, request_type, requester_name, shop_name, owner_head_name, assigned_entry_user_name, disbursement_mode, amount, notes, submitted_at, created_at, bank_account_holder_name, bank_account_no, bank_ifsc, bank_name, enter_bank_details_later'
+          )
+          .eq('id', id)
+          .maybeSingle();
+
+        const pettySource = (liveRow as RequestRecord | null) || cachedReq;
+        if (pettySource && pettySource.request_type === 'petty_cash') {
+          const { blob, pageCount } = await generatePettyCashFormPdf(pettySource);
+          const formPath = `${id}/${crypto.randomUUID()}-petty_cash_form_below_1000.pdf`;
+          const { error: upFormErr } = await supabase.storage
+            .from('request-files')
+            .upload(formPath, blob, { contentType: 'application/pdf', upsert: false });
+          if (upFormErr) {
+            throw new Error(`Could not upload Petty Cash Form Below 1000: ${upFormErr.message}`);
+          }
+          const { error: syncErr } = await supabase.rpc('sync_petty_cash_form_file', {
+            p_request_id: id,
+            p_storage_path: formPath,
+            p_size_bytes: blob.size,
+            p_page_count: pageCount,
+          });
+          if (syncErr) {
+            const { error: regFallbackErr } = await supabase.rpc('register_file', {
+              p_request_id: id,
+              p_kind: 'document',
+              p_storage_path: formPath,
+              p_original_name: 'Petty_Cash_Form_Below_1000.pdf',
+              p_mime_type: 'application/pdf',
+              p_size_bytes: blob.size,
+              p_page_count: pageCount,
+              p_duration_sec: null,
+            });
+            if (regFallbackErr) {
+              await supabase.storage.from('request-files').remove([formPath]);
+              throw new Error(`Could not attach Petty Cash Form Below 1000: ${regFallbackErr.message}`);
+            }
+          }
+        }
+
         const { data, error } = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
           request_id: id,
           // Used for the QR / verify link stamped on every page.
@@ -2404,11 +2580,28 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           id: `signed-${Date.now()}`,
           request_id: id,
           source_file_id: null,
+          is_packet: true,
+          file_name: `${approvalNo}_packet.pdf`,
           storage_path: `signed/${approvalNo}_packet.pdf`,
           sha256: 'a9f24e7821bc19e3489d71fa90bce32148b598710fa982341209bca3482910fa',
-          page_count: (current.files?.length || 1) + 1,
+          page_count: (current.files?.length || 1) + (current.request_type === 'petty_cash' ? 2 : 1),
           created_at: new Date().toISOString(),
         },
+        ...(current.request_type === 'petty_cash'
+          ? [
+              {
+                id: `signed-pc-form-${Date.now()}`,
+                request_id: id,
+                source_file_id: null,
+                is_packet: false,
+                file_name: `${approvalNo}_01_petty_cash_form_below_1000.pdf`,
+                storage_path: `signed/${approvalNo}_01_petty_cash_form_below_1000.pdf`,
+                sha256: 'b4e93c6120ad88f13290e44718bc01129044ab3219fc882341209bca3482910fb',
+                page_count: 1,
+                created_at: new Date().toISOString(),
+              },
+            ]
+          : []),
       ],
     };
 

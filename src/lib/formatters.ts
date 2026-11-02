@@ -296,10 +296,11 @@ export function isEntryCheckingUser(u?: {
   );
 }
 
-export const REQUEST_TYPES: RequestType[] = ['general', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'];
+export const REQUEST_TYPES: RequestType[] = ['general', 'petty_cash', 'discount', 'exhibition', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'];
 
 export const TYPE_LABELS: Record<RequestType, string> = {
   general: 'General',
+  petty_cash: 'Petty Cash',
   discount: 'Discount Approval',
   exhibition: 'Exhibition / Event',
   asset: 'Asset Buying',
@@ -310,6 +311,7 @@ export const TYPE_LABELS: Record<RequestType, string> = {
 
 export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
   general: 'Money request with invoices or bills. Clerk routes to Head (B) or Admin (A).',
+  petty_cash: 'Expenses up to ₹1,000 (Cash default). Mandatory note, optional voice/doc. Skips clerk directly to Petty Cash Dealing Head.',
   discount: 'Customer discount. Head approval (B-level). No payment step.',
   exhibition: 'Event sponsorship & promotion. Admin approval (A-level), then paid.',
   asset: 'Min. 2 bills or quotes. Head picks the best — up to ₹10,000 Head approves, above goes to Admin.',
@@ -320,6 +322,7 @@ export const TYPE_DESCRIPTIONS: Record<RequestType, string> = {
 
 export const TYPE_BADGES: Record<RequestType, string> = {
   general: 'bg-slate-100 text-slate-700 border-slate-200',
+  petty_cash: 'bg-teal-100 text-teal-900 border-teal-300 font-bold',
   discount: 'bg-amber-50 text-amber-800 border-amber-200',
   exhibition: 'bg-indigo-50 text-indigo-700 border-indigo-200',
   asset: 'bg-teal-50 text-teal-700 border-teal-200',

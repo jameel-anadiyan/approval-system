@@ -200,6 +200,19 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
     );
   };
 
+  const togglePettyCashDealer = async (u: Profile) => {
+    setBusyId(u.id);
+    const nextEnabled = !u.is_petty_cash_dealer;
+    const res = await dir.setPettyCashDealer(u.id, nextEnabled);
+    setBusyId(null);
+    show(
+      res.success
+        ? `${u.full_name} ${nextEnabled ? 'enabled as Petty Cash Dealer' : 'removed from Petty Cash Dealers'}.`
+        : res.error || 'Failed to update Petty Cash Dealer setting',
+      res.success
+    );
+  };
+
   const changeDisbType = async (u: Profile, t: DisbursementAccountType) => {
     setBusyId(u.id);
     const res = await dir.setDisbursementType(u.id, t);
@@ -401,6 +414,11 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${ROLE_BADGES[u.role]}`}>
                         {ROLE_LABELS[u.role]}
                       </span>
+                      {u.role === 'head' && u.is_petty_cash_dealer && (
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border bg-teal-50 text-teal-800 border-teal-300">
+                          Petty Cash Dealer
+                        </span>
+                      )}
                       {u.role === 'disbursement' && (
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${DISB_TYPE_STYLES[disbType(u)].badge}`}>
                           {DISBURSEMENT_TYPE_LABELS[disbType(u)]}
@@ -673,6 +691,26 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
 
               {me?.role === 'admin' && u.role === 'head' && (
                 <div className="space-y-2">
+                  <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-teal-200/90 bg-teal-50/70 cursor-pointer">
+                    <span className="flex items-center gap-2 text-xs text-teal-900">
+                      <Wallet className="w-3.5 h-3.5 text-teal-600" />
+                      <span><strong>Petty Cash Dealer</strong> (appears in Petty Cash Head list)</span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      id={`petty-cash-dealer-${u.id}`}
+                      aria-checked={!!u.is_petty_cash_dealer}
+                      disabled={busyId === u.id}
+                      onClick={() => togglePettyCashDealer(u)}
+                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${u.is_petty_cash_dealer ? 'bg-teal-600' : 'bg-slate-300'
+                        }`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.is_petty_cash_dealer ? 'translate-x-4' : ''
+                        }`} />
+                    </button>
+                  </label>
+
                   <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 cursor-pointer">
                     <span className="flex items-center gap-2 text-xs text-slate-700">
                       <Percent className="w-3.5 h-3.5 text-brand-600" />

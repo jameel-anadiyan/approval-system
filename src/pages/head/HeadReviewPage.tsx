@@ -4,7 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { isOwningDepartmentHead } from '../../lib/workflow';
-import { CheckCircle, CheckCircle2, Clock, CornerDownRight } from 'lucide-react';
+import { typeOf } from '../../lib/formatters';
+import { CheckCircle, CheckCircle2, Clock, CornerDownRight, Wallet } from 'lucide-react';
 
 export const HeadReviewPage: React.FC = () => {
   const { user } = useAuth();
@@ -20,6 +21,7 @@ export const HeadReviewPage: React.FC = () => {
   const toReviewQueue = requests.filter(
     (r) => r.status === 'pending_head_review' && isOwningDepartmentHead(r, user)
   );
+  const pettyCashCount = [...toApproveQueue, ...toReviewQueue].filter((r) => typeOf(r) === 'petty_cash').length;
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -46,6 +48,20 @@ export const HeadReviewPage: React.FC = () => {
           <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-white text-[10px] font-bold">
             {toReviewQueue.length}
           </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/petty-cash')}
+          className="px-4 py-2 text-xs font-bold rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+        >
+          <Wallet className="w-3.5 h-3.5 text-teal-600" />
+          <span>Petty Cash</span>
+          {pettyCashCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-teal-600 text-white text-[10px] font-bold">
+              {pettyCashCount}
+            </span>
+          )}
         </button>
       </div>
 

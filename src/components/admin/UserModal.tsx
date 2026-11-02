@@ -39,6 +39,7 @@ interface UserModalProps {
     connected_entry_accounts?: string[];
     mandatory_head_consultation?: boolean;
     mandatory_consultation_head_id?: string | null;
+    is_petty_cash_dealer?: boolean;
     account_persons?: AccountPersonInput[];
     whatsapp_number?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
@@ -66,6 +67,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [connectedEntryAccounts, setConnectedEntryAccounts] = useState<string[]>([]);
   const [mandatoryHeadConsultation, setMandatoryHeadConsultation] = useState(false);
   const [mandatoryConsultationHeadId, setMandatoryConsultationHeadId] = useState('');
+  const [isPettyCashDealer, setIsPettyCashDealer] = useState(false);
   const [accountPersons, setAccountPersons] = useState<AccountPersonInput[]>([
     { name: '', passkey: '' },
   ]);
@@ -80,6 +82,7 @@ export const UserModal: React.FC<UserModalProps> = ({
       setConnectedEntryAccounts([]);
       setMandatoryHeadConsultation(false);
       setMandatoryConsultationHeadId('');
+      setIsPettyCashDealer(false);
       setAccountPersons([{ name: '', passkey: '' }]);
       setWhatsappNumber('');
     }
@@ -205,6 +208,7 @@ export const UserModal: React.FC<UserModalProps> = ({
               region_id: extra.regionId || null,
               mandatory_head_consultation: mandatoryHeadConsultation,
               mandatory_consultation_head_id: mandatoryHeadConsultation ? mandatoryConsultationHeadId || null : null,
+              is_petty_cash_dealer: isPettyCashDealer,
             }
           : {}),
         ...(role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
@@ -678,6 +682,26 @@ export const UserModal: React.FC<UserModalProps> = ({
         )}
 
         {role === 'head' && (
+          <div className="space-y-3">
+            <div className="p-3.5 rounded-xl border border-teal-200 bg-teal-50/60">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isPettyCashDealer}
+                  onChange={(e) => setIsPettyCashDealer(e.target.checked)}
+                  className="mt-0.5 rounded-sm text-teal-600 focus:ring-teal-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-teal-950 block">
+                    Enable as Petty Cash Dealer
+                  </span>
+                  <span className="text-[11px] text-teal-800/80 block leading-tight mt-0.5">
+                    Shows this Department Head in the Petty Cash Dealing Head selector for employees and regional heads.
+                  </span>
+                </div>
+              </label>
+            </div>
+
           <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/50 space-y-2.5">
             <label className="flex items-start gap-2.5 cursor-pointer">
               <input
@@ -722,6 +746,7 @@ export const UserModal: React.FC<UserModalProps> = ({
                 </select>
               </div>
             )}
+          </div>
           </div>
         )}
 

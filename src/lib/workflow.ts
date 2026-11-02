@@ -25,6 +25,9 @@ export function isOwningDepartmentHead(r: RequestRecord, me: Me): boolean {
   if (!me || me.role !== 'head') return false;
   if (r.requester_id === me.id) return false;
   if ((r.consultations || []).some((c) => c.head_id === me.id)) return false;
+  if (r.request_type === 'petty_cash' && r.owner_head_id) {
+    return r.owner_head_id === me.id;
+  }
   return Boolean(
     (r.owner_head_id && r.owner_head_id === me.id) ||
     (me.department_id && r.department_id === me.department_id)

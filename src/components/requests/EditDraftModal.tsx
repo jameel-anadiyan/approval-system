@@ -1,11 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { FileUploader } from './FileUploader';
-import { RequestFile, RequestRecord, RequestDetails, DisbursementMode } from '../../types/database';
+import { RequestFile, RequestRecord, RequestDetails, DisbursementMode, Profile, PettyCashDealer } from '../../types/database';
 import { useRequests } from '../../context/RequestContext';
 import { formatFileSize, formatINR, formatINRWhole, typeOf } from '../../lib/formatters';
 import { errMsg } from '../../lib/errorUtils';
-import { FileText, Mic, Trash2, Save, Loader2, Eye, Image as ImageIcon } from 'lucide-react';
+import { FileText, Mic, Trash2, Save, Loader2, Eye, Image as ImageIcon, Wallet, UserCheck } from 'lucide-react';
 import { DocumentPreviewModal, DocumentPreviewItem } from './DocumentPreviewModal';
 import {
   DiscountFields, ExhibitionFields, discountFromDetails, exhibitionFromDetails, discountCalc, exhibitionCalc,
@@ -24,7 +24,7 @@ import { WorkCategoryField, useCategoryOptions } from './WorkCategoryField';
 import { TargetHeadField } from './TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useAuth } from '../../context/AuthContext';
-import { useDirectory } from '../../lib/directory';
+import { useDirectory, fetchActiveEntryOfficers, fetchPettyCashDealers } from '../../lib/directory';
 import { RequestShopField, useRequestShops, useExhibitionShops, needsShopPick } from './RequestShopField';
 import { DisbursementModeSelector } from './DisbursementModeSelector';
 
@@ -36,13 +36,14 @@ interface EditDraftModalProps {
 
 /** Requester edits a draft / returned request: details, add documents, remove attachments. */
 export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose, request }) => {
-  const { user } = useAuth();
+  const { user, isBackendConnected } = useAuth();
   const { updateDraft, addFiles, removeFile, setQuote, threshold, requests } = useRequests();
   const type = typeOf(request);
   const isAsset = type === 'asset' || type === 'asset_below_20k';
+  const isPettyCash = type === 'petty_cash';
   const isPaymentNeeded = type !== 'discount' && type !== 'non_cash' && type !== 'stock_transfer';
   const [disbursementMode, setDisbursementMode] = useState<DisbursementMode>(
-    request.disbursement_mode ?? (request.details?.disbursement_mode as DisbursementMode) ?? null
+    request.disbursement_mode ?? (request.details?.disbursement_mode as DisbursementMode) ?? (type === 'petty_cash' ? 'cash' : null)
   );
   const [enterBankDetailsLater, setEnterBankDetailsLater] = useState<boolean>(
     Boolean(request.enter_bank_details_later ?? request.details?.enter_bank_details_later ?? false)
@@ -91,8 +92,25 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files, type === 'asset_below_20k' ? 1 : 2));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
   const [targetHeadId, setTargetHeadId] = useState<string>(request.owner_head_id ?? '');
-  const categoryOptions = useCategoryOptions(type === 'exhibition' ? null : targetHeadId || null);
+  const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>(request.assigned_entry_user_id ?? '');
+  const [pettyCashDealers, setPettyCashDealers] = useState<PettyCashDealer[]>([]);
+  const [entryOfficers, setEntryOfficers] = useState<Profile[]>([]);
+  const categoryOptions = useCategoryOptions(type === 'exhibition' || type === 'petty_cash' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState<string>(request.category_id ?? '');
+
+  useEffect(() => {
+    if (!isOpen || !isPettyCash) return;
+    let alive = true;
+    fetchPettyCashDealers(isBackendConnected, dir.users).then((dealers) => {
+      if (alive) setPettyCashDealers(dealers);
+    });
+    fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
+      if (alive) setEntryOfficers(officers);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [isOpen, isPettyCash, isBackendConnected, dir.users]);
   const shopState = useRequestShops();
   const exhibitionShopState = useExhibitionShops(shopState, request.requester_id);
   const pickShop = needsShopPick(type);
@@ -128,6 +146,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const stockCalc = stockTransferCalc(stockTransfer);
   const amount =
     type === 'non_cash' ? 0
+      : type === 'petty_cash' ? baseAmount
       : type === 'discount' ? discountCalc(discount).value
       : type === 'stock_transfer' ? stockCalc.totalMrp
       : type === 'exhibition' ? exhibitionCalc(exhibition).total
@@ -136,7 +155,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
 
   // Asset quotation documents are edited in the quotation editor; only voice notes are listed here.
   const existing = (request.files || []).filter(
-    (f) => !deletedFileIds.has(f.id) && (!isAsset || f.kind !== 'document')
+    (f) =>
+      !deletedFileIds.has(f.id) &&
+      f.original_name !== 'Petty_Cash_Form_Below_1000.pdf' &&
+      (!isAsset || f.kind !== 'document')
   );
 
   const handleRemoveExisting = async (fileId: string, fileName?: string): Promise<boolean> => {
@@ -184,7 +206,14 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const getDetails = (): RequestDetails | null => {
     let d: RequestDetails | null = null;
     if (type === 'non_cash') d = toNonCashDetails(nonCash, shopState.loading ? undefined : shopChoice());
-    else if (type === 'discount') d = toDiscountDetails(discount);
+    else if (type === 'petty_cash') {
+      d = {
+        petty_cash_form: 'petty_cash_form_below_1000',
+        max_limit: 1000,
+        total_amount: baseAmount,
+        ...(shopState.loading ? {} : shopChoice()),
+      };
+    } else if (type === 'discount') d = toDiscountDetails(discount);
     else if (type === 'stock_transfer') d = toStockTransferDetails(stockTransfer);
     else if (type === 'exhibition') {
       const exh = toExhibitionDetails(exhibition);
@@ -228,8 +257,26 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     e.preventDefault();
     if (saveLockRef.current) return;
     setError(null);
-    if (!title.trim()) return setError('Please enter a title.');
-    if (baseAmount <= 0 && type === 'general') return setError('Amount must be more than zero.');
+    if (isPettyCash) {
+      if (user?.role !== 'head' && !targetHeadId) {
+        return setError('Please select a Petty Cash Dealing Head.');
+      }
+      if (!assignedEntryUserId) {
+        return setError('Please select a Disbursement Entry Account.');
+      }
+      if (baseAmount <= 0) {
+        return setError('Amount must be greater than zero.');
+      }
+      if (baseAmount > 1000) {
+        return setError('Maximum amount for Petty Cash is ₹1,000.');
+      }
+      if (!notes.trim()) {
+        return setError('Note is mandatory for Petty Cash requests.');
+      }
+    } else {
+      if (!title.trim()) return setError('Please enter a title.');
+      if (baseAmount <= 0 && type === 'general') return setError('Amount must be more than zero.');
+    }
     if (isPaymentNeeded && disbursementMode === 'bank' && !enterBankDetailsLater) {
       if (!bankAccountNo.trim()) return setError('Please enter bank account number, or select "Enter bank details later".');
       if (!bankIfsc.trim()) return setError('Please enter bank IFSC code, or select "Enter bank details later".');
@@ -243,6 +290,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     if (v) return setError(v);
     if (
       type !== 'exhibition' &&
+      type !== 'petty_cash' &&
       user?.role !== 'head' &&
       user?.role !== 'admin' &&
       user?.role !== 'clerk' &&
@@ -259,19 +307,27 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     try {
       const categoryChanged = (categoryId || null) !== (request.category_id || null);
       const targetHeadChanged = (targetHeadId || null) !== (request.owner_head_id || null);
+      const entryAccountChanged = (assignedEntryUserId || null) !== (request.assigned_entry_user_id || null);
+      const finalTitle = isPettyCash
+        ? `Petty Cash: ${(notes.trim() || 'Expense').replace(/\s+/g, ' ').slice(0, 60)}`
+        : title.trim();
       const upd = await updateDraft(request.id, {
-        title: title.trim(),
+        title: finalTitle,
         amount: type === 'non_cash' ? 0 : (type === 'general' ? generalTotal : amount),
         notes: notes.trim() || undefined,
         details: getDetails(),
         category_id:
-          type !== 'exhibition' && user?.role !== 'head' && categoryChanged
+          type !== 'exhibition' && type !== 'petty_cash' && user?.role !== 'head' && categoryChanged
             ? categoryId || null
             : undefined,
         target_head_id:
           type === 'exhibition' || user?.role === 'head' || !targetHeadChanged
             ? null
             : targetHeadId || undefined,
+        assigned_entry_user_id:
+          isPettyCash && entryAccountChanged
+            ? assignedEntryUserId || null
+            : undefined,
       });
       if (!upd.success) throw new Error(upd.error);
       if (isAsset) {
@@ -303,14 +359,48 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit Request" description="Correct the details or attachments, then submit again." maxWidth="lg">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={isPettyCash ? 'Edit Petty Cash Request' : 'Edit Request'}
+      description="Correct the details or attachments, then submit again."
+      maxWidth="lg"
+    >
       <form onSubmit={handleSave} className="space-y-4">
-        <div>
-          <label htmlFor="edit-title" className="text-xs font-bold text-slate-700 block mb-1">Title</label>
-          <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
-            className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
-        </div>
-        {type !== 'exhibition' && user?.role !== 'head' && (
+        {!isPettyCash && (
+          <div>
+            <label htmlFor="edit-title" className="text-xs font-bold text-slate-700 block mb-1">Title</label>
+            <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
+              className="w-full text-sm p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
+          </div>
+        )}
+        {isPettyCash && user?.role !== 'head' ? (
+          <div className="p-3.5 bg-teal-50/70 border border-teal-200 rounded-xl space-y-1.5">
+            <label htmlFor="edit-petty-head" className="text-xs font-bold text-teal-950 flex items-center gap-1.5">
+              <Wallet className="w-3.5 h-3.5 text-teal-600" />
+              <span>Petty Cash Dealing Head <span className="text-rose-500">*</span></span>
+            </label>
+            <select
+              id="edit-petty-head"
+              value={targetHeadId}
+              onChange={(e) => setTargetHeadId(e.target.value)}
+              disabled={busy}
+              className="w-full text-xs sm:text-sm font-semibold p-2.5 rounded-xl border border-teal-300 bg-white text-slate-800 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 outline-hidden"
+            >
+              <option value="">-- Select Petty Cash Dealing Head --</option>
+              {pettyCashDealers.map((dealer) => (
+                <option key={dealer.head_id} value={dealer.head_id}>
+                  {dealer.head_name} ({dealer.department_name})
+                </option>
+              ))}
+              {request.owner_head_id && !pettyCashDealers.some((d) => d.head_id === request.owner_head_id) && (
+                <option value={request.owner_head_id}>
+                  {request.owner_head_name || 'Assigned Head'} (Current)
+                </option>
+              )}
+            </select>
+          </div>
+        ) : type !== 'exhibition' && !isPettyCash && user?.role !== 'head' ? (
           <TargetHeadField
             value={targetHeadId}
             currentHead={
@@ -333,8 +423,59 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
               }
             }}
           />
+        ) : null}
+        {isPettyCash && (
+          <div className="p-3.5 bg-teal-50/50 border border-teal-200 rounded-xl space-y-1.5">
+            <label htmlFor="edit-petty-entry" className="text-xs font-bold text-teal-950 flex items-center gap-1.5">
+              <UserCheck className="w-3.5 h-3.5 text-teal-600" />
+              <span>Disbursement Entry Account <span className="text-rose-500">*</span></span>
+            </label>
+            <select
+              id="edit-petty-entry"
+              value={assignedEntryUserId}
+              onChange={(e) => setAssignedEntryUserId(e.target.value)}
+              disabled={busy}
+              className="w-full text-xs sm:text-sm font-semibold p-2.5 rounded-xl border border-teal-300 bg-white text-slate-800 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 outline-hidden"
+            >
+              <option value="">-- Choose Disbursement Entry Account --</option>
+              {entryOfficers.map((officer) => (
+                <option key={officer.id} value={officer.id}>
+                  {officer.full_name} (@{officer.username}){officer.designation ? ` – ${officer.designation}` : ''}
+                </option>
+              ))}
+              {request.assigned_entry_user_id && !entryOfficers.some((o) => o.id === request.assigned_entry_user_id) && (
+                <option value={request.assigned_entry_user_id}>
+                  {request.assigned_entry_user_name || 'Assigned Entry Account'} (Current)
+                </option>
+              )}
+            </select>
+          </div>
         )}
-        {user?.role !== 'head' && (
+        {isPettyCash && (
+          <div className="space-y-1.5 bg-teal-50/40 p-3.5 rounded-xl border border-teal-200/80">
+            <div className="flex items-center justify-between">
+              <label htmlFor="edit-petty-amount" className="text-xs font-bold text-slate-800">
+                Amount in Rupees (₹) <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[11px] font-bold text-teal-700">Max ₹1,000.00</span>
+            </div>
+            <input
+              id="edit-petty-amount"
+              type="number"
+              min="1"
+              max="1000"
+              step="0.01"
+              inputMode="decimal"
+              value={amountStr}
+              onChange={(e) => setAmountStr(e.target.value)}
+              className="w-full text-sm p-3 rounded-xl border border-teal-300 bg-white focus:border-teal-600 focus:ring-1 focus:ring-teal-600 outline-hidden font-bold"
+            />
+            {baseAmount > 1000 && (
+              <p className="text-[11px] font-bold text-rose-600">Maximum amount for Petty Cash is ₹1,000.</p>
+            )}
+          </div>
+        )}
+        {!isPettyCash && user?.role !== 'head' && (
           <WorkCategoryField options={categoryOptions} value={categoryId} onChange={setCategoryId}
             currentName={request.category_name} />
         )}
@@ -423,8 +564,11 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
         )}
         {isAsset && <AssetFields value={asset} onChange={setAsset} />}
         <div>
-          <label htmlFor="edit-notes" className="text-xs font-bold text-slate-700 block mb-1">Purpose / Notes</label>
+          <label htmlFor="edit-notes" className="text-xs font-bold text-slate-700 block mb-1">
+            {isPettyCash ? <>Note <span className="text-rose-500">*</span></> : 'Purpose / Notes'}
+          </label>
           <textarea id="edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
+            placeholder={isPettyCash ? 'Describe the petty cash purpose / expense (mandatory)…' : undefined}
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
 

@@ -48,7 +48,7 @@ function appOrigin(v: unknown): string | null {
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  general: "General", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
+  general: "General", petty_cash: "Petty Cash (Below 1000)", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
   asset: "Asset buying", asset_below_20k: "Asset buying below 20k", non_cash: "Non-cash request",
   stock_transfer: "Stock transfer",
 };
@@ -208,6 +208,33 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
       ],
     };
   }
+  if (r.request_type === "petty_cash") {
+    // Skip duplicate server form if client already synced Petty_Cash_Form_Below_1000.pdf into files
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("petty_cash_form_below_1000")
+    );
+    if (alreadyUploaded) return null;
+    const payMode = String(r.disbursement_mode ?? d.disbursement_mode ?? "cash").toLowerCase() === "bank"
+      ? "Bank Transfer"
+      : "Cash (Default)";
+    return {
+      subtitle: "PETTY CASH FORM BELOW 1000",
+      sections: [
+        { title: "Petty Cash Voucher Details (Max Rs. 1,000.00)", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Petty Cash Dealing Head", txt(r.owner_head_name ?? r.department)],
+          ["Disbursement Entry Account", txt(r.assigned_entry_user_name)],
+          ["Payment Mode", payMode],
+          ["Requested Amount (<= Rs. 1,000)", money(r.amount)],
+        ] },
+        { title: "Mandatory Note / Purpose", text: r.notes ?? "-" },
+      ],
+    };
+  }
   return null;
 }
 
@@ -291,11 +318,15 @@ Deno.serve(handle(async (req) => {
         ++n,
         r.request_type === "discount"
           ? "discount_form"
-          : (r.request_type === "asset" || r.request_type === "asset_below_20k")
-            ? "asset_purchase_form"
-            : r.request_type === "stock_transfer"
-              ? "stock_transfer_form"
-              : "exhibition_form",
+          : r.request_type === "petty_cash"
+            ? "petty_cash_form_below_1000"
+            : (r.request_type === "asset" || r.request_type === "asset_below_20k")
+              ? "asset_purchase_form"
+              : r.request_type === "stock_transfer"
+                ? "stock_transfer_form"
+                : r.request_type === "non_cash"
+                  ? "non_cash_form"
+                  : "exhibition_form",
         null,
         out.pageCount
       );

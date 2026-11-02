@@ -116,6 +116,7 @@ export const MOCK_USERS: Profile[] = [
     must_change_password: false,
     can_view_discount_report: true,
     can_view_exhibition_waitlist: true,
+    is_petty_cash_dealer: true,
     created_at: '2026-09-02T04:00:00Z',
     updated_at: '2026-09-02T04:00:00Z',
     department: MOCK_DEPARTMENTS[0],
