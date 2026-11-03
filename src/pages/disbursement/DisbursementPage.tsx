@@ -1060,20 +1060,34 @@ export const DisbursementPage: React.FC = () => {
                                   </span>
                                   <span
                                     className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border ${
-                                      isCashMode
+                                      ent.entry_type === 'old_balance' || (Number(ent.amount || 0) === 0 && Number(ent.adjustment_amount || 0) > 0)
+                                        ? 'bg-violet-100 text-violet-900 border-violet-300'
+                                        : isCashMode
                                         ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
                                         : 'bg-blue-100 text-blue-900 border-blue-300'
                                     }`}
                                   >
-                                    {isCashMode ? 'Cash Entry' : 'Bank Entry'}
+                                    {ent.entry_type === 'old_balance' || (Number(ent.amount || 0) === 0 && Number(ent.adjustment_amount || 0) > 0)
+                                      ? 'Old Advance'
+                                      : isCashMode
+                                      ? 'Cash Entry'
+                                      : 'Bank Entry'}
                                   </span>
-                                  <span className="font-extrabold text-slate-900 font-mono text-sm">
-                                    {formatINR(ent.amount)}
-                                  </span>
-                                  {Number(ent.adjustment_amount ?? 0) > 0 && (
-                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-800 border-violet-200">
-                                      + Old Bal. Adj. {formatINR(Number(ent.adjustment_amount))}
+                                  {Number(ent.amount || 0) === 0 && Number(ent.adjustment_amount || 0) > 0 ? (
+                                    <span className="font-extrabold text-violet-900 font-mono text-sm">
+                                      {formatINR(Number(ent.adjustment_amount))} (Old Advance)
                                     </span>
+                                  ) : (
+                                    <>
+                                      <span className="font-extrabold text-slate-900 font-mono text-sm">
+                                        {formatINR(ent.amount)}
+                                      </span>
+                                      {Number(ent.adjustment_amount ?? 0) > 0 && (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-800 border-violet-200">
+                                          + Old Bal. Adj. {formatINR(Number(ent.adjustment_amount))}
+                                        </span>
+                                      )}
+                                    </>
                                   )}
                                   <span
                                     className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
@@ -1254,8 +1268,8 @@ export const DisbursementPage: React.FC = () => {
             const adjText = adjustment > 0 ? ` · Old balance adjusted ${formatINR(adjustment)}` : '';
             const tdsText = tdsCut ? `TDS Cut ${formatINR(extra.tdsAmount)}` : 'TDS Not Cut';
             setNotice(
-              amount <= 0
-                ? `Entry recorded${adjText}. Nothing to pay — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
+              amount <= 0 || res.fully_paid
+                ? `Request automatically closed & marked as Paid through Old Balance / Old Advance adjustment (${formatINR(adjustment || amount)}).`
                 : `Entry added as ${entryType === 'cash' ? 'Cash Entry' : 'Bank Entry'}: ${formatINR(amount)} to pay (${tdsText})${adjText}. Sent to Approver for review.`
             );
           }}

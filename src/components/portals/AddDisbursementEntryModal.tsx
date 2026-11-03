@@ -15,7 +15,7 @@ interface AddDisbursementEntryModalProps {
     tdsCut: boolean,
     notes: string | undefined,
     adjustment: number,
-    entryType: 'cash' | 'bank',
+    entryType: 'cash' | 'bank' | 'old_balance',
     extra: { tdsAmount: number; passkey: string }
   ) => Promise<void>;
 }
@@ -38,7 +38,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
   // Balance available for new entries = approved - paid/adjusted - unpaid entries
   const remainingUnentered = entryAvailable(request);
 
-  const [entryType, setEntryType] = useState<'cash' | 'bank'>(
+  const [entryType, setEntryType] = useState<'cash' | 'bank' | 'old_balance'>(
     request.disbursement_mode === 'cash' ? 'cash' : 'bank'
   );
   const [amountStr, setAmountStr] = useState<string>(
@@ -54,20 +54,27 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
   const [error, setError] = useState<string | null>(null);
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  const parsedAmount = round2(parseFloat(amountStr) || 0);
-  const parsedAdjustment = round2(parseFloat(adjustmentStr) || 0);
-  // TDS is deducted from the request balance, so it is only counted when ticked
-  const parsedTds = tdsCut ? round2(parseFloat(tdsAmountStr) || 0) : 0;
+  const rawAdjustment = round2(parseFloat(adjustmentStr) || 0);
+  const isFullOldBalance = entryType === 'old_balance' || (rawAdjustment > 0 && rawAdjustment >= remainingUnentered);
+  const parsedAdjustment = isFullOldBalance && entryType === 'old_balance' && rawAdjustment === 0
+    ? remainingUnentered
+    : rawAdjustment;
+  const parsedAmount = isFullOldBalance ? 0 : round2(parseFloat(amountStr) || 0);
+  const parsedTds = tdsCut && !isFullOldBalance ? round2(parseFloat(tdsAmountStr) || 0) : 0;
   const total = round2(parsedAmount + parsedAdjustment + parsedTds);
   // Max entry amount after keeping room for the adjustment and the TDS
   const maxEntryAmount = Math.max(0, round2(remainingUnentered - parsedAdjustment - parsedTds));
   const adjustmentInvalid = parsedAdjustment < 0 || parsedAdjustment > remainingUnentered;
-  const tdsMissing = tdsCut && parsedTds <= 0;
-  const overLimit = total > remainingUnentered;
-  const adjustmentOnly = parsedAmount === 0 && parsedAdjustment > 0;
+  const tdsMissing = tdsCut && !isFullOldBalance && parsedTds <= 0;
+  const overLimit = !isFullOldBalance && total > remainingUnentered;
+  const adjustmentOnly = isFullOldBalance || (parsedAmount === 0 && parsedAdjustment > 0);
 
   // Keep the auto-filled entry amount = balance - adjustment - TDS until the user edits it
   const autoFill = (adj: number, tds: number) => {
+    if (adj >= remainingUnentered) {
+      setAmountStr('0');
+      return;
+    }
     if (amountTouched) return;
     const next = Math.max(0, round2(remainingUnentered - adj - tds));
     setAmountStr(next > 0 ? next.toFixed(2) : '0');
@@ -75,7 +82,21 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
 
   const handleAdjustmentChange = (value: string) => {
     setAdjustmentStr(value);
-    autoFill(round2(parseFloat(value) || 0), parsedTds);
+    const adjVal = round2(parseFloat(value) || 0);
+    if (adjVal >= remainingUnentered && remainingUnentered > 0) {
+      setAmountStr('0');
+    } else {
+      autoFill(adjVal, parsedTds);
+    }
+  };
+
+  const handleSelectFullOldBalance = () => {
+    setEntryType('old_balance');
+    setAdjustmentStr(remainingUnentered > 0 ? remainingUnentered.toFixed(2) : '0');
+    setAmountStr('0');
+    setAmountTouched(true);
+    setTdsCut(false);
+    setTdsAmountStr('');
   };
 
   const handleTdsAmountChange = (value: string) => {
@@ -95,7 +116,13 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
     e.preventDefault();
     setError(null);
 
-    if (parsedAmount < 0 || parsedAdjustment < 0 || parsedTds < 0) {
+    const finalType: 'cash' | 'bank' | 'old_balance' = isFullOldBalance ? 'old_balance' : entryType;
+    const finalAmount = isFullOldBalance ? 0 : parsedAmount;
+    const finalAdjustment = isFullOldBalance ? (parsedAdjustment > 0 ? parsedAdjustment : remainingUnentered) : parsedAdjustment;
+    const finalTdsCut = isFullOldBalance ? false : tdsCut;
+    const finalTdsAmount = isFullOldBalance ? 0 : parsedTds;
+
+    if (finalAmount < 0 || finalAdjustment < 0 || finalTdsAmount < 0) {
       setError('Amounts cannot be negative.');
       return;
     }
@@ -105,17 +132,17 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
       return;
     }
 
-    if (parsedAmount + parsedAdjustment <= 0) {
+    if (finalAmount + finalAdjustment <= 0) {
       setError('Enter an entry amount or an old balance / advance adjustment.');
       return;
     }
 
-    if (tdsCut && parsedAmount === 0) {
+    if (finalTdsCut && finalAmount === 0) {
       setError('TDS needs an entry amount to be paid.');
       return;
     }
 
-    if (overLimit) {
+    if (!isFullOldBalance && overLimit) {
       setError(
         `Entry amount + TDS + adjustment (${formatINR(total)}) cannot exceed the balance available for entries (${formatINR(remainingUnentered)}).`
       );
@@ -129,8 +156,8 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
 
     setIsSubmitting(true);
     try {
-      await onAddEntry(parsedAmount, tdsCut, notes.trim() || undefined, parsedAdjustment, entryType, {
-        tdsAmount: parsedTds,
+      await onAddEntry(finalAmount, finalTdsCut, notes.trim() || undefined, finalAdjustment, finalType, {
+        tdsAmount: finalTdsAmount,
         passkey,
       });
       onClose();
@@ -203,44 +230,74 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </span>
         </div>
 
-        {/* Payment Entry Mode (Cash vs Bank) */}
+        {/* Payment Entry Mode (Bank vs Cash vs Old Advance) */}
         <div>
           <label className="block text-xs font-bold text-slate-700 mb-1.5">
             Payment Dealing Mode <span className="text-rose-500">*</span>
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
-              onClick={() => setEntryType('cash')}
-              className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                entryType === 'cash'
-                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-1 ring-emerald-500'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Banknote className="w-4 h-4" />
-              <span>Cash Entry</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setEntryType('bank')}
-              className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                entryType === 'bank'
+              onClick={() => {
+                setEntryType('bank');
+                if (entryType === 'old_balance') {
+                  setAdjustmentStr('');
+                  setAmountStr(remainingUnentered > 0 ? remainingUnentered.toFixed(2) : '');
+                  setAmountTouched(false);
+                }
+              }}
+              className={`p-2.5 sm:p-3 rounded-xl border text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                entryType === 'bank' && !isFullOldBalance
                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-500'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <Landmark className="w-4 h-4" />
+              <Landmark className="w-4 h-4 shrink-0" />
               <span>Bank Entry</span>
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEntryType('cash');
+                if (entryType === 'old_balance') {
+                  setAdjustmentStr('');
+                  setAmountStr(remainingUnentered > 0 ? remainingUnentered.toFixed(2) : '');
+                  setAmountTouched(false);
+                }
+              }}
+              className={`p-2.5 sm:p-3 rounded-xl border text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                entryType === 'cash' && !isFullOldBalance
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-1 ring-emerald-500'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Banknote className="w-4 h-4 shrink-0" />
+              <span>Cash Entry</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleSelectFullOldBalance}
+              className={`p-2.5 sm:p-3 rounded-xl border text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                isFullOldBalance
+                  ? 'bg-violet-600 text-white border-violet-600 shadow-xs ring-1 ring-violet-500'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <RotateCcw className="w-4 h-4 shrink-0" />
+              <span>Old Advance</span>
+            </button>
           </div>
-          <span className="text-[10px] text-slate-400 mt-1 block">
-            This entry will route to the associated {entryType === 'cash' ? 'Cash' : 'Bank'} payment desk once approved by the Entry Approver.
+          <span className="text-[10px] text-slate-500 mt-1 block">
+            {isFullOldBalance
+              ? '⚡ Direct Settlement: Settles full amount against old balance/advance and marks the request as Paid immediately. Skips verifier and cashier.'
+              : entryType === 'cash'
+              ? 'This entry will route to the associated Cash payment desk once approved by the Entry Approver.'
+              : 'This entry will route to the associated Bank payment desk once approved by the Entry Approver.'}
           </span>
         </div>
 
-        {/* If Bank Entry, display the request's bank details */}
-        {entryType === 'bank' && (
+        {/* If Bank Entry and not full old advance, display requester's bank details */}
+        {entryType === 'bank' && !isFullOldBalance && (
           <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/50 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
@@ -274,7 +331,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
                 </div>
               </div>
             ) : (
-              <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+              <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <span>Bank account details have not been entered yet for this request. Only requests with bank account details entered will be automatically transferred.</span>
               </div>
@@ -282,7 +339,7 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </div>
         )}
 
-        {!request.disbursement_mode && (
+        {!request.disbursement_mode && !isFullOldBalance && (
           <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
             <div>
@@ -294,13 +351,30 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </div>
         )}
 
-        {/* Old balance / old advance adjustment (separate from the entry amount) */}
-        <div className="p-3.5 rounded-xl border border-violet-200 bg-violet-50/50 space-y-2.5">
-          <label htmlFor="entry-adjustment" className="text-xs font-bold text-violet-950 flex items-center gap-1.5">
-            <RotateCcw className="w-3.5 h-3.5 text-violet-600" />
-            Old Balance / Old Advance Adjustment (₹)
-            <span className="text-[10px] font-semibold text-violet-600">Optional</span>
-          </label>
+        {/* Old balance / old advance adjustment */}
+        <div className={`p-3.5 rounded-xl border transition-all space-y-2.5 ${
+          isFullOldBalance
+            ? 'border-emerald-300 bg-emerald-50/70 ring-1 ring-emerald-200'
+            : 'border-violet-200 bg-violet-50/50'
+        }`}>
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="entry-adjustment" className="text-xs font-bold text-violet-950 flex items-center gap-1.5">
+              <RotateCcw className="w-3.5 h-3.5 text-violet-600" />
+              Old Balance / Old Advance Adjustment (₹)
+              <span className="text-[10px] font-semibold text-violet-600">
+                {isFullOldBalance ? 'Full Settle' : 'Optional'}
+              </span>
+            </label>
+            {remainingUnentered > 0 && !isFullOldBalance && (
+              <button
+                type="button"
+                onClick={handleSelectFullOldBalance}
+                className="px-2 py-0.5 rounded-lg border border-violet-300 bg-white text-violet-700 hover:bg-violet-100 text-[10px] font-extrabold cursor-pointer transition-colors shadow-2xs"
+              >
+                Adjust Full ₹{formatINR(remainingUnentered)}
+              </button>
+            )}
+          </div>
           <input
             id="entry-adjustment"
             type="number"
@@ -314,59 +388,85 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
             className={`w-full text-sm font-bold font-mono p-2.5 rounded-xl border bg-white outline-hidden focus:ring-1 ${
               adjustmentInvalid
                 ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                : isFullOldBalance
+                ? 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-500'
                 : 'border-violet-200 focus:border-violet-500 focus:ring-violet-500'
             }`}
           />
-          <p className="text-[11px] text-violet-800/80 leading-snug">
-            Deducted from the request balance and marked as <strong>paid automatically</strong>. It is not part of the
-            entry amount — the Payment account does not pay it.
+          <p className="text-[11px] text-violet-900 leading-snug">
+            {isFullOldBalance
+              ? '✓ Full amount adjusted against old balance. The request will be automatically marked as Paid and closed directly from this Entry account.'
+              : 'Deducted from the request balance and marked as paid automatically. It is not part of the entry amount — Payment account does not pay it.'}
           </p>
         </div>
 
-        {/* Entry Amount (what the Payment-Only account pays) */}
-        <div>
-          <label htmlFor="entry-amount" className="text-xs font-bold text-slate-700 block mb-1">
-            Entry Amount to Pay (₹) <span className="text-rose-500">*</span>
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="entry-amount"
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
-              max={maxEntryAmount}
-              required
-              value={amountStr}
-              onChange={(e) => {
-                setAmountTouched(true);
-                setAmountStr(e.target.value);
-              }}
-              placeholder="0.00"
-              className={`w-full text-base font-bold font-mono p-3 rounded-xl border outline-hidden focus:ring-1 ${
-                overLimit
-                  ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
-                  : 'border-slate-200 focus:border-sky-500 focus:ring-sky-500'
-              }`}
-            />
-            {maxEntryAmount > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setAmountTouched(true);
-                  setAmountStr(maxEntryAmount.toFixed(2));
-                }}
-                className="shrink-0 px-3 rounded-xl border border-sky-200 bg-sky-50 text-sky-700 text-xs font-bold hover:bg-sky-100 transition-colors"
-              >
-                Max Balance
-              </button>
-            )}
+        {/* Notice for direct full settlement */}
+        {isFullOldBalance && (
+          <div className="p-3.5 rounded-xl border border-emerald-300 bg-emerald-50/90 text-emerald-950 flex items-start gap-2.5 shadow-xs">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <span className="font-extrabold text-emerald-900 block">
+                Automatic Settlement via Old Balance / Old Advance
+              </span>
+              <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
+                This request will be <strong>automatically marked as Paid</strong> through old balance / advance adjustment.
+                It will <strong>not</strong> go further to verifying (Entry Approver) or cash/bank cashier desk (cashacc); it will be closed directly from this Entry account.
+              </p>
+            </div>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            The Payment-Only account pays exactly the amount the Entry Approver approves against Entry #{nextEntryNo}
-            (full, or a partial figure). Use 0 to record only an adjustment.
-          </p>
-        </div>
+        )}
+
+        {/* Entry Amount (what the Payment-Only account pays) */}
+        {!isFullOldBalance ? (
+          <div>
+            <label htmlFor="entry-amount" className="text-xs font-bold text-slate-700 block mb-1">
+              Entry Amount to Pay (₹) <span className="text-rose-500">*</span>
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="entry-amount"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                max={maxEntryAmount}
+                required
+                value={amountStr}
+                onChange={(e) => {
+                  setAmountTouched(true);
+                  setAmountStr(e.target.value);
+                }}
+                placeholder="0.00"
+                className={`w-full text-base font-bold font-mono p-3 rounded-xl border outline-hidden focus:ring-1 ${
+                  overLimit
+                    ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                    : 'border-slate-200 focus:border-sky-500 focus:ring-sky-500'
+                }`}
+              />
+              {maxEntryAmount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAmountTouched(true);
+                    setAmountStr(maxEntryAmount.toFixed(2));
+                  }}
+                  className="shrink-0 px-3 rounded-xl border border-sky-200 bg-sky-50 text-sky-700 text-xs font-bold hover:bg-sky-100 transition-colors"
+                >
+                  Max Balance
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              The Payment-Only account pays exactly the amount the Entry Approver approves against Entry #{nextEntryNo}
+              (full, or a partial figure). Use 0 to record only an adjustment.
+            </p>
+          </div>
+        ) : (
+          <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-600">Entry Amount to Pay:</span>
+            <span className="font-mono font-bold text-slate-900">₹0.00 (100% Settled via Old Advance)</span>
+          </div>
+        )}
 
         {(parsedAdjustment > 0 || parsedTds > 0) && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
@@ -411,77 +511,79 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           </p>
         )}
 
-        {/* TDS Cut / Not Cut indication */}
-        <div>
-          <label className="text-xs font-bold text-slate-700 block mb-1.5">
-            TDS Deducted Status <span className="text-rose-500">*</span>
-          </label>
-          <label
-            htmlFor="tds-checkbox"
-            className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
-              tdsCut
-                ? 'bg-amber-50/80 border-amber-300 ring-1 ring-amber-300'
-                : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
-            }`}
-          >
-            <input
-              id="tds-checkbox"
-              type="checkbox"
-              checked={tdsCut}
-              onChange={(e) => handleTdsToggle(e.target.checked)}
-              className="mt-1 w-4 h-4 text-amber-600 rounded-sm border-slate-300 focus:ring-amber-500 cursor-pointer"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <Percent className={`w-3.5 h-3.5 ${tdsCut ? 'text-amber-700' : 'text-slate-500'}`} />
-                <span className={`text-xs font-bold ${tdsCut ? 'text-amber-900' : 'text-slate-800'}`}>
-                  {tdsCut ? 'TDS Cut (Tax Deducted at Source)' : 'TDS Not Cut (No Tax Deducted)'}
-                </span>
-                <span
-                  className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
-                    tdsCut
-                      ? 'bg-amber-100 text-amber-900 border-amber-300'
-                      : 'bg-slate-200 text-slate-700 border-slate-300'
-                  }`}
-                >
-                  {tdsCut ? 'TDS Cut' : 'TDS Not Cut'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-600 mt-0.5">
-                {tdsCut
-                  ? 'Check this box if TDS has been deducted from this payment entry.'
-                  : 'Leave unchecked if no TDS deduction applies to this entry.'}
-              </p>
-            </div>
-          </label>
-
-          {tdsCut && (
-            <div className="mt-2 p-3 rounded-xl border border-amber-200 bg-amber-50/50">
-              <label htmlFor="entry-tds-amount" className="text-xs font-bold text-amber-950 block mb-1">
-                TDS Amount Cut (₹) <span className="text-rose-500">*</span>
-              </label>
+        {/* TDS Cut / Not Cut indication (Only for Cash/Bank entries with amount to pay) */}
+        {!isFullOldBalance && (
+          <div>
+            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+              TDS Deducted Status <span className="text-rose-500">*</span>
+            </label>
+            <label
+              htmlFor="tds-checkbox"
+              className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                tdsCut
+                  ? 'bg-amber-50/80 border-amber-300 ring-1 ring-amber-300'
+                  : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
+              }`}
+            >
               <input
-                id="entry-tds-amount"
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
-                value={tdsAmountStr}
-                onChange={(e) => handleTdsAmountChange(e.target.value)}
-                placeholder="0.00"
-                className={`w-full text-sm font-bold font-mono p-2.5 rounded-xl border bg-white outline-hidden focus:ring-1 ${
-                  tdsMissing
-                    ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
-                    : 'border-amber-200 focus:border-amber-500 focus:ring-amber-500'
-                }`}
+                id="tds-checkbox"
+                type="checkbox"
+                checked={tdsCut}
+                onChange={(e) => handleTdsToggle(e.target.checked)}
+                className="mt-1 w-4 h-4 text-amber-600 rounded-sm border-slate-300 focus:ring-amber-500 cursor-pointer"
               />
-              <p className="text-[11px] text-amber-900/80 leading-snug mt-1">
-                Deducted from the request balance together with the entry amount. The Payment account pays only the
-                entry amount; the TDS is settled automatically against the balance.
-              </p>
-            </div>
-          )}
-        </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Percent className={`w-3.5 h-3.5 ${tdsCut ? 'text-amber-700' : 'text-slate-500'}`} />
+                  <span className={`text-xs font-bold ${tdsCut ? 'text-amber-900' : 'text-slate-800'}`}>
+                    {tdsCut ? 'TDS Cut (Tax Deducted at Source)' : 'TDS Not Cut (No Tax Deducted)'}
+                  </span>
+                  <span
+                    className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
+                      tdsCut
+                        ? 'bg-amber-100 text-amber-900 border-amber-300'
+                        : 'bg-slate-200 text-slate-700 border-slate-300'
+                    }`}
+                  >
+                    {tdsCut ? 'TDS Cut' : 'TDS Not Cut'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 mt-0.5">
+                  {tdsCut
+                    ? 'Check this box if TDS has been deducted from this payment entry.'
+                    : 'Leave unchecked if no TDS deduction applies to this entry.'}
+                </p>
+              </div>
+            </label>
+
+            {tdsCut && (
+              <div className="mt-2 p-3 rounded-xl border border-amber-200 bg-amber-50/50">
+                <label htmlFor="entry-tds-amount" className="text-xs font-bold text-amber-950 block mb-1">
+                  TDS Amount Cut (₹) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  id="entry-tds-amount"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  value={tdsAmountStr}
+                  onChange={(e) => handleTdsAmountChange(e.target.value)}
+                  placeholder="0.00"
+                  className={`w-full text-sm font-bold font-mono p-2.5 rounded-xl border bg-white outline-hidden focus:ring-1 ${
+                    tdsMissing
+                      ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                      : 'border-amber-200 focus:border-amber-500 focus:ring-amber-500'
+                  }`}
+                />
+                <p className="text-[11px] text-amber-900/80 leading-snug mt-1">
+                  Deducted from the request balance together with the entry amount. The Payment account pays only the
+                  entry amount; the TDS is settled automatically against the balance.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Optional Notes */}
         <div>
@@ -521,13 +623,29 @@ export const AddDisbursementEntryModal: React.FC<AddDisbursementEntryModalProps>
           <button
             type="submit"
             id="submit-entry-button"
-            disabled={isSubmitting || parsedAmount + parsedAdjustment <= 0 || overLimit || adjustmentInvalid || tdsMissing || !isValidPasskey(passkey)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs shadow-md shadow-sky-200 transition-all disabled:opacity-50 cursor-pointer"
+            disabled={
+              isSubmitting ||
+              (isFullOldBalance
+                ? parsedAdjustment <= 0
+                : parsedAmount + parsedAdjustment <= 0 || overLimit || adjustmentInvalid || tdsMissing) ||
+              !isValidPasskey(passkey)
+            }
+            className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md transition-all disabled:opacity-50 cursor-pointer text-white ${
+              isFullOldBalance
+                ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'
+                : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'
+            }`}
           >
-            <PlusCircle className="w-4 h-4" />
+            {isFullOldBalance ? (
+              <CheckCircle2 className="w-4 h-4" />
+            ) : (
+              <PlusCircle className="w-4 h-4" />
+            )}
             <span>
               {isSubmitting
-                ? 'Creating Entry…'
+                ? 'Processing…'
+                : isFullOldBalance
+                ? `Close & Mark Paid via Old Balance (${formatINR(parsedAdjustment || remainingUnentered)})`
                 : `Create Entry #${nextEntryNo} (${formatINR(parsedAmount)} to pay)${
                     parsedAdjustment > 0 ? ` · Adjust ${formatINR(parsedAdjustment)}` : ''
                   }`}

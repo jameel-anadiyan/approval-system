@@ -175,7 +175,7 @@ interface RequestContextType {
     notes?: string,
     /** Old balance / old advance adjusted from this entry (auto-settled) */
     adjustment?: number,
-    entryType?: 'cash' | 'bank',
+    entryType?: 'cash' | 'bank' | 'old_balance',
     /** TDS amount (required when TDS is cut) + the entering person's passkey */
     extra?: EntryExtra
   ) => Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }>;
@@ -189,7 +189,7 @@ interface RequestContextType {
   editRejectedDisbursementEntry: (
     entryId: string,
     amount: number,
-    entryType: 'cash' | 'bank',
+    entryType: 'cash' | 'bank' | 'old_balance',
     tdsCut: boolean,
     notes?: string,
     adjustment?: number,
@@ -3172,22 +3172,36 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     tdsCut: boolean,
     notes?: string,
     adjustment = 0,
-    entryType: 'cash' | 'bank' = 'bank',
+    entryType: 'cash' | 'bank' | 'old_balance' = 'bank',
     extra?: EntryExtra
   ): Promise<{ success: boolean; error?: string; entry_id?: string; entry_no?: number; fully_paid?: boolean }> => {
     if (!user) return { success: false, error: 'Must be logged in' };
-    const amt = Math.round(Math.max(0, amount || 0) * 100) / 100;
-    const adj = Math.round(Math.max(0, adjustment || 0) * 100) / 100;
-    const tds = tdsCut ? Math.round(Math.max(0, extra?.tdsAmount || 0) * 100) / 100 : 0;
+    let amt = Math.round(Math.max(0, amount || 0) * 100) / 100;
+    let adj = Math.round(Math.max(0, adjustment || 0) * 100) / 100;
+    const reqForCheck = getRequestById(requestId);
+    const availForCheck = reqForCheck ? entryAvailable(reqForCheck) : Infinity;
+
+    // Auto-resolve full old balance adjustment: if adjustment covers full available balance,
+    // or if user entered amount = adjustment or chose old_balance mode, amt to pay by cashier is 0.
+    if (adj > 0 && (entryType === 'old_balance' || (amt > 0 && amt === adj) || (amt + adj > availForCheck && adj >= availForCheck))) {
+      amt = 0;
+      entryType = 'old_balance';
+      if (adj > availForCheck && availForCheck < Infinity) {
+        adj = availForCheck;
+      }
+    }
+
+    const isAdjustOnly = amt === 0 && adj > 0;
+    const tds = (!isAdjustOnly && tdsCut) ? Math.round(Math.max(0, extra?.tdsAmount || 0) * 100) / 100 : 0;
     if (amt + adj <= 0) return { success: false, error: 'Enter an entry amount or an old balance / advance adjustment.' };
-    if (tdsCut && tds <= 0) return { success: false, error: 'TDS is ticked - enter the TDS amount.' };
+    if (!isAdjustOnly && tdsCut && tds <= 0) return { success: false, error: 'TDS is ticked - enter the TDS amount.' };
 
     if (isBackendConnected) {
       try {
         const { data, error } = await supabase.rpc('add_disbursement_entry', {
           p_request_id: requestId,
           p_amount: amt,
-          p_tds_cut: tdsCut,
+          p_tds_cut: isAdjustOnly ? false : tdsCut,
           p_notes: notes?.trim() || null,
           p_adjustment: adj,
           p_entry_type: entryType,
@@ -3197,12 +3211,26 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         if (error) {
           if (error.message.includes('schema cache')) {
-            throw new Error('Database migration required: run 0060_passkeys_tds_amount_partial_approval.sql in the Supabase SQL Editor.');
+            throw new Error('Database migration required: run apply_0082_entry_old_balance_auto_settlement.sql in the Supabase SQL Editor.');
           }
           throw error;
         }
         await loadRequests();
         const res = data as { entry_id?: string; entry_no?: number; fully_paid?: boolean } | null;
+        if (res?.fully_paid) {
+          const fresh = getRequestById(requestId);
+          if (fresh) {
+            sendPaymentDisbursedWhatsAppNotification(
+              fresh,
+              amt > 0 ? amt : adj,
+              0,
+              'Old Balance / Old Advance',
+              null,
+              new Date().toISOString().slice(0, 10),
+              true
+            ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
+          }
+        }
         return { success: true, entry_id: res?.entry_id, entry_no: res?.entry_no, fully_paid: !!res?.fully_paid };
       } catch (err: unknown) {
         return { success: false, error: errMsg(err) };
@@ -3213,8 +3241,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!/^\d{4}$/.test(extra?.passkey || '')) return { success: false, error: 'Enter your 4-digit passkey' };
     const req = getRequestById(requestId);
     if (!req) return { success: false, error: 'Request not found' };
-    if (amt + adj + tds > entryAvailable(req)) {
-      return { success: false, error: `Entry + TDS + adjustment is more than the balance available for entries (₹${entryAvailable(req).toFixed(2)}).` };
+    const avail = entryAvailable(req);
+    if (adj > 0 && (amt === adj || (amt + adj > avail && adj >= avail))) {
+      amt = 0;
+      entryType = 'old_balance';
+      if (adj > avail) adj = avail;
+    }
+    if (!isAdjustOnly && amt + adj + tds > avail) {
+      return { success: false, error: `Entry + TDS + adjustment is more than the balance available for entries (₹${avail.toFixed(2)}).` };
     }
     const existing = req.disbursement_entries || [];
     const nextNo = existing.length > 0 ? Math.max(...existing.map((e) => e.entry_no)) + 1 : 1;
@@ -3227,13 +3261,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       request_id: requestId,
       entry_no: nextNo,
       amount: amt,
-      entry_type: entryType,
+      entry_type: fullyAdjusted ? 'old_balance' : entryType,
       adjustment_amount: adj,
       adjustment_payment_id: paymentId,
-      tds_cut: tdsCut,
+      tds_cut: isAdjustOnly ? false : tdsCut,
       tds_amount: tds,
       tds_settled: false,
-      paid_amount: 0,
+      paid_amount: fullyAdjusted ? adj : 0,
       approved_amount: null,
       status: fullyAdjusted ? 'paid' : 'pending_approval',
       notes: notes?.trim() || null,
@@ -3259,16 +3293,24 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
                     status: full ? ('paid' as const) : r.status,
                     paid_by: full ? user.id : r.paid_by,
                     paid_at: full ? now : r.paid_at,
-                    payment_mode: full ? 'Adjustment' : r.payment_mode,
+                    payment_mode: full ? 'Old Balance / Old Advance' : r.payment_mode,
+                    payment_remarks: full ? (notes?.trim() || 'Paid through old balance / old advance adjustment') : r.payment_remarks,
                     updated_at: now,
                     payments: [
                       ...(r.payments || []),
                       {
-                        id: paymentId!, request_id: requestId, amount: adj, payment_date: now.slice(0, 10),
-                        payment_mode: 'Adjustment', payment_ref: null,
-                        remarks: `Old balance / old advance adjustment · Entry #${nextNo}`,
-                        paid_by: user.id, paid_by_name: user.full_name, created_at: now,
-                        entry_id: entryId, is_adjustment: true,
+                        id: paymentId!,
+                        request_id: requestId,
+                        amount: adj,
+                        payment_date: now.slice(0, 10),
+                        payment_mode: 'Old Balance / Old Advance',
+                        payment_ref: null,
+                        remarks: `Paid through old balance / old advance adjustment · Entry #${nextNo}`,
+                        paid_by: user.id,
+                        paid_by_name: user.full_name,
+                        created_at: now,
+                        entry_id: entryId,
+                        is_adjustment: true,
                       },
                     ],
                   }
@@ -3277,6 +3319,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           : r
       )
     );
+    if (full) {
+      const fresh = getRequestById(requestId);
+      if (fresh) {
+        sendPaymentDisbursedWhatsAppNotification(
+          fresh,
+          adj,
+          0,
+          'Old Balance / Old Advance',
+          null,
+          now.slice(0, 10),
+          true
+        ).catch((e) => console.warn('Payment WhatsApp notification failed:', e));
+      }
+    }
     return { success: true, entry_id: newEntry.id, entry_no: nextNo, fully_paid: full };
   };
 
@@ -3577,7 +3633,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const editRejectedDisbursementEntry = async (
     entryId: string,
     amount: number,
-    entryType: 'cash' | 'bank',
+    entryType: 'cash' | 'bank' | 'old_balance',
     tdsCut: boolean,
     notes?: string,
     adjustment = 0,

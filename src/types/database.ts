@@ -483,7 +483,7 @@ export interface DisbursementEntry {
   request_id: string;
   entry_no: number;
   amount: number;
-  entry_type: 'cash' | 'bank';
+  entry_type: 'cash' | 'bank' | 'old_balance';
   tds_cut: boolean;
   status: DisbursementEntryStatus;
   notes?: string | null;

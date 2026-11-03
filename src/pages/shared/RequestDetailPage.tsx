@@ -1684,12 +1684,22 @@ export const RequestDetailPage: React.FC = () => {
                                 <span className="font-mono font-extrabold text-sky-900 bg-sky-100/90 px-2 py-0.5 rounded-md text-[11px]">
                                   Entry #{ent.entry_no}
                                 </span>
-                                <span className="font-extrabold text-slate-900 font-mono text-xs">
-                                  {formatINR(ent.amount)}
-                                </span>
+                                {Number(ent.amount || 0) === 0 && Number(ent.adjustment_amount || 0) > 0 ? (
+                                  <span className="font-extrabold text-violet-900 font-mono text-xs">
+                                    {formatINR(Number(ent.adjustment_amount))} (Old Advance)
+                                  </span>
+                                ) : (
+                                  <span className="font-extrabold text-slate-900 font-mono text-xs">
+                                    {formatINR(ent.amount)}
+                                  </span>
+                                )}
 
-                                {/* Cash vs Bank Badge */}
-                                {isCash ? (
+                                {/* Cash vs Bank vs Old Advance Badge */}
+                                {ent.entry_type === 'old_balance' || (Number(ent.amount || 0) === 0 && Number(ent.adjustment_amount || 0) > 0) ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-300">
+                                    <RotateCcw className="w-3 h-3 text-violet-700" /> Old Advance
+                                  </span>
+                                ) : isCash ? (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                                     <Banknote className="w-3 h-3 text-emerald-700" /> Cash
                                   </span>
@@ -2783,8 +2793,8 @@ export const RequestDetailPage: React.FC = () => {
             setBanner({
               ok: true,
               text:
-                amount <= 0
-                  ? `Entry recorded${adjText}. Nothing to pay — marked as Paid${res.fully_paid ? ', request closed' : ''}.`
+                amount <= 0 || res.fully_paid
+                  ? `Request closed and marked as Paid through Old Balance / Old Advance adjustment (${formatINR(adjustment || amount)}).`
                   : `Disbursement entry created: ${formatINR(amount)} to pay${typeText} (${tdsText})${adjText}. Sent for Entry Approver review.`,
             });
           }}

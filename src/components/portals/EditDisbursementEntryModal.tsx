@@ -14,7 +14,7 @@ interface EditDisbursementEntryModalProps {
   onResubmit: (
     entryId: string,
     amount: number,
-    entryType: 'cash' | 'bank',
+    entryType: 'cash' | 'bank' | 'old_balance',
     tdsCut: boolean,
     notes: string | undefined,
     adjustment: number,
@@ -29,7 +29,7 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
   entry,
   onResubmit,
 }) => {
-  const [entryType, setEntryType] = useState<'cash' | 'bank'>(entry.entry_type || 'bank');
+  const [entryType, setEntryType] = useState<'cash' | 'bank' | 'old_balance'>(entry.entry_type || 'bank');
   const [amountStr, setAmountStr] = useState<string>(String(entry.amount || ''));
   const [tdsCut, setTdsCut] = useState<boolean>(entry.tds_cut);
   const [tdsAmountStr, setTdsAmountStr] = useState<string>(
@@ -79,8 +79,8 @@ export const EditDisbursementEntryModal: React.FC<EditDisbursementEntryModalProp
       setError('TDS is ticked - enter the TDS amount that was cut.');
       return;
     }
-    if (parsedAmount <= 0) {
-      setError('Enter the entry amount to pay.');
+    if (parsedAmount + parsedAdjustment <= 0) {
+      setError('Enter the entry amount or an old balance / advance adjustment.');
       return;
     }
     if (overLimit) {
