@@ -127,8 +127,13 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       });
     }
     if (isPaymentNeeded) {
-      fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
-        if (alive) setEntryOfficers(officers);
+      fetchActiveEntryOfficers(isBackendConnected, dir.users).then((officers) => {
+        if (alive) {
+          setEntryOfficers(officers);
+          if (officers.length === 1) {
+            setAssignedEntryUserId((prev) => prev || officers[0].id);
+          }
+        }
       });
     }
     return () => {

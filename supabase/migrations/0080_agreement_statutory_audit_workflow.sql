@@ -1348,6 +1348,70 @@ create policy requests_select on public.requests for select using (
   )
 );
 
+-- 11b. Update profiles_select RLS policy so all authenticated roles (Clerk, Head, Employee, Regional Head, Admin) can view active Disbursement accounts
+drop policy if exists profiles_select on public.profiles;
+create policy profiles_select on public.profiles for select to authenticated
+  using (
+    (id = (select auth.uid()))
+    or ((select public.my_role()) = 'admin'::public.app_role)
+    or (((select public.my_role()) = any (array['clerk'::public.app_role, 'head'::public.app_role, 'regional_head'::public.app_role]))
+        and (department_id = (select public.my_department())))
+    or (role in ('head'::public.app_role, 'regional_head'::public.app_role) and is_active)
+    or (role = 'disbursement'::public.app_role and is_active)
+  );
+
+-- 11c. Security-definer RPC: get_active_entry_only_users (auto-heals NULL disbursement_type on call)
+create or replace function public.get_active_entry_only_users()
+returns table (
+  id uuid,
+  username text,
+  full_name text,
+  designation text,
+  role public.app_role,
+  disbursement_type text,
+  is_active boolean
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.profiles
+     set disbursement_type = 'entry_only',
+         updated_at = now()
+   where role = 'disbursement'
+     and is_active = true
+     and (
+       disbursement_type is null
+       or btrim(disbursement_type) = ''
+       or lower(btrim(disbursement_type)) in ('entry', 'entry_only')
+     )
+     and not (
+       lower(coalesce(designation, '')) ~ '(approv|check|verif|review|audit)'
+       or lower(coalesce(username, '')) ~ '(approv|check|verif|review|audit)'
+       or lower(coalesce(full_name, '')) ~ '(approv|check|verif|review|audit)'
+     );
+
+  return query
+    select p.id, p.username, p.full_name, p.designation, p.role,
+           coalesce(nullif(btrim(p.disbursement_type), ''), 'entry_only') as disbursement_type,
+           p.is_active
+    from public.profiles p
+    where p.role = 'disbursement'
+      and p.is_active = true
+      and coalesce(nullif(btrim(p.disbursement_type), ''), 'entry_only') in ('entry_only', 'entry')
+      and not (
+        lower(coalesce(p.designation, '')) ~ '(approv|check|verif|review|audit)'
+        or lower(coalesce(p.username, '')) ~ '(approv|check|verif|review|audit)'
+        or lower(coalesce(p.full_name, '')) ~ '(approv|check|verif|review|audit)'
+      )
+    order by p.full_name asc;
+end;
+$$;
+
+revoke execute on function public.get_active_entry_only_users() from public, anon;
+grant execute on function public.get_active_entry_only_users() to authenticated;
+
 -- 12. Update assign_disbursement_entry_user to exclude 'agreement' and 'audit_report'
 create or replace function public.assign_disbursement_entry_user(
   p_request_id uuid,
@@ -1413,7 +1477,7 @@ begin
     raise exception 'Target disbursement user not found or inactive';
   end if;
   if target_user.role <> 'disbursement'
-     or target_user.disbursement_type is distinct from 'entry_only'
+     or coalesce(nullif(btrim(target_user.disbursement_type), ''), 'entry_only') not in ('entry_only', 'entry')
      or (lower(coalesce(target_user.designation, '')) ~ '(approv|check|verif|review|audit)')
      or (lower(coalesce(target_user.username, '')) ~ '(approv|check|verif|review|audit)')
      or (lower(coalesce(target_user.full_name, '')) ~ '(approv|check|verif|review|audit)') then
@@ -1517,7 +1581,7 @@ begin
       raise exception 'Target disbursement entry account not found or inactive';
     end if;
     if target_entry_user.role <> 'disbursement'
-       or target_entry_user.disbursement_type is distinct from 'entry_only'
+       or coalesce(nullif(btrim(target_entry_user.disbursement_type), ''), 'entry_only') not in ('entry_only', 'entry')
        or (lower(coalesce(target_entry_user.designation, '')) ~ '(approv|check|verif|review|audit)')
        or (lower(coalesce(target_entry_user.username, '')) ~ '(approv|check|verif|review|audit)')
        or (lower(coalesce(target_entry_user.full_name, '')) ~ '(approv|check|verif|review|audit)') then

@@ -83,7 +83,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
   // Load active entry officers directly to ensure clerks & heads always see them
   React.useEffect(() => {
     let isMounted = true;
-    fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
+    fetchActiveEntryOfficers(isBackendConnected, users).then((officers) => {
       if (isMounted && officers && officers.length > 0) {
         setExtraOfficers(officers);
       }
@@ -91,7 +91,7 @@ export const RouteModal: React.FC<RouteModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isBackendConnected]);
+  }, [isBackendConnected, users]);
 
   const needsPayment = isDisbursementAssociated(type);
   const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>(

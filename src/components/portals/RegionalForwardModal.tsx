@@ -74,7 +74,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
         setPettyCashDealers(dealers);
       });
       setLoadingEntryOfficers(true);
-      fetchActiveEntryOfficers(isBackendConnected)
+      fetchActiveEntryOfficers(isBackendConnected, dir.users)
         .then((officers) => {
           if (alive) setEntryOfficers(officers);
         })

@@ -185,9 +185,14 @@ export const NewRequestPage: React.FC = () => {
     if (needsEntryAccount) {
       let cancelled = false;
       setLoadingOfficers(true);
-      fetchActiveEntryOfficers(isBackendConnected)
+      fetchActiveEntryOfficers(isBackendConnected, dir.users)
         .then((officers) => {
-          if (!cancelled) setEntryOfficers(officers);
+          if (!cancelled) {
+            setEntryOfficers(officers);
+            if (officers.length === 1) {
+              setAssignedEntryUserId((prev) => prev || officers[0].id);
+            }
+          }
         })
         .finally(() => {
           if (!cancelled) setLoadingOfficers(false);
@@ -196,7 +201,13 @@ export const NewRequestPage: React.FC = () => {
         cancelled = true;
       };
     }
-  }, [needsEntryAccount, isBackendConnected]);
+  }, [needsEntryAccount, isBackendConnected, dir.users]);
+
+  useEffect(() => {
+    if (entryOfficers.length === 1 && !assignedEntryUserId) {
+      setAssignedEntryUserId(entryOfficers[0].id);
+    }
+  }, [entryOfficers, assignedEntryUserId]);
 
   // Exactly one associated shop: assign it as the default.
   useEffect(() => {
@@ -760,8 +771,32 @@ export const NewRequestPage: React.FC = () => {
                   <span>Loading active entry accounts…</span>
                 </div>
               ) : entryOfficers.length === 0 ? (
-                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
-                  No active Disbursement Entry Only accounts found. Please contact Admin.
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-amber-900">
+                      No active Disbursement Entry Only accounts found.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoadingOfficers(true);
+                        fetchActiveEntryOfficers(isBackendConnected, dir.users)
+                          .then((officers) => {
+                            setEntryOfficers(officers);
+                            if (officers.length === 1) {
+                              setAssignedEntryUserId((prev) => prev || officers[0].id);
+                            }
+                          })
+                          .finally(() => setLoadingOfficers(false));
+                      }}
+                      className="text-[11px] underline font-bold text-amber-800 hover:text-amber-950 cursor-pointer"
+                    >
+                      Retry Loading
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                    Please ensure an active Disbursement user account exists with type set to &quot;Entry Only&quot;, or execute the database update in Supabase.
+                  </p>
                 </div>
               ) : (
                 <select

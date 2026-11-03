@@ -43,7 +43,7 @@ export const AssignEntryAccountModal: React.FC<AssignEntryAccountModalProps> = (
   // Load active entry officers directly to ensure clerks & heads always see them
   React.useEffect(() => {
     let isMounted = true;
-    fetchActiveEntryOfficers(isBackendConnected).then((officers) => {
+    fetchActiveEntryOfficers(isBackendConnected, users).then((officers) => {
       if (isMounted && officers && officers.length > 0) {
         setExtraOfficers(officers);
       }
@@ -51,7 +51,7 @@ export const AssignEntryAccountModal: React.FC<AssignEntryAccountModalProps> = (
     return () => {
       isMounted = false;
     };
-  }, [isBackendConnected]);
+  }, [isBackendConnected, users]);
 
   const [selectedUserId, setSelectedUserId] = useState<string>(
     request.assigned_entry_user_id || ''

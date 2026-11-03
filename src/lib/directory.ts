@@ -251,13 +251,15 @@ export function useDirectory() {
                 .from('profiles')
                 .select('*')
                 .eq('role', 'disbursement')
-                .eq('disbursement_type', 'entry_only')
                 .eq('is_active', true);
               if (directProfiles && directProfiles.length > 0) {
                 eoList = directProfiles as Profile[];
               }
             }
-            const filteredEo = eoList.filter((eo) => !isEntryCheckingUser(eo));
+            const filteredEo = eoList.filter((eo) => {
+              const dt = (eo.disbursement_type || 'entry_only').toLowerCase();
+              return (dt === 'entry_only' || dt === 'entry') && !isEntryCheckingUser(eo);
+            });
             if (filteredEo.length > 0) {
               setUsers((prev) => {
                 const map = new Map<string, Profile>(prev.map((u) => [u.id, u]));
@@ -268,6 +270,11 @@ export function useDirectory() {
                 }
                 return Array.from(map.values());
               });
+              try {
+                localStorage.setItem('approval_app_entry_officers', JSON.stringify(filteredEo));
+              } catch {
+                /* ignore */
+              }
             }
           } catch (e) {
             console.warn('Could not load entry-only disbursement officers:', e);
@@ -1503,39 +1510,81 @@ export async function saveThreshold(live: boolean, value: number): Promise<Resul
 
 export { isEntryCheckingUser } from './formatters';
 
-/** Reliably loads active Entry Only disbursement officers, using the dedicated RPC with fallbacks */
-export async function fetchActiveEntryOfficers(live: boolean): Promise<Profile[]> {
+/** Reliably loads active Entry Only disbursement officers, using the dedicated RPC with direct query & cached fallbacks */
+export async function fetchActiveEntryOfficers(live: boolean, fallbackUsers?: Profile[]): Promise<Profile[]> {
+  const isEntryOfficer = (u: any): boolean => {
+    if (!u || !u.is_active || u.role !== 'disbursement') return false;
+    const dt = (u.disbursement_type || 'entry_only').toLowerCase();
+    if (dt === 'payment_only' || dt === 'stock_transfer_monitor' || dt === 'entry_approver') {
+      return false;
+    }
+    return !isEntryCheckingUser(u);
+  };
+
   if (!live) {
-    return MOCK_USERS.filter(
-      (u) => u.role === 'disbursement' && u.disbursement_type === 'entry_only' && !isEntryCheckingUser(u) && u.is_active
-    );
+    const src = fallbackUsers && fallbackUsers.length > 0 ? fallbackUsers : MOCK_USERS;
+    return src.filter(isEntryOfficer);
   }
+
   let officers: Profile[] = [];
+
+  // 1. Try dedicated security definer RPC
   try {
     const { data: rpcOfficers, error: rpcErr } = await supabase.rpc('get_active_entry_only_users');
-    if (!rpcErr && rpcOfficers && (rpcOfficers as Profile[]).length > 0) {
-      officers = rpcOfficers as Profile[];
+    if (!rpcErr && Array.isArray(rpcOfficers) && rpcOfficers.length > 0) {
+      officers = (rpcOfficers as Profile[]).filter(isEntryOfficer);
     }
-  } catch {
-    // fallback to direct table query
+  } catch (err) {
+    console.warn('get_active_entry_only_users RPC note:', err);
   }
+
+  // 2. Direct profiles query without strict disbursement_type filter in SQL (in case it is NULL in DB)
   if (officers.length === 0) {
     try {
-      const { data: directProfiles } = await supabase
+      const { data: directProfiles, error: directErr } = await supabase
         .from('profiles')
         .select('id, username, full_name, designation, role, disbursement_type, is_active')
         .eq('role', 'disbursement')
-        .eq('disbursement_type', 'entry_only')
         .eq('is_active', true)
         .order('full_name', { ascending: true });
-      if (directProfiles && directProfiles.length > 0) {
-        officers = directProfiles as Profile[];
+      if (!directErr && directProfiles && directProfiles.length > 0) {
+        officers = (directProfiles as Profile[]).filter(isEntryOfficer);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Direct profiles query for entry officers note:', err);
     }
   }
-  return officers.filter((u) => !isEntryCheckingUser(u));
+
+  // 3. Fallback to passed-in fallbackUsers (e.g. dir.users from useDirectory)
+  if (officers.length === 0 && fallbackUsers && fallbackUsers.length > 0) {
+    officers = fallbackUsers.filter(isEntryOfficer);
+  }
+
+  // 4. Fallback to cached active officers in localStorage
+  if (officers.length === 0) {
+    try {
+      const cached = localStorage.getItem('approval_app_entry_officers');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          officers = parsed.filter(isEntryOfficer);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Persist found officers in cache so Clerk always has them available immediately
+  if (officers.length > 0) {
+    try {
+      localStorage.setItem('approval_app_entry_officers', JSON.stringify(officers));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return officers.filter(isEntryOfficer);
 }
 
 /** Loads active Department Heads enabled as Petty Cash Dealers, using RPC with direct profile/mock fallbacks */
