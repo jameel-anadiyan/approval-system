@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { AppRole } from '../../types/database';
-import { MOCK_USERS } from '../../lib/mockData';
-import { Lock, ArrowRight, ShieldCheck, Sparkles, AlertCircle } from 'lucide-react';
+import { ArrowRight, AlertCircle } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { login, isBackendConnected, switchMockRole } = useAuth();
+  const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -32,13 +30,6 @@ export const LoginPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const quickLoginAs = (userProfile: (typeof MOCK_USERS)[0]) => {
-    setUsername(userProfile.username);
-    setPassword('ChangeMe@123');
-    switchMockRole(userProfile.role);
-    navigate('/');
   };
 
   return (
@@ -117,42 +108,6 @@ export const LoginPage: React.FC = () => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Demo personas: offline sandbox only — never shown against live Supabase */}
-          {!isBackendConnected && (
-          <div className="mt-8 pt-6 border-t border-slate-700/60">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Instant Demo Login (1-Click)</span>
-              </span>
-              <span className="text-[10px] text-slate-500">Pick any role</span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2">
-              {MOCK_USERS.map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => quickLoginAs(u)}
-                  className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-700/60 border border-slate-700/80 transition-all text-left text-xs group"
-                >
-                  <div>
-                    <span className="font-semibold text-slate-200 group-hover:text-indigo-300">
-                      {u.full_name}
-                    </span>
-                    <span className="text-slate-500 block text-[11px]">
-                      @{u.username} • {u.designation || u.role}
-                    </span>
-                  </div>
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-indigo-900/50 text-indigo-300 border border-indigo-700/50">
-                    {u.role}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-          )}
         </div>
       </div>
     </div>
