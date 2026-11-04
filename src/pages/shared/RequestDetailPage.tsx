@@ -58,6 +58,7 @@ import {
   isDisbursementAssociated,
   isNonCashRequestType,
   isSpecialRequestType,
+  HeadConsultation,
 } from '../../types/database';
 import { useDirectory } from '../../lib/directory';
 import { useEntryLock } from '../../lib/entryLock';
@@ -177,6 +178,36 @@ export const RequestDetailPage: React.FC = () => {
   const [showBillMissingModal, setShowBillMissingModal] = useState(false);
 
   const request = id ? getRequestById(id) : undefined;
+  const [localConsultations, setLocalConsultations] = useState<HeadConsultation[] | null>(null);
+
+  // Directly fetch consultations for this request to ensure consulted heads can ALWAYS agree/disagree
+  useEffect(() => {
+    if (!id) return;
+    let isCancelled = false;
+    supabase
+      .from('head_consultations')
+      .select('*, head:profiles!head_id(id, full_name, designation, photo_path)')
+      .eq('request_id', id)
+      .order('created_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (isCancelled) return;
+        if (!error && data) {
+          setLocalConsultations(data as HeadConsultation[]);
+        } else if (error) {
+          supabase
+            .from('head_consultations')
+            .select('*')
+            .eq('request_id', id)
+            .order('created_at', { ascending: true })
+            .then(({ data: d2 }) => {
+              if (!isCancelled && d2) setLocalConsultations(d2 as HeadConsultation[]);
+            });
+        }
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [id]);
   const isDisbursement = role === 'disbursement';
   const isStockMonitorUser = isDisbursement && user?.disbursement_type === 'stock_transfer_monitor';
   const isEntryOnly = isDisbursement && !isStockMonitorUser && (user?.disbursement_type === 'entry_only' || !user?.disbursement_type);
@@ -267,7 +298,7 @@ export const RequestDetailPage: React.FC = () => {
   const isOwner = user?.id === request.requester_id;
 
   // Inter-department consultations & strict role isolation:
-  const consultations = request.consultations || [];
+  const consultations = localConsultations || request.consultations || [];
   const myConsultation = consultations.find((c) => c.head_id === user?.id);
 
   // A consulted head is ANY head assigned in consultations OR from another department
@@ -285,14 +316,27 @@ export const RequestDetailPage: React.FC = () => {
     ((Boolean(request.owner_head_id) && user?.id === request.owner_head_id) ||
       (Boolean(user?.department_id) && user?.department_id === request.department_id));
 
-  // Mandatory designated head consultation check
+  // Mandatory designated head consultation check:
+  // ONLY applies to owning department head approving/forwarding their OWN staff requests.
+  // It NEVER applies to:
+  // 1) A consulted head agreeing or disagreeing (they need no mandate or permission)
+  // 2) Any request initiated by another Department Head (requester_role === 'head' or requester is another head)
+  // 3) Petty cash requests
   const designatedConsultation = user?.mandatory_consultation_head_id
     ? consultations.find((c) => c.head_id === user.mandatory_consultation_head_id)
     : null;
+  const isCrossHeadRequest = Boolean(
+    request.requester_role === 'head' ||
+    (request.requester_id && request.requester_id !== user?.id && request.owner_head_id === user?.id)
+  );
   const isMandatoryHeadBlocked = Boolean(
     role === 'head' &&
     isOwningHead &&
+    !myConsultation &&
+    !isConsultedHead &&
+    !isCrossHeadRequest &&
     request?.request_type !== 'petty_cash' &&
+    request?.requester_role !== 'head' &&
     user?.mandatory_head_consultation &&
     user?.mandatory_consultation_head_id &&
     designatedConsultation?.status !== 'agreed'
@@ -1299,9 +1343,9 @@ export const RequestDetailPage: React.FC = () => {
           )}
 
           {/* Inter-Department Head Consultations Section */}
-          {request.consultations && request.consultations.length > 0 ? (
+          {consultations && consultations.length > 0 ? (
             <HeadConsultationsSection
-              consultations={request.consultations}
+              consultations={consultations}
               requestId={request.id}
               canRequestMore={canRequestConsultation}
               requestStatus={request.status}
@@ -2616,7 +2660,19 @@ export const RequestDetailPage: React.FC = () => {
           request={request}
           consultation={myConsultation}
           initialStatus={consultInitialStatus}
-          onSuccess={() => setBanner({ ok: true, text: 'Your consultation decision has been saved.' })}
+          onSuccess={() => {
+            setBanner({ ok: true, text: 'Your consultation decision has been saved.' });
+            if (id) {
+              supabase
+                .from('head_consultations')
+                .select('*, head:profiles!head_id(id, full_name, designation, photo_path)')
+                .eq('request_id', id)
+                .order('created_at', { ascending: true })
+                .then(({ data }) => {
+                  if (data) setLocalConsultations(data as HeadConsultation[]);
+                });
+            }
+          }}
         />
       )}
 

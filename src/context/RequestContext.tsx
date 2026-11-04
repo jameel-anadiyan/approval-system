@@ -537,6 +537,47 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             if (!r.disbursement_entries) r.disbursement_entries = [];
           });
         }
+
+        // Safe standalone fetch for head_consultations so nested select issues or schema caching never lose consultations
+        try {
+          const { data: consults, error: consultErr } = await supabase
+            .from('head_consultations')
+            .select('*, head:profiles!head_id(id, full_name, designation, photo_path)')
+            .order('created_at', { ascending: true });
+
+          const consultMap = new Map<string, any[]>();
+          if (!consultErr && consults && consults.length > 0) {
+            consults.forEach((c: any) => {
+              const list = consultMap.get(c.request_id) || [];
+              list.push(c);
+              consultMap.set(c.request_id, list);
+            });
+          } else if (consultErr) {
+            // Fallback without embedded profiles
+            const { data: cFallback } = await supabase
+              .from('head_consultations')
+              .select('*')
+              .order('created_at', { ascending: true });
+            if (cFallback && cFallback.length > 0) {
+              cFallback.forEach((c: any) => {
+                const list = consultMap.get(c.request_id) || [];
+                list.push(c);
+                consultMap.set(c.request_id, list);
+              });
+            }
+          }
+
+          if (consultMap.size > 0) {
+            data.forEach((r: any) => {
+              const fetched = consultMap.get(r.id) || [];
+              if (!r.consultations || r.consultations.length < fetched.length) {
+                r.consultations = fetched;
+              }
+            });
+          }
+        } catch (err: any) {
+          console.warn('head_consultations standalone load exception:', err);
+        }
       }
 
       // RLS decides what each role sees; never substitute demo data in live mode.
@@ -3907,9 +3948,56 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         p_voice_duration: voiceDuration,
       });
       if (error) return { success: false, error: errMsg(error) };
+
+      // Optimistically update local requests state so UI reflects response immediately
+      updateLocalRequests((prev) =>
+        prev.map((r) => {
+          if (requestId && r.id !== requestId) return r;
+          const hasConsult = (r.consultations || []).some((c) => c.id === consultationId);
+          if (!hasConsult) return r;
+          return {
+            ...r,
+            consultations: (r.consultations || []).map((c) =>
+              c.id === consultationId
+                ? {
+                    ...c,
+                    status,
+                    response_remarks: remarks || c.response_remarks,
+                    response_voice_path: voicePath || c.response_voice_path,
+                    response_voice_duration: voiceDuration || c.response_voice_duration,
+                    responded_at: new Date().toISOString(),
+                  }
+                : c
+            ),
+          };
+        })
+      );
+
       await loadRequests(true);
       return { success: true };
     }
+
+    // Offline / Mock mode fallback
+    updateLocalRequests((prev) =>
+      prev.map((r) => {
+        if (requestId && r.id !== requestId) return r;
+        const hasConsult = (r.consultations || []).some((c) => c.id === consultationId);
+        if (!hasConsult) return r;
+        return {
+          ...r,
+          consultations: (r.consultations || []).map((c) =>
+            c.id === consultationId
+              ? {
+                  ...c,
+                  status,
+                  response_remarks: remarks || c.response_remarks,
+                  responded_at: new Date().toISOString(),
+                }
+              : c
+          ),
+        };
+      })
+    );
     return { success: true };
   };
 

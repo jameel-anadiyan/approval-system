@@ -6,6 +6,7 @@ import { formatINR, formatISTDate, typeOf } from '../../lib/formatters';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
 import { UserAvatar } from '../../components/common/UserAvatar';
 import { ConsultationVoicePlayer } from '../../components/requests/ConsultationVoicePlayer';
+import { errMsg } from '../../lib/errorUtils';
 import {
   Users,
   CheckCircle2,
@@ -18,6 +19,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Loader2,
+  AlertCircle,
 } from 'lucide-react';
 
 export const HeadConsultationsPage: React.FC = () => {
@@ -28,6 +30,7 @@ export const HeadConsultationsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
   const [filter, setFilter] = useState<'all' | 'pending' | 'responded'>('all');
   const [actingId, setActingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Consultations received by current user (where head_id = user.id)
   const receivedConsultations: { consultation: any; request: any }[] = [];
@@ -62,10 +65,15 @@ export const HeadConsultationsPage: React.FC = () => {
   ) => {
     e.stopPropagation();
     setActingId(consultationId);
+    setActionError(null);
     try {
-      await respondHeadConsultation(consultationId, status);
+      const res = await respondHeadConsultation(consultationId, status);
+      if (!res.success) {
+        setActionError(res.error || 'Failed to submit response');
+      }
     } catch (err) {
       console.error(err);
+      setActionError(errMsg(err));
     } finally {
       setActingId(null);
     }
@@ -91,6 +99,13 @@ export const HeadConsultationsPage: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {actionError && (
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{actionError}</span>
+        </div>
+      )}
 
       {/* Main Mode Tabs */}
       <div className="flex border-b border-slate-200">
