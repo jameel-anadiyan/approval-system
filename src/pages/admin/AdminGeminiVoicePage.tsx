@@ -4,10 +4,14 @@ import { useRequests } from '../../context/RequestContext';
 import { useDirectory } from '../../lib/directory';
 import {
   GeminiChatMessage,
+  GeminiVoiceName,
   sendGeminiVoiceMessage,
-  speakMalayalam,
+  speakNativeMalayalam,
+  playNativeAudio,
   stopSpeaking,
   isSpeaking,
+  getPreferredVoice,
+  setPreferredVoice,
   getGeminiApiKey,
   setGeminiApiKey,
   DEFAULT_GEMINI_API_KEY,
@@ -27,6 +31,7 @@ import {
   Check,
   Loader2,
   Play,
+  Volume1,
 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 
@@ -38,6 +43,45 @@ interface IWindow extends Window {
 
 const INITIAL_WELCOME_MALAYALAM =
   'നമസ്കാരം കൊച്ചു മുതലാളി! ഞാൻ നിങ്ങളുടെ Gemini AI വോയ്‌സ് അസിസ്റ്റൻ്റാണ്. അപ്രൂവലുകൾ, റിപ്പോർട്ടുകൾ, പെൻഡിങ് റിക്വസ്റ്റുകൾ, ഡിസ്ബേഴ്സ്മെന്റുകൾ തുടങ്ങിയ എല്ലാ വിവരങ്ങളും എന്നോട് ചോദിക്കാം. എന്താണ് കൊച്ചു മുതലാളിക്ക് ഇന്ന് അറിയേണ്ടത്?';
+
+const VOICE_OPTIONS: { id: GeminiVoiceName; label: string; tag: string; desc: string }[] = [
+  {
+    id: 'Aoede',
+    label: 'Aoede',
+    tag: 'സ്ത്രീ ശബ്ദം (Female - Recomended)',
+    desc: 'വ്യക്തവും സ്വാഭാവികവുമായ മലയാളം സ്ത്രീ ശബ്ദം (Crystal clear & natural)',
+  },
+  {
+    id: 'Puck',
+    label: 'Puck',
+    tag: 'പുരുഷ ശബ്ദം (Male)',
+    desc: 'ഊർജ്ജസ്വലമായ മലയാളം പുരുഷ ശബ്ദം (Crisp & engaging male voice)',
+  },
+  {
+    id: 'Charon',
+    label: 'Charon',
+    tag: 'ഗംഭീര പുരുഷൻ (Deep Male)',
+    desc: 'ആധികാരികതയുള്ള ഗംഭീര ശബ്ദം (Authoritative executive male voice)',
+  },
+  {
+    id: 'Kore',
+    label: 'Kore',
+    tag: 'ശാന്തമായ സ്ത്രീ (Warm Female)',
+    desc: 'മൃദുവായ ശാന്തമായ പെൺശബ്ദം (Soft & warm female voice)',
+  },
+  {
+    id: 'Fenrir',
+    label: 'Fenrir',
+    tag: 'പരുക്കൻ ശബ്ദം (Deep Tone)',
+    desc: 'ശക്തമായ പുരുഷ ശബ്ദം (Resonant deep tone)',
+  },
+  {
+    id: 'GoogleMalayalam',
+    label: 'Google Native',
+    tag: 'ക്ലാസിക് മലയാളം (Standard)',
+    desc: 'ഗൂഗിളിന്റെ ഔദ്യോഗിക മലയാളം ഓഡിയോ എൻജിൻ (Direct Google Native TTS)',
+  },
+];
 
 export const AdminGeminiVoicePage: React.FC = () => {
   const navigate = useNavigate();
@@ -58,6 +102,10 @@ export const AdminGeminiVoicePage: React.FC = () => {
   const [isListening, setIsListening] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
   const [isAudioSpeaking, setIsAudioSpeaking] = useState(false);
+  const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
+  const [audioLoadingId, setAudioLoadingId] = useState<string | null>(null);
+  const [preferredVoice, setPreferredVoiceState] = useState<GeminiVoiceName>(getPreferredVoice);
+  const [isAuditioningVoice, setIsAuditioningVoice] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [selectedLanguage, setSelectedLanguage] = useState<'ml-IN' | 'en-IN'>('ml-IN');
   const [speechSupported] = useState(() => {
@@ -81,43 +129,173 @@ export const AdminGeminiVoicePage: React.FC = () => {
     scrollToBottom();
   }, [messages, isProcessing, liveTranscript]);
 
-  // Cleanup speech synthesis on unmount
+  // Cleanup speech audio on unmount
   useEffect(() => {
     return () => {
       stopSpeaking();
     };
   }, []);
 
-  // Speak welcome message on user intent
-  const handlePlayWelcome = () => {
-    setIsAudioSpeaking(true);
-    speakMalayalam(
-      INITIAL_WELCOME_MALAYALAM,
-      () => setIsAudioSpeaking(true),
-      () => setIsAudioSpeaking(false),
-      () => setIsAudioSpeaking(false)
-    );
+  // Update preferred voice handler
+  const handleVoiceChange = (voice: GeminiVoiceName) => {
+    setPreferredVoice(voice);
+    setPreferredVoiceState(voice);
   };
 
   // Stop currently playing speech
   const handleStopSpeaking = () => {
     stopSpeaking();
     setIsAudioSpeaking(false);
+    setActivePlayingId(null);
+    setAudioLoadingId(null);
+    setIsAuditioningVoice(false);
   };
 
-  // Replay a specific message's audio
-  const handlePlayMessageAudio = (text: string) => {
-    if (isSpeaking()) {
+  // Speak welcome message on user intent
+  const handlePlayWelcome = async () => {
+    if (isSpeaking() || isAudioSpeaking) {
       handleStopSpeaking();
       return;
     }
+    setActivePlayingId('welcome-1');
     setIsAudioSpeaking(true);
-    speakMalayalam(
-      text,
-      () => setIsAudioSpeaking(true),
-      () => setIsAudioSpeaking(false),
-      () => setIsAudioSpeaking(false)
-    );
+    try {
+      const welcomeMsg = messages.find((m) => m.id === 'welcome-1');
+      if (welcomeMsg?.audioUrl) {
+        playNativeAudio(
+          welcomeMsg.audioUrl,
+          () => {
+            setIsAudioSpeaking(true);
+            setActivePlayingId('welcome-1');
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+          }
+        );
+      } else {
+        setAudioLoadingId('welcome-1');
+        const audioUrl = await speakNativeMalayalam(
+          INITIAL_WELCOME_MALAYALAM,
+          preferredVoice,
+          () => {
+            setIsAudioSpeaking(true);
+            setActivePlayingId('welcome-1');
+            setAudioLoadingId(null);
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+            setAudioLoadingId(null);
+          }
+        );
+        setMessages((prev) =>
+          prev.map((m) => (m.id === 'welcome-1' ? { ...m, audioUrl } : m))
+        );
+      }
+    } catch (err) {
+      console.error('Welcome audio error:', err);
+      setIsAudioSpeaking(false);
+      setActivePlayingId(null);
+      setAudioLoadingId(null);
+    }
+  };
+
+  // Replay a specific message's audio
+  const handlePlayMessageAudio = async (msg: GeminiChatMessage) => {
+    if (activePlayingId === msg.id && (isSpeaking() || isAudioSpeaking)) {
+      handleStopSpeaking();
+      return;
+    }
+
+    handleStopSpeaking();
+    setIsAudioSpeaking(true);
+    setActivePlayingId(msg.id);
+
+    try {
+      if (msg.audioUrl) {
+        playNativeAudio(
+          msg.audioUrl,
+          () => {
+            setIsAudioSpeaking(true);
+            setActivePlayingId(msg.id);
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+          }
+        );
+      } else {
+        setAudioLoadingId(msg.id);
+        const url = await speakNativeMalayalam(
+          msg.text,
+          preferredVoice,
+          () => {
+            setIsAudioSpeaking(true);
+            setActivePlayingId(msg.id);
+            setAudioLoadingId(null);
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+          },
+          () => {
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+            setAudioLoadingId(null);
+          }
+        );
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msg.id ? { ...m, audioUrl: url } : m))
+        );
+      }
+    } catch (err) {
+      console.error('Play audio error:', err);
+      setIsAudioSpeaking(false);
+      setActivePlayingId(null);
+      setAudioLoadingId(null);
+    }
+  };
+
+  // Audition voice in settings modal
+  const handleAuditionVoice = async (voice: GeminiVoiceName) => {
+    if (isSpeaking() || isAudioSpeaking) {
+      handleStopSpeaking();
+      return;
+    }
+    setIsAuditioningVoice(true);
+    setIsAudioSpeaking(true);
+    try {
+      await speakNativeMalayalam(
+        'നമസ്കാരം കൊച്ചു മുതലാളി, എന്റെ ശബ്ദം വ്യക്തമായി കേൾക്കാൻ കഴിയുന്നുണ്ടോ?',
+        voice,
+        () => setIsAudioSpeaking(true),
+        () => {
+          setIsAudioSpeaking(false);
+          setIsAuditioningVoice(false);
+        },
+        () => {
+          setIsAudioSpeaking(false);
+          setIsAuditioningVoice(false);
+        }
+      );
+    } catch (e) {
+      console.error('Audition error:', e);
+      setIsAudioSpeaking(false);
+      setIsAuditioningVoice(false);
+    }
   };
 
   // Send message to Gemini AI
@@ -128,6 +306,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
 
       stopSpeaking();
       setIsAudioSpeaking(false);
+      setActivePlayingId(null);
 
       const userMsg: GeminiChatMessage = {
         id: `user-${Date.now()}`,
@@ -153,8 +332,9 @@ export const AdminGeminiVoicePage: React.FC = () => {
         const history = messages.map((m) => ({ role: m.role, text: m.text }));
         const res = await sendGeminiVoiceMessage(trimmed, history, liveContext);
 
+        const aiMsgId = `ai-${Date.now()}`;
         const aiMsg: GeminiChatMessage = {
-          id: `ai-${Date.now()}`,
+          id: aiMsgId,
           role: 'model',
           text: res.text,
           timestamp: new Date(),
@@ -163,15 +343,41 @@ export const AdminGeminiVoicePage: React.FC = () => {
 
         setMessages((prev) => [...prev, aiMsg]);
 
-        // Speak aloud automatically if autoSpeak is enabled
+        // Speak aloud automatically in native Malayalam if autoSpeak is enabled
         if (autoSpeak) {
           setIsAudioSpeaking(true);
-          speakMalayalam(
-            res.text,
-            () => setIsAudioSpeaking(true),
-            () => setIsAudioSpeaking(false),
-            () => setIsAudioSpeaking(false)
-          );
+          setActivePlayingId(aiMsgId);
+          setAudioLoadingId(aiMsgId);
+          try {
+            const audioUrl = await speakNativeMalayalam(
+              res.text,
+              preferredVoice,
+              () => {
+                setIsAudioSpeaking(true);
+                setActivePlayingId(aiMsgId);
+                setAudioLoadingId(null);
+              },
+              () => {
+                setIsAudioSpeaking(false);
+                setActivePlayingId(null);
+              },
+              () => {
+                setIsAudioSpeaking(false);
+                setActivePlayingId(null);
+                setAudioLoadingId(null);
+              }
+            );
+            if (audioUrl) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === aiMsgId ? { ...m, audioUrl } : m))
+              );
+            }
+          } catch (audioErr) {
+            console.warn('Auto speak error:', audioErr);
+            setIsAudioSpeaking(false);
+            setActivePlayingId(null);
+            setAudioLoadingId(null);
+          }
         }
       } catch (err: any) {
         console.error('Gemini Voice Error:', err);
@@ -186,7 +392,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
         setIsProcessing(false);
       }
     },
-    [autoSpeak, isProcessing, messages, requests, shops, departments, users, threshold]
+    [autoSpeak, isProcessing, messages, preferredVoice, requests, shops, departments, users, threshold]
   );
 
   // Toggle voice listening
@@ -302,6 +508,23 @@ export const AdminGeminiVoicePage: React.FC = () => {
 
         {/* Controls Bar */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+          {/* Native Malayalam Voice Engine Picker */}
+          <div className="flex items-center">
+            <select
+              value={preferredVoice}
+              onChange={(e) => handleVoiceChange(e.target.value as GeminiVoiceName)}
+              className="bg-slate-950 text-violet-300 border border-slate-800 hover:border-violet-600/50 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-hidden cursor-pointer shadow-inner"
+              title="Select Native Malayalam Voice Engine"
+            >
+              <option value="Aoede">🎙️ Aoede (സ്ത്രീ ശബ്ദം / Female)</option>
+              <option value="Puck">🎙️ Puck (പുരുഷ ശബ്ദം / Male)</option>
+              <option value="Charon">🎙️ Charon (ഗംഭീര പുരുഷൻ / Executive)</option>
+              <option value="Kore">🎙️ Kore (ശാന്തമായ സ്ത്രീ / Warm Female)</option>
+              <option value="Fenrir">🎙️ Fenrir (പരുക്കൻ ശബ്ദം / Deep Male)</option>
+              <option value="GoogleMalayalam">🎙️ Google Native (മലയാളം)</option>
+            </select>
+          </div>
+
           {/* Language Selector */}
           <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
             <button
@@ -356,7 +579,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
               setShowKeyModal(true);
             }}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition-colors cursor-pointer"
-            title="Configure Gemini API Key"
+            title="Configure Gemini API Key & Voice Settings"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -365,10 +588,17 @@ export const AdminGeminiVoicePage: React.FC = () => {
           <button
             type="button"
             onClick={handlePlayWelcome}
+            disabled={audioLoadingId === 'welcome-1'}
             className="px-2.5 py-1.5 rounded-xl bg-violet-950/80 hover:bg-violet-900/90 text-violet-300 border border-violet-700/60 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
-            title="Listen to Welcome Greeting (സ്വാഗതം കേൾക്കൂ)"
+            title="Listen to Welcome Greeting in Native Malayalam (സ്വാഗതം കേൾക്കൂ)"
           >
-            <Play className="w-3.5 h-3.5 text-violet-400" />
+            {audioLoadingId === 'welcome-1' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />
+            ) : activePlayingId === 'welcome-1' && isAudioSpeaking ? (
+              <VolumeX className="w-3.5 h-3.5 text-violet-400 animate-pulse" />
+            ) : (
+              <Play className="w-3.5 h-3.5 text-violet-400" />
+            )}
             <span className="hidden md:inline">സ്വാഗതം</span>
           </button>
 
@@ -461,11 +691,26 @@ export const AdminGeminiVoicePage: React.FC = () => {
                       {isModel && (
                         <button
                           type="button"
-                          onClick={() => handlePlayMessageAudio(msg.text)}
-                          className="p-1 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                          title="Replay Voice (Audio)"
+                          onClick={() => handlePlayMessageAudio(msg)}
+                          disabled={audioLoadingId === msg.id}
+                          className={`p-1 rounded-md transition-colors cursor-pointer flex items-center gap-1 ${
+                            activePlayingId === msg.id && isAudioSpeaking
+                              ? 'bg-violet-900/60 text-violet-300 ring-1 ring-violet-500/50'
+                              : 'hover:bg-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                          title={
+                            activePlayingId === msg.id && isAudioSpeaking
+                              ? 'ശബ്ദം നിർത്തുക (Stop Audio)'
+                              : 'കേൾക്കൂ (Play Native Malayalam Voice)'
+                          }
                         >
-                          <Volume2 className="w-3.5 h-3.5" />
+                          {audioLoadingId === msg.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />
+                          ) : activePlayingId === msg.id && isAudioSpeaking ? (
+                            <VolumeX className="w-3.5 h-3.5 text-violet-400 animate-pulse" />
+                          ) : (
+                            <Volume2 className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       )}
                     </div>
@@ -633,21 +878,75 @@ export const AdminGeminiVoicePage: React.FC = () => {
         </form>
       </div>
 
-      {/* API Key Settings Modal */}
+      {/* API Key & Voice Settings Modal */}
       {showKeyModal && (
         <Modal
           isOpen={showKeyModal}
           onClose={() => setShowKeyModal(false)}
-          title="Gemini AI API Key Configuration"
-          description="Manage the Google Gemini API key powering Kochu Muthalali's Voice AI."
+          title="Gemini AI Voice & Settings"
+          description="Manage the Google Gemini API key and choose the native Malayalam neural voice for Kochu Muthalali."
         >
           <div className="space-y-4">
             {keySavedBanner && (
               <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 text-xs flex items-center gap-2">
                 <Check className="w-4 h-4 text-emerald-600" />
-                <span>API Key successfully updated!</span>
+                <span>Settings successfully saved!</span>
               </div>
             )}
+
+            {/* Voice Engine Personality Selection */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  Native Malayalam Neural Voice (മലയാളം ശബ്ദം)
+                </label>
+                <span className="text-[10px] text-violet-600 font-semibold">
+                  Active: {preferredVoice}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                {VOICE_OPTIONS.map((vo) => {
+                  const isSelected = preferredVoice === vo.id;
+                  return (
+                    <div
+                      key={vo.id}
+                      onClick={() => handleVoiceChange(vo.id)}
+                      className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-violet-600 bg-violet-50/80 shadow-xs'
+                          : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-xs text-slate-900">{vo.label}</span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-violet-600" />}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleVoiceChange(vo.id);
+                            handleAuditionVoice(vo.id);
+                          }}
+                          className="px-2 py-0.5 rounded-md bg-violet-100 hover:bg-violet-200 text-violet-700 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Audition this voice in Malayalam"
+                        >
+                          {isAuditioningVoice && preferredVoice === vo.id ? (
+                            <VolumeX className="w-3 h-3 text-violet-700" />
+                          ) : (
+                            <Volume1 className="w-3 h-3 text-violet-700" />
+                          )}
+                          <span>ശബ്ദം കേൾക്കൂ</span>
+                        </button>
+                      </div>
+                      <p className="text-[11px] font-medium text-slate-700">{vo.tag}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">{vo.desc}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -691,7 +990,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
                 }}
                 className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs shadow-md transition-colors"
               >
-                Save Key
+                Save Settings
               </button>
             </div>
           </div>

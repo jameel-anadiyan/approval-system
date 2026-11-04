@@ -36,12 +36,32 @@ export function setGeminiApiKey(key: string): void {
   }
 }
 
+export type GeminiVoiceName = 'Puck' | 'Aoede' | 'Charon' | 'Kore' | 'Fenrir' | 'GoogleMalayalam';
+export const VOICE_STORAGE_KEY = 'gemini_voice_preferred_voice';
+
+export function getPreferredVoice(): GeminiVoiceName {
+  if (typeof window !== 'undefined') {
+    const v = localStorage.getItem(VOICE_STORAGE_KEY);
+    if (v === 'Puck' || v === 'Aoede' || v === 'Charon' || v === 'Kore' || v === 'Fenrir' || v === 'GoogleMalayalam') {
+      return v;
+    }
+  }
+  return 'Aoede'; // Default to Aoede (pleasant, clear natural voice)
+}
+
+export function setPreferredVoice(voice: GeminiVoiceName): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(VOICE_STORAGE_KEY, voice);
+  }
+}
+
 export interface GeminiChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
   timestamp: Date;
-  isAudioPlaying?: boolean;
+  audioUrl?: string;
+  isAudioLoading?: boolean;
   widgetData?: {
     type: 'requests_list' | 'stats_overview' | 'shop_summary' | 'discount_summary';
     title: string;
@@ -735,80 +755,197 @@ export async function sendGeminiVoiceMessage(
 }
 
 /**
- * Text-to-Speech (TTS) for Malayalam
+ * Audio handling for Native Malayalam Neural TTS
  */
-let _currentUtterance: SpeechSynthesisUtterance | null = null;
+let currentAudioElement: HTMLAudioElement | null = null;
 
-export function speakMalayalam(
+function writeString(view: DataView, offset: number, string: string): void {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+export function pcmToWavBlob(pcmData: Uint8Array, sampleRate = 24000, numChannels = 1): Blob {
+  const byteRate = sampleRate * numChannels * 2;
+  const blockAlign = numChannels * 2;
+  const buffer = new ArrayBuffer(44 + pcmData.length);
+  const view = new DataView(buffer);
+
+  // RIFF header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + pcmData.length, true);
+  writeString(view, 8, 'WAVE');
+
+  // fmt chunk
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // Linear PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); // 16-bit
+
+  // data chunk
+  writeString(view, 36, 'data');
+  view.setUint32(40, pcmData.length, true);
+
+  new Uint8Array(buffer, 44).set(pcmData);
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+export function cleanTextForSpeech(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    .replace(/REQ-\d{4}-\d+/gi, (m) => `റിക്വസ്റ്റ് ${m.replace('REQ-', '')}`)
+    .replace(/APR-\d{4}-\d+/gi, (m) => `അപ്രൂവൽ ${m.replace('APR-', '')}`)
+    .replace(/₹\s?([\d,]+)/g, '$1 രൂപ')
+    .replace(/[#_~`]/g, '')
+    .trim();
+}
+
+/**
+ * Generates ultra-realistic Native Neural Audio in Malayalam using Gemini 2.5 Flash TTS
+ * with instant fallback to Google Native Malayalam Audio
+ */
+export async function generateNativeMalayalamAudio(
   text: string,
+  voiceName: GeminiVoiceName = getPreferredVoice()
+): Promise<string> {
+  const apiKey = getGeminiApiKey();
+  const cleanText = cleanTextForSpeech(text);
+
+  if (!cleanText) {
+    throw new Error('No speech text provided');
+  }
+
+  // If user picked Google Malayalam directly
+  if (voiceName === 'GoogleMalayalam') {
+    const encoded = encodeURIComponent(cleanText.slice(0, 300));
+    return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ml&client=tw-ob`;
+  }
+
+  try {
+    const body = {
+      contents: [{ parts: [{ text: cleanText }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: voiceName || 'Aoede',
+            },
+          },
+        },
+      },
+    };
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Gemini TTS API responded with ${res.status}`);
+    }
+
+    const json = await res.json();
+    const b64Audio = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+    if (!b64Audio) {
+      throw new Error('No audio inlineData in Gemini response');
+    }
+
+    const binaryStr = atob(b64Audio);
+    const pcmBytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      pcmBytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    const wavBlob = pcmToWavBlob(pcmBytes, 24000, 1);
+    return URL.createObjectURL(wavBlob);
+  } catch (err) {
+    console.warn('Gemini 2.5 Flash TTS fallback to Google Native Malayalam voice:', err);
+    // Instant fallback to dedicated Google Native Malayalam Voice
+    const encoded = encodeURIComponent(cleanText.slice(0, 300));
+    return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ml&client=tw-ob`;
+  }
+}
+
+/**
+ * Plays the native audio stream via HTML5 Audio
+ */
+export function playNativeAudio(
+  audioUrl: string,
   onStart?: () => void,
   onEnd?: () => void,
   onError?: (err: unknown) => void
-): boolean {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    stopSpeaking();
+): HTMLAudioElement {
+  stopSpeaking();
 
-    // Strip Markdown symbols for clean speech synthesis
-    const cleanSpeechText = text
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-      .replace(/REQ-\d{4}-\d+/gi, (m) => `റിക്വസ്റ്റ് ${m.replace('REQ-', '')}`)
-      .replace(/APR-\d{4}-\d+/gi, (m) => `അപ്രൂവൽ ${m.replace('APR-', '')}`)
-      .replace(/₹\s?([\d,]+)/g, '$1 രൂപ');
+  const audio = new Audio(audioUrl);
+  currentAudioElement = audio;
 
-    const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+  audio.onplay = () => onStart?.();
+  audio.onended = () => {
+    currentAudioElement = null;
+    onEnd?.();
+  };
+  audio.onerror = (e) => {
+    currentAudioElement = null;
+    onError?.(e);
+  };
 
-    // Search for Malayalam voice
-    const voices = window.speechSynthesis.getVoices();
-    const mlVoice = voices.find(
-      (v) =>
-        v.lang.toLowerCase().includes('ml') ||
-        v.name.toLowerCase().includes('malayalam') ||
-        v.name.toLowerCase().includes('mal')
-    );
+  audio.play().catch((err) => {
+    console.warn('Audio play prevented or interrupted:', err);
+    currentAudioElement = null;
+    onError?.(err);
+  });
 
-    const inVoice = voices.find((v) => v.lang.toLowerCase().includes('in'));
+  return audio;
+}
 
-    if (mlVoice) {
-      utterance.voice = mlVoice;
-      utterance.lang = 'ml-IN';
-    } else if (inVoice) {
-      utterance.voice = inVoice;
-      utterance.lang = inVoice.lang;
-    } else {
-      utterance.lang = 'ml-IN';
-    }
-
-    utterance.onstart = () => onStart?.();
-    utterance.onend = () => {
-      _currentUtterance = null;
-      onEnd?.();
-    };
-    utterance.onerror = (e) => {
-      _currentUtterance = null;
-      onError?.(e);
-    };
-
-    _currentUtterance = utterance;
-    window.speechSynthesis.speak(utterance);
-    return true;
+/**
+ * Speaks text using Native Malayalam Audio (fetches audio and plays)
+ */
+export async function speakNativeMalayalam(
+  text: string,
+  voiceName: GeminiVoiceName = getPreferredVoice(),
+  onStart?: () => void,
+  onEnd?: () => void,
+  onError?: (err: unknown) => void
+): Promise<string> {
+  stopSpeaking();
+  try {
+    const audioUrl = await generateNativeMalayalamAudio(text, voiceName);
+    playNativeAudio(audioUrl, onStart, onEnd, onError);
+    return audioUrl;
+  } catch (err) {
+    console.error('Failed to generate native audio:', err);
+    onError?.(err);
+    throw err;
   }
-  return false;
 }
 
 export function stopSpeaking(): void {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    _currentUtterance = null;
+  if (currentAudioElement) {
+    try {
+      currentAudioElement.pause();
+      currentAudioElement.currentTime = 0;
+    } catch {
+      // ignore
+    }
+    currentAudioElement = null;
   }
 }
 
 export function isSpeaking(): boolean {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    return window.speechSynthesis.speaking;
-  }
-  return false;
+  return currentAudioElement !== null && !currentAudioElement.paused;
 }
