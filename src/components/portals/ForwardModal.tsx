@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { RequestRecord } from '../../types/database';
-import { CornerDownRight, AlertTriangle } from 'lucide-react';
+import { CornerDownRight, AlertTriangle, Percent } from 'lucide-react';
 import type { ActionVoice } from '../../context/RequestContext';
 import { ActionVoiceField } from '../requests/ActionVoiceField';
 import { errMsg } from '../../lib/errorUtils';
+import { formatINR, typeOf } from '../../lib/formatters';
 
 interface ForwardModalProps {
   isOpen: boolean;
@@ -28,6 +29,21 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
   const pendingConsultations = consultations.filter((c) => c.status === 'pending');
   const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
   const isConsultationBlocked = pendingConsultations.length > 0 || disagreedConsultations.length > 0;
+
+  const rType = typeOf(request);
+  const discDetails = request.details;
+  const discBefore = Number(discDetails?.before_amount || 0);
+  const discAfter = Number(discDetails?.after_amount || 0);
+  const discValue = Number(
+    discDetails?.discount_amount ??
+      (discBefore > 0 && discAfter >= 0 ? discBefore - discAfter : request.amount)
+  );
+  const discPct =
+    discDetails?.discount_pct !== undefined && discDetails?.discount_pct !== null && !isNaN(Number(discDetails.discount_pct))
+      ? Number(discDetails.discount_pct)
+      : discBefore > 0
+      ? (discValue / discBefore) * 100
+      : 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,6 +89,38 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
           <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 leading-relaxed">
             As Department Head, you are confirming that you have reviewed the request details, verified
             the invoices, and recommend it for final Admin sign-off.
+          </div>
+        )}
+
+        {rType === 'discount' && (
+          <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-bold text-amber-900 uppercase tracking-wider">
+              <span className="flex items-center gap-1.5">
+                <Percent className="w-3.5 h-3.5 text-amber-600" />
+                <span>Discount Review Summary</span>
+              </span>
+              <span className="font-extrabold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-300">
+                {discPct.toFixed(1)}% OFF
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-center text-xs">
+              <div className="bg-white/90 p-2 rounded-lg border border-amber-200/70">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block truncate">Before</span>
+                <span className="font-bold text-slate-800 truncate block">{discBefore > 0 ? formatINR(discBefore) : '—'}</span>
+              </div>
+              <div className="bg-white/90 p-2 rounded-lg border border-amber-200/70">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block truncate">After</span>
+                <span className="font-bold text-slate-800 truncate block">{discAfter > 0 ? formatINR(discAfter) : '—'}</span>
+              </div>
+              <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-300/80">
+                <span className="text-[10px] font-black text-amber-900 uppercase block truncate">Discount %</span>
+                <span className="font-black text-amber-950 truncate block">{discPct.toFixed(1)}%</span>
+              </div>
+              <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                <span className="text-[10px] font-bold text-emerald-800 uppercase block truncate">Discount Value</span>
+                <span className="font-black text-emerald-900 truncate block">{formatINR(discValue)}</span>
+              </div>
+            </div>
           </div>
         )}
 

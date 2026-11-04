@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Eye,
   MessageSquare,
+  Percent,
 } from 'lucide-react';
 import { SignedDocPreviewModal } from '../requests/SignedDocPreviewModal';
 
@@ -66,6 +67,22 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
 
   const [voice, setVoice] = useState<ActionVoice | null>(null);
   const rType = typeOf(request);
+
+  // Discount details pre-calculation
+  const discDetails = request.details;
+  const discBefore = Number(discDetails?.before_amount || 0);
+  const discAfter = Number(discDetails?.after_amount || 0);
+  const discValue = Number(
+    discDetails?.discount_amount ??
+      (discBefore > 0 && discAfter >= 0 ? discBefore - discAfter : request.amount)
+  );
+  const discPct =
+    discDetails?.discount_pct !== undefined && discDetails?.discount_pct !== null && !isNaN(Number(discDetails.discount_pct))
+      ? Number(discDetails.discount_pct)
+      : discBefore > 0
+      ? (discValue / discBefore) * 100
+      : 0;
+
   const hasForm = rType !== 'general';
   const uploadedPages = request.files?.filter((f) => f.kind === 'document').reduce((acc, f) => acc + (f.page_count || 1), 0) || 0;
   const documentPagesCount = hasForm ? uploadedPages : uploadedPages || 1;
@@ -258,6 +275,39 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
             {rType === 'stock_transfer' && documentPagesCount === 0 && (
               <div className="text-[11px] text-blue-700 bg-blue-50/70 p-2 rounded-lg border border-blue-200">
                 No external documents attached. The generated Stock Transfer form will be signed and sealed with official stamp and QR verification.
+              </div>
+            )}
+
+            {/* Discount Breakdown when approving */}
+            {rType === 'discount' && (
+              <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl p-3 my-2 space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-bold text-amber-900 uppercase tracking-wider">
+                  <span className="flex items-center gap-1.5">
+                    <Percent className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Discount Approval Details</span>
+                  </span>
+                  <span className="font-extrabold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-300">
+                    {discPct.toFixed(1)}% OFF
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                  <div className="bg-white/90 p-2 rounded-lg border border-amber-200/70">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block truncate">Before</span>
+                    <span className="font-bold text-slate-800 truncate block">{discBefore > 0 ? formatINR(discBefore) : '—'}</span>
+                  </div>
+                  <div className="bg-white/90 p-2 rounded-lg border border-amber-200/70">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block truncate">After</span>
+                    <span className="font-bold text-slate-800 truncate block">{discAfter > 0 ? formatINR(discAfter) : '—'}</span>
+                  </div>
+                  <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-300/80">
+                    <span className="text-[10px] font-black text-amber-900 uppercase block truncate">Discount %</span>
+                    <span className="font-black text-amber-950 truncate block">{discPct.toFixed(1)}%</span>
+                  </div>
+                  <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                    <span className="text-[10px] font-bold text-emerald-800 uppercase block truncate">Discount Value</span>
+                    <span className="font-black text-emerald-900 truncate block">{formatINR(discValue)}</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>

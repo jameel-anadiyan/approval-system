@@ -35,6 +35,22 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   const isHighValue = rType === 'general' && request.amount > threshold;
   const showHeadChangeRoute = canHeadChangeRoute(request, user, threshold);
 
+  // Discount details pre-calculation for card display
+  const isDiscount = rType === 'discount';
+  const discDetails = request.details;
+  const discBefore = Number(discDetails?.before_amount || 0);
+  const discAfter = Number(discDetails?.after_amount || 0);
+  const discValue = Number(
+    discDetails?.discount_amount ??
+      (discBefore > 0 && discAfter >= 0 ? discBefore - discAfter : request.amount)
+  );
+  const discPct =
+    discDetails?.discount_pct !== undefined && discDetails?.discount_pct !== null && !isNaN(Number(discDetails.discount_pct))
+      ? Number(discDetails.discount_pct)
+      : discBefore > 0
+      ? (discValue / discBefore) * 100
+      : 0;
+
   const isApprovalQueueStage = ['pending_head_approval', 'pending_head_review', 'pending_admin_approval'].includes(
     request.status
   );
@@ -240,15 +256,54 @@ export const RequestCard: React.FC<RequestCardProps> = ({
         </div>
       )}
 
+      {/* Discount Metrics Strip on Card: Before, After, Percentage, and Discount Value */}
+      {isDiscount && (
+        <div className="rounded-xl bg-amber-50/90 border border-amber-200/90 p-2 sm:p-2.5 my-0.5 grid grid-cols-4 gap-1.5 sm:gap-2 text-center shadow-2xs">
+          <div className="min-w-0 bg-white/80 rounded-lg p-1 border border-amber-100">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Before</span>
+            <span className="text-xs font-bold text-slate-800 truncate block">
+              {discBefore > 0 ? formatINR(discBefore) : '—'}
+            </span>
+          </div>
+          <div className="min-w-0 bg-white/80 rounded-lg p-1 border border-amber-100">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">After</span>
+            <span className="text-xs font-bold text-slate-800 truncate block">
+              {discAfter > 0 ? formatINR(discAfter) : '—'}
+            </span>
+          </div>
+          <div className="min-w-0 bg-amber-100/90 rounded-lg p-1 border border-amber-300">
+            <span className="text-[10px] uppercase font-black text-amber-900 block truncate">Discount %</span>
+            <span className="text-xs font-black text-amber-950 truncate block">
+              {discPct > 0 ? `${discPct.toFixed(1)}%` : '—'}
+            </span>
+          </div>
+          <div className="min-w-0 bg-emerald-50 rounded-lg p-1 border border-emerald-200">
+            <span className="text-[10px] uppercase font-bold text-emerald-800 block truncate">Discount Value</span>
+            <span className="text-xs font-black text-emerald-900 truncate block">
+              {formatINR(discValue)}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Footer: Amount & Metadata */}
       <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            {rType === 'discount' ? 'Discount' : rType === 'stock_transfer' ? 'Total MRP' : 'Amount'}
+            {isDiscount ? 'Discount Value' : rType === 'stock_transfer' ? 'Total MRP' : 'Amount'}
           </div>
-          <div className="font-bold text-slate-900 text-base font-display">
+          <div className="font-bold text-slate-900 text-base font-display flex items-center gap-1.5">
             {isNonCashRequestType(rType) ? (
               <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Non-Cash</span>
+            ) : isDiscount ? (
+              <>
+                <span>{formatINR(discValue)}</span>
+                {discPct > 0 && (
+                  <span className="text-[11px] font-black px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+                    {discPct.toFixed(1)}%
+                  </span>
+                )}
+              </>
             ) : (
               formatINR(request.amount)
             )}

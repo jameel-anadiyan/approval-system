@@ -40,6 +40,7 @@ import {
   RotateCcw,
   FileCheck2,
   Users,
+  Percent,
 } from 'lucide-react';
 
 export const HeadTrackingPage: React.FC = () => {
@@ -90,7 +91,7 @@ export const HeadTrackingPage: React.FC = () => {
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  // Tracking fetch logic: checks local context first, then queries Supabase
+  // Tracking fetch logic: checks local context first, then queries RPC / Supabase
   const executeSearch = useCallback(
     async (rawQuery: string) => {
       const q = rawQuery.trim();
@@ -121,7 +122,25 @@ export const HeadTrackingPage: React.FC = () => {
         return;
       }
 
-      // 2. Query Supabase directly (for older or un-cached requests)
+      // 2. Try track_request RPC (works across all heads and departments via security definer)
+      try {
+        const { data: trackData, error: rpcErr } = await supabase.rpc('track_request', { p_query: q });
+        if (!rpcErr && trackData && trackData.request) {
+          const r = trackData.request;
+          r.actions = trackData.actions || [];
+          r.disbursement_entries = trackData.entries || [];
+          r.files = trackData.files || [];
+          r.signed_files = trackData.signed_files || [];
+          r.consultations = trackData.consultations || [];
+          setActiveRequest(r as RequestRecord);
+          setIsSearching(false);
+          return;
+        }
+      } catch (rpcErr) {
+        console.warn('track_request RPC notice, falling back to direct table query:', rpcErr);
+      }
+
+      // 3. Fallback: Query Supabase directly (for older or un-cached requests)
       try {
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q);
 
@@ -184,21 +203,14 @@ export const HeadTrackingPage: React.FC = () => {
     [requests]
   );
 
-  // Sync with searchParams on mount or param change
+  // Sync with searchParams on mount or param change (NO preset data or auto-fill)
   useEffect(() => {
     const q = searchParams.get('q') || searchParams.get('id') || searchParams.get('no') || '';
     if (q) {
       setSearchQuery(q);
       executeSearch(q);
-    } else if (requests.length > 0 && !activeRequest) {
-      // Auto-load most recent department request as initial preview if none specified
-      const defaultReq = requests.find((r) => r.department_id === user?.department_id || r.owner_head_id === user?.id) || requests[0];
-      if (defaultReq) {
-        setActiveRequest(defaultReq);
-        setSearchQuery(defaultReq.approval_no || defaultReq.request_no || defaultReq.id);
-      }
     }
-  }, [searchParams, requests, user, executeSearch, activeRequest]);
+  }, [searchParams, executeSearch]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -487,6 +499,41 @@ export const HeadTrackingPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Initial Empty State when no request is tracked yet */}
+      {!activeRequest && !isSearching && (
+        <div className="bg-white rounded-2xl border border-slate-200/90 p-8 sm:p-12 text-center shadow-xs space-y-4 max-w-2xl mx-auto my-4">
+          <div className="w-14 h-14 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto border border-purple-100 shadow-xs">
+            <Compass className="w-7 h-7" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-base sm:text-lg font-bold text-slate-900 font-display">
+              Track Any Request Across All Departments
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+              Enter any Request ID (e.g. <span className="font-mono font-semibold text-slate-700">REQ-2026-000123</span>) or Approval ID (e.g. <span className="font-mono font-semibold text-slate-700">APR-2026-000045</span>) above. You can track requests from any department head or location in real time.
+            </p>
+          </div>
+          {recentDeptRequests.length > 0 && (
+            <div className="pt-2 border-t border-slate-100">
+              <span className="text-xs text-slate-400 block mb-2 font-medium">Or pick from recent requests:</span>
+              <div className="flex flex-wrap justify-center gap-2">
+                {recentDeptRequests.slice(0, 4).map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => handleSelectRecent(r)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 hover:border-purple-200 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Hash className="w-3 h-3 text-slate-400" />
+                    <span>{r.approval_no || r.request_no || r.id}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Tracking Content (if active request found) */}
       {activeRequest && (
@@ -792,6 +839,51 @@ export const HeadTrackingPage: React.FC = () => {
                     </span>
                   </div>
                 </div>
+
+                {/* Discount Computation Card if Discount request */}
+                {typeOf(activeRequest) === 'discount' && (() => {
+                  const d = activeRequest.details;
+                  const before = Number(d?.before_amount || 0);
+                  const after = Number(d?.after_amount || 0);
+                  const val = Number(d?.discount_amount ?? (before > 0 && after >= 0 ? before - after : activeRequest.amount));
+                  const pct = d?.discount_pct !== undefined && d?.discount_pct !== null && !isNaN(Number(d.discount_pct))
+                    ? Number(d.discount_pct)
+                    : before > 0
+                    ? (val / before) * 100
+                    : 0;
+
+                  return (
+                    <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-amber-900 uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5">
+                          <Percent className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Discount Computation</span>
+                        </span>
+                        <span className="font-extrabold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-300">
+                          {pct.toFixed(1)}% OFF
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                        <div className="bg-white/90 p-2 rounded-lg border border-amber-200/70">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase block truncate">Before</span>
+                          <span className="font-bold text-slate-800 truncate block">{before > 0 ? formatINR(before) : '—'}</span>
+                        </div>
+                        <div className="bg-white/90 p-2 rounded-lg border border-amber-200/70">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase block truncate">After</span>
+                          <span className="font-bold text-slate-800 truncate block">{after > 0 ? formatINR(after) : '—'}</span>
+                        </div>
+                        <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-300/80">
+                          <span className="text-[10px] font-black text-amber-900 uppercase block truncate">Discount %</span>
+                          <span className="font-black text-amber-950 truncate block">{pct.toFixed(1)}%</span>
+                        </div>
+                        <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                          <span className="text-[10px] font-bold text-emerald-800 uppercase block truncate">Discount Value</span>
+                          <span className="font-black text-emerald-900 truncate block">{formatINR(val)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {activeRequest.notes && (
                   <div className="pt-3 border-t border-slate-100 text-xs">
