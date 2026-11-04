@@ -22,6 +22,7 @@ import {
   FileWarning,
   Wallet,
   ShieldCheck,
+  Search,
 } from 'lucide-react';
 
 export const HeadDashboardPage: React.FC = () => {
@@ -169,6 +170,15 @@ export const HeadDashboardPage: React.FC = () => {
               {pendingAdminQueue.length}
             </span>
           )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/head/tracking')}
+          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+        >
+          <Search className="w-3.5 h-3.5 text-purple-600" />
+          <span>Track Request</span>
         </button>
 
         {isPettyCashDealer && (

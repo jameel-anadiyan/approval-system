@@ -58,6 +58,7 @@ const AdminProductCategoriesPage = page(() => import('./pages/admin/AdminProduct
 const StockTransferMonitorPage = page(() => import('./pages/stock/StockTransferMonitorPage'), 'StockTransferMonitorPage');
 const StockTransferReportPage = page(() => import('./pages/reports/StockTransferReportPage'), 'StockTransferReportPage');
 const EntryApprovalsPage = page(() => import('./pages/disbursement/EntryApprovalsPage'), 'EntryApprovalsPage');
+const HeadTrackingPage = page(() => import('./pages/head/HeadTrackingPage'), 'HeadTrackingPage');
 
 const PageSpinner: React.FC = () => (
   <div className="min-h-[50vh] flex items-center justify-center">
@@ -316,6 +317,11 @@ export const App: React.FC = () => {
                   <Route path="head/users" element={<HeadUsersPage />} />
                   <Route path="head/department" element={<ClerkDeptRequestsPage />} />
                   <Route path="head/credentials" element={<AdminCredentialsPage />} />
+                </Route>
+
+                {/* Tracking tab for Department Heads (also accessible to Admin) */}
+                <Route element={<RequireRole roles={['head', 'admin']} />}>
+                  <Route path="head/tracking" element={<HeadTrackingPage />} />
                 </Route>
 
                 {/* Admin routes */}

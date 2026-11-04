@@ -76,23 +76,21 @@ begin
     raise exception 'Select the best quotation before approving';
   end if;
 
-  -- Inter-Department Head Consultations check (Skipped for Petty Cash)
-  if r.request_type::text <> 'petty_cash' then
-    select count(*) into pending_count
-    from public.head_consultations
-    where request_id = r.id and status = 'pending';
+  -- Inter-Department Head Consultations check
+  select count(*) into pending_count
+  from public.head_consultations
+  where request_id = r.id and status = 'pending';
 
-    if pending_count > 0 then
-      raise exception 'Cannot approve: Awaiting review response from % consulted department head(s)', pending_count;
-    end if;
+  if pending_count > 0 then
+    raise exception 'Cannot approve: Awaiting review response from % consulted department head(s)', pending_count;
+  end if;
 
-    select count(*) into disagreed_count
-    from public.head_consultations
-    where request_id = r.id and status = 'disagreed';
+  select count(*) into disagreed_count
+  from public.head_consultations
+  where request_id = r.id and status = 'disagreed';
 
-    if disagreed_count > 0 then
-      raise exception 'Cannot approve: % consulted department head(s) disagreed with this request', disagreed_count;
-    end if;
+  if disagreed_count > 0 then
+    raise exception 'Cannot approve: % consulted department head(s) disagreed with this request', disagreed_count;
   end if;
 
   select * into c from public.approver_credentials where user_id = me.id;
@@ -254,23 +252,21 @@ begin
     end if;
   end if;
 
-  -- Inter-Department Head Consultation checks (Skipped for Petty Cash):
-  if r.request_type::text <> 'petty_cash' then
-    select count(*) into pending_count
-    from public.head_consultations
-    where request_id = r.id and status = 'pending';
+  -- Inter-Department Head Consultation checks:
+  select count(*) into pending_count
+  from public.head_consultations
+  where request_id = r.id and status = 'pending';
 
-    if pending_count > 0 then
-      raise exception 'Cannot forward: Awaiting review response from % consulted department head(s)', pending_count;
-    end if;
+  if pending_count > 0 then
+    raise exception 'Cannot forward: Awaiting review response from % consulted department head(s)', pending_count;
+  end if;
 
-    select count(*) into disagreed_count
-    from public.head_consultations
-    where request_id = r.id and status = 'disagreed';
+  select count(*) into disagreed_count
+  from public.head_consultations
+  where request_id = r.id and status = 'disagreed';
 
-    if disagreed_count > 0 then
-      raise exception 'Cannot forward: % consulted department head(s) disagreed with this request', disagreed_count;
-    end if;
+  if disagreed_count > 0 then
+    raise exception 'Cannot forward: % consulted department head(s) disagreed with this request', disagreed_count;
   end if;
 
   update public.requests set
@@ -296,3 +292,4 @@ revoke execute on function public.forward_request(uuid, text) from public, anon;
 grant execute on function public.forward_request(uuid, text) to authenticated;
 
 notify pgrst, 'reload schema';
+

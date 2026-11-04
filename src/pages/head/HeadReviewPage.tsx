@@ -6,7 +6,7 @@ import { RequestQueue } from '../../components/requests/RequestQueue';
 import { isOwningDepartmentHead } from '../../lib/workflow';
 import { typeOf } from '../../lib/formatters';
 import { useDirectory } from '../../lib/directory';
-import { CheckCircle, CheckCircle2, Clock, CornerDownRight, Wallet, ShieldCheck, Send } from 'lucide-react';
+import { CheckCircle, CheckCircle2, Clock, CornerDownRight, Wallet, ShieldCheck, Send, Search } from 'lucide-react';
 
 export const HeadReviewPage: React.FC = () => {
   const { user } = useAuth();
@@ -94,6 +94,15 @@ export const HeadReviewPage: React.FC = () => {
           >
             {pendingAdminQueue.length}
           </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/head/tracking')}
+          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+        >
+          <Search className="w-3.5 h-3.5 text-purple-600" />
+          <span>Track Request</span>
         </button>
 
         {isPettyCashDealer && (

@@ -354,6 +354,7 @@ export const Navigation: React.FC = () => {
         ...specialNavItems,
         billMissingNavItem,
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
+        { label: 'Track Request', path: '/head/tracking', icon: Search },
         ...(user?.can_view_exhibition_waitlist
           ? [{ label: 'Waitlist Exhibitions', path: '/head/exhibition-waitlist', icon: AlertTriangle, badge: headWaitlistCount, badgeVariant: 'rose' as const, isWaitlistTab: true }]
           : []),

@@ -41,6 +41,8 @@ export const ApprovedRequestsPage: React.FC = () => {
 
   const [query, setQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string>('all');
+  const [selectedShop, setSelectedShop] = useState<string>('all');
+  const [adminOnly, setAdminOnly] = useState<boolean>(false);
   const [dateRange, setDateRange] = useState<DatePreset>('all');
   const [fromDate, setFromDate] = useState<string>('');
   const [toDate, setToDate] = useState<string>('');
@@ -77,6 +79,36 @@ export const ApprovedRequestsPage: React.FC = () => {
       (r) => toISTDateKey(r.decided_at || r.updated_at || r.created_at) === todayIST
     ).length;
   }, [approvedList, todayIST]);
+
+  const availableShops = useMemo(() => {
+    const map = new Map<string, string>();
+    (dir.shops || []).forEach((s) => {
+      if (s.name && s.name.trim()) map.set(s.name.trim(), s.name.trim());
+    });
+    approvedList.forEach((r) => {
+      if (r.shop_name && r.shop_name.trim()) {
+        map.set(r.shop_name.trim(), r.shop_name.trim());
+      }
+      const conductingShop = (r.details as any)?.conducting_shop_name;
+      if (conductingShop && typeof conductingShop === 'string' && conductingShop.trim()) {
+        map.set(conductingShop.trim(), conductingShop.trim());
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  }, [dir.shops, approvedList]);
+
+  const adminApprovedCount = useMemo(() => {
+    return approvedList.filter(
+      (r) =>
+        r.approver_role === 'admin' ||
+        r.route === 'A' ||
+        (r.actions || []).some(
+          (a) =>
+            (a.action === 'approved' || a.action === 'admin_approved') &&
+            a.actor_role === 'admin'
+        )
+    ).length;
+  }, [approvedList]);
 
   const handleToggleTodayOnly = () => {
     if (dateRange === 'today') {
@@ -137,6 +169,8 @@ export const ApprovedRequestsPage: React.FC = () => {
   const hasActiveFilters =
     Boolean(query.trim()) ||
     selectedType !== 'all' ||
+    selectedShop !== 'all' ||
+    adminOnly ||
     dateRange !== 'all' ||
     Boolean(fromDate) ||
     Boolean(toDate);
@@ -144,6 +178,8 @@ export const ApprovedRequestsPage: React.FC = () => {
   const clearAllFilters = () => {
     setQuery('');
     setSelectedType('all');
+    setSelectedShop('all');
+    setAdminOnly(false);
     setDateRange('all');
     setFromDate('');
     setToDate('');
@@ -154,6 +190,28 @@ export const ApprovedRequestsPage: React.FC = () => {
     return approvedList.filter((r) => {
       // Type filter
       if (selectedType !== 'all' && typeOf(r) !== selectedType) return false;
+
+      // Shop filter
+      if (selectedShop !== 'all') {
+        const sLower = selectedShop.toLowerCase().trim();
+        const shopMatches = (r.shop_name || '').toLowerCase().trim() === sLower;
+        const conductingMatches = ((r.details as any)?.conducting_shop_name || '').toLowerCase().trim() === sLower;
+        const shopIdMatches = r.shop_id === selectedShop;
+        if (!shopMatches && !conductingMatches && !shopIdMatches) return false;
+      }
+
+      // Admin Approved Only filter
+      if (adminOnly) {
+        const isApprovedByAdmin =
+          r.approver_role === 'admin' ||
+          r.route === 'A' ||
+          (r.actions || []).some(
+            (a) =>
+              (a.action === 'approved' || a.action === 'admin_approved') &&
+              a.actor_role === 'admin'
+          );
+        if (!isApprovedByAdmin) return false;
+      }
 
       const approvedTs = r.decided_at || r.updated_at || r.created_at;
       const approvedDateKey = toISTDateKey(approvedTs);
@@ -273,6 +331,19 @@ export const ApprovedRequestsPage: React.FC = () => {
             </select>
 
             <select
+              value={selectedShop}
+              onChange={(e) => setSelectedShop(e.target.value)}
+              className="px-3 py-2.5 rounded-xl border border-slate-200 text-xs bg-white focus:border-emerald-500 outline-hidden font-medium text-slate-700 w-full sm:w-auto max-w-[200px]"
+            >
+              <option value="all">🏪 All Shops ({availableShops.length})</option>
+              {availableShops.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+
+            <select
               value={dateRange}
               onChange={(e) => handlePresetChange(e.target.value as DatePreset)}
               className="px-3 py-2.5 rounded-xl border border-slate-200 text-xs bg-white focus:border-emerald-500 outline-hidden font-medium text-slate-700 w-full sm:w-auto"
@@ -310,6 +381,29 @@ export const ApprovedRequestsPage: React.FC = () => {
                 }`}
               >
                 {todayCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              id="approved-admin-only-btn"
+              onClick={() => setAdminOnly((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                adminOnly
+                  ? 'bg-purple-600 text-white border-purple-600 shadow-sm shadow-purple-200 ring-2 ring-purple-400/30'
+                  : 'bg-purple-50/70 hover:bg-purple-100 text-purple-800 border-purple-200'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Admin Approved Only</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  adminOnly
+                    ? 'bg-white/20 text-white'
+                    : 'bg-purple-200/80 text-purple-900'
+                }`}
+              >
+                {adminApprovedCount}
               </span>
             </button>
 

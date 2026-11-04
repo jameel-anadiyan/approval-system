@@ -62,9 +62,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
   const consultations = request.consultations || [];
   const pendingConsultations = consultations.filter((c) => c.status === 'pending');
   const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
-  const isConsultationBlocked =
-    request.request_type !== 'petty_cash' &&
-    (pendingConsultations.length > 0 || disagreedConsultations.length > 0);
+  const isConsultationBlocked = pendingConsultations.length > 0 || disagreedConsultations.length > 0;
 
   const [voice, setVoice] = useState<ActionVoice | null>(null);
   const rType = typeOf(request);

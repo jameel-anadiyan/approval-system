@@ -27,9 +27,7 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
   const consultations = request.consultations || [];
   const pendingConsultations = consultations.filter((c) => c.status === 'pending');
   const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
-  const isConsultationBlocked =
-    request.request_type !== 'petty_cash' &&
-    (pendingConsultations.length > 0 || disagreedConsultations.length > 0);
+  const isConsultationBlocked = pendingConsultations.length > 0 || disagreedConsultations.length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
