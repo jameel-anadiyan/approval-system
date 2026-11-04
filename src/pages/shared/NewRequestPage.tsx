@@ -33,13 +33,15 @@ import {
   toStockTransferDetails, validateStockTransfer, stockTransferCalc,
 } from '../../components/requests/StockTransferFields';
 import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2, Wallet, FileSignature, Landmark, ClipboardCheck } from 'lucide-react';
+import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2, Wallet, FileSignature, Landmark, ClipboardCheck, Eye, FileText, CheckCircle2, Users } from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
 import { useDirectory, fetchActiveEntryOfficers, fetchPettyCashDealers } from '../../lib/directory';
 import { RequestShopField, useRequestShops, useExhibitionShops, needsShopPick } from '../../components/requests/RequestShopField';
 import { DisbursementModeSelector } from '../../components/requests/DisbursementModeSelector';
+import { generateExhibitionFormPdf } from '../../lib/exhibitionFormPdf';
+import { DocumentPreviewModal, DocumentPreviewItem } from '../../components/requests/DocumentPreviewModal';
 
 const TYPE_ICONS: Record<RequestType, React.ReactNode> = {
   general: <Receipt className="w-5 h-5" />,
@@ -135,6 +137,48 @@ export const NewRequestPage: React.FC = () => {
   const [targetHeadId, setTargetHeadId] = useState('');
   const [pettyCashDealers, setPettyCashDealers] = useState<PettyCashDealer[]>([]);
   const [loadingPettyDealers, setLoadingPettyDealers] = useState(false);
+  // Department Head routing choice: Route to Admin (Default) vs Route to Other Department Head
+  const [headRoutingMode, setHeadRoutingMode] = useState<'admin' | 'other_head'>('admin');
+  const otherHeads = useMemo(() => {
+    return dir.users.filter((u) => u.role === 'head' && u.id !== user?.id && u.is_active);
+  }, [dir.users, user?.id]);
+
+  // Preview form state
+  const [previewPdfItem, setPreviewPdfItem] = useState<DocumentPreviewItem | null>(null);
+  const [generatingPreview, setGeneratingPreview] = useState(false);
+
+  const handlePreviewExhibitionForm = async () => {
+    setGeneratingPreview(true);
+    try {
+      const exhDetails = toExhibitionDetails(exhibition);
+      const { blob, fileName } = await generateExhibitionFormPdf({
+        request_no: 'DRAFT PREVIEW',
+        title: exhibition.event_name || 'Exhibition / Event Sponsorship',
+        requester_name: user?.full_name || 'Requester',
+        shop_name: exhibition.conducting_shop_name || shopName || 'Conducting Shop',
+        owner_head_name: user?.role === 'head' ? user.full_name : null,
+        assigned_entry_user_name: null,
+        disbursement_mode: disbursementMode,
+        amount: exhibitionCalc(exhibition).total,
+        notes: notes || exhibition.purpose || '',
+        details: exhDetails,
+        submitted_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      });
+      const url = URL.createObjectURL(blob);
+      setPreviewPdfItem({
+        id: 'exhibition-preview',
+        name: fileName,
+        publicUrl: url,
+        mimeType: 'application/pdf',
+      });
+    } catch (err) {
+      console.error('Failed to generate preview PDF:', err);
+    } finally {
+      setGeneratingPreview(false);
+    }
+  };
+
   const categoryOptions = useCategoryOptions(type === 'exhibition' || type === 'petty_cash' ? null : targetHeadId || null);
   const [categoryId, setCategoryId] = useState('');
   const shopState = useRequestShops();
@@ -381,6 +425,12 @@ export const NewRequestPage: React.FC = () => {
       }
       return null;
     }
+    if (!forDraft && user?.role === 'head' && !isPettyCash && headRoutingMode === 'other_head') {
+      if (!targetHeadId) return 'Please select the target Department Head.';
+      if (categoryOptions.categories.length > 1 && !categoryId) {
+        return 'Please select the work category for this department.';
+      }
+    }
     if (!forDraft && user?.role !== 'head' && user?.role !== 'clerk' && categoryOptions.required && !categoryId) return 'Select the work category for this request.';
     if (!forDraft && needsEntryAccount && isPaymentNeeded && !assignedEntryUserId) {
       return 'Please select a Disbursement Entry Account before submitting.';
@@ -469,8 +519,20 @@ export const NewRequestPage: React.FC = () => {
         notes: notes.trim() || undefined,
         details: details(),
         files: allFiles,
-        category_id: type !== 'petty_cash' && user?.role !== 'head' && categoryOptions.required ? categoryId || null : null,
-        target_head_id: type === 'exhibition' ? null : (targetHeadId || null),
+        category_id:
+          user?.role === 'head'
+            ? (headRoutingMode === 'other_head' ? categoryId || null : null)
+            : type !== 'petty_cash' && categoryOptions.required
+            ? categoryId || null
+            : null,
+        target_head_id:
+          isPettyCash
+            ? (user?.role === 'head' ? null : targetHeadId || null)
+            : user?.role === 'head'
+            ? (headRoutingMode === 'other_head' ? targetHeadId || null : null)
+            : type === 'exhibition'
+            ? null
+            : (targetHeadId || null),
         assigned_entry_user_id: needsEntryAccount && isPaymentNeeded ? assignedEntryUserId || null : null,
         disbursement_mode: isPaymentNeeded ? disbursementMode : null,
         enter_bank_details_later: isPaymentNeeded && disbursementMode === 'bank' ? enterBankDetailsLater : false,
@@ -723,6 +785,135 @@ export const NewRequestPage: React.FC = () => {
                 <span>Department Head Petty Cash request: Goes directly to <strong>Admin</strong> for approval.</span>
               </div>
             )
+          ) : user?.role === 'head' ? (
+            /* Department Head Routing Target: Admin (Default) vs Other Department Head */
+            <div className="bg-purple-50/70 border border-purple-200/90 rounded-2xl p-4 sm:p-5 space-y-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-purple-600" />
+                  <span className="text-xs font-bold text-purple-950 uppercase tracking-wide">
+                    Approval Routing Target <span className="text-rose-500">*</span>
+                  </span>
+                </div>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                  Head Routing Option
+                </span>
+              </div>
+
+              {/* Segmented Button: Route to Admin (Default) vs Route to Other Department Head */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeadRoutingMode('admin');
+                    setTargetHeadId('');
+                    setCategoryId('');
+                  }}
+                  className={`p-3 rounded-xl border text-left flex items-start gap-2.5 transition-all cursor-pointer ${
+                    headRoutingMode === 'admin'
+                      ? 'bg-white border-purple-600 ring-2 ring-purple-500/20 shadow-xs'
+                      : 'bg-white/60 border-purple-200 hover:bg-white text-slate-600'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                    headRoutingMode === 'admin' ? 'border-purple-600 bg-purple-600 text-white' : 'border-slate-300'
+                  }`}>
+                    {headRoutingMode === 'admin' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">👑 Route to Admin (Default)</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Bypasses clerk and goes directly to Administrator for approval & digital sealing.
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeadRoutingMode('other_head');
+                    if (otherHeads.length > 0 && !targetHeadId) {
+                      setTargetHeadId(otherHeads[0].id);
+                    }
+                  }}
+                  className={`p-3 rounded-xl border text-left flex items-start gap-2.5 transition-all cursor-pointer ${
+                    headRoutingMode === 'other_head'
+                      ? 'bg-white border-purple-600 ring-2 ring-purple-500/20 shadow-xs'
+                      : 'bg-white/60 border-purple-200 hover:bg-white text-slate-600'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                    headRoutingMode === 'other_head' ? 'border-purple-600 bg-purple-600 text-white' : 'border-slate-300'
+                  }`}>
+                    {headRoutingMode === 'other_head' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">👥 Route to Other Department Head</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Routes to that department's appointed clerk first (if present), then to that Head.
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* When Other Head is chosen: Select Target Head and Work Category */}
+              {headRoutingMode === 'other_head' && (
+                <div className="space-y-3 pt-2 border-t border-purple-200/80">
+                  <div>
+                    <label htmlFor="other-target-head-select" className="block text-xs font-bold text-purple-950 mb-1">
+                      Select Other Department Head <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      id="other-target-head-select"
+                      value={targetHeadId}
+                      onChange={(e) => {
+                        setTargetHeadId(e.target.value);
+                        setCategoryId('');
+                      }}
+                      className="w-full text-xs sm:text-sm font-semibold p-3 rounded-xl border border-purple-300 bg-white text-slate-900 focus:border-purple-600 focus:ring-1 focus:ring-purple-600 outline-hidden"
+                    >
+                      <option value="">-- Select Target Department Head --</option>
+                      {otherHeads.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.full_name} ({h.department?.name || 'Department'}){h.designation ? ` – ${h.designation}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {targetHeadId && categoryOptions.categories.length > 0 && (
+                    <WorkCategoryField
+                      options={categoryOptions}
+                      value={categoryId}
+                      onChange={setCategoryId}
+                    />
+                  )}
+
+                  {targetHeadId && (
+                    <div className="p-3 bg-white rounded-xl border border-purple-200 text-xs text-purple-900 space-y-1">
+                      <span className="font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />
+                        Routing Preview:
+                      </span>
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        {(() => {
+                          const targetHead = otherHeads.find((h) => h.id === targetHeadId);
+                          const selectedCat = categoryOptions.categories.find((c: any) => c.id === categoryId);
+                          if (selectedCat && (selectedCat as any).clerk_name) {
+                            return `This request will go to appointed clerk ${(selectedCat as any).clerk_name} for work category "${selectedCat.name}". The clerk will verify and forward it to ${targetHead?.full_name || 'the Department Head'}.`;
+                          }
+                          const firstClerkCat = categoryOptions.categories.find((c: any) => Boolean((c as any).clerk_name));
+                          if (firstClerkCat) {
+                            return `This request will go to the appointed clerk (${(firstClerkCat as any).clerk_name}) for ${targetHead?.full_name || 'the Department Head'}.`;
+                          }
+                          return `No clerk is appointed for this department/category. The request will route directly to ${targetHead?.full_name || 'the Department Head'} for approval.`;
+                        })()}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           ) : type !== 'exhibition' ? (
             <TargetHeadField
               value={targetHeadId}
@@ -995,14 +1186,38 @@ export const NewRequestPage: React.FC = () => {
 
           {type === 'discount' && <DiscountFields value={discount} onChange={setDiscount} />}
           {type === 'exhibition' && (
-            <ExhibitionFields
-              value={exhibition}
-              onChange={setExhibition}
-              quotaStatus={exhibitionQuota}
-              shopOptions={exhibitionShopState.options}
-              shopsLoading={exhibitionShopState.loading}
-              disabled={isSubmitting || isSavingDraft}
-            />
+            <>
+              <ExhibitionFields
+                value={exhibition}
+                onChange={setExhibition}
+                quotaStatus={exhibitionQuota}
+                shopOptions={exhibitionShopState.options}
+                shopsLoading={exhibitionShopState.loading}
+                disabled={isSubmitting || isSavingDraft}
+              />
+              <div className="flex items-center justify-between gap-3 p-3.5 bg-indigo-50/70 border border-indigo-200/90 rounded-2xl shadow-2xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-indigo-950 font-display">Official Form Preview</h4>
+                    <p className="text-[11px] text-slate-500">Preview the pre-sealing exhibition approval document.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="preview-exhibition-form-btn"
+                  onClick={handlePreviewExhibitionForm}
+                  disabled={generatingPreview || !exhibition.event_name.trim()}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-indigo-100/70 text-indigo-700 border border-indigo-300 font-bold text-xs shadow-2xs transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+                  title="Preview the filled official form before submitting"
+                >
+                  {generatingPreview ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                  <span>Preview Form</span>
+                </button>
+              </div>
+            </>
           )}
           {isAsset && <AssetFields value={asset} onChange={setAsset} />}
 
@@ -1162,6 +1377,17 @@ export const NewRequestPage: React.FC = () => {
           </div>
         </div>
       </form>
+
+      {/* Official Form Pre-Sealing Preview Modal */}
+      {previewPdfItem && (
+        <DocumentPreviewModal
+          isOpen={true}
+          onClose={() => setPreviewPdfItem(null)}
+          files={[previewPdfItem]}
+          initialIndex={0}
+          title={`Pre-Sealing Preview · ${previewPdfItem.name}`}
+        />
+      )}
     </div>
   );
 };

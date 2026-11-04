@@ -21,6 +21,7 @@ import {
   ArrowRight,
   FileWarning,
   Wallet,
+  ShieldCheck,
 } from 'lucide-react';
 
 export const HeadDashboardPage: React.FC = () => {
@@ -66,6 +67,13 @@ export const HeadDashboardPage: React.FC = () => {
   // Queue 2: To Review (Route A requests waiting for Head review)
   const toReviewQueue = requests.filter(
     (r) => r.status === 'pending_head_review' && isOwningDepartmentHead(r, user)
+  );
+
+  // Queue: Route A requests reviewed and forwarded to Admin, waiting for Admin approval
+  const pendingAdminQueue = requests.filter(
+    (r) =>
+      r.status === 'pending_admin_approval' &&
+      (isOwningDepartmentHead(r, user) || r.department_id === user?.department_id)
   );
 
   // Queue 3: Bill Missing strictly associated with this Head
@@ -147,6 +155,20 @@ export const HeadDashboardPage: React.FC = () => {
           <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold">
             {toReviewQueue.length}
           </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/head/review?tab=admin')}
+          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
+          <span>Pending Admin Approval</span>
+          {pendingAdminQueue.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
+              {pendingAdminQueue.length}
+            </span>
+          )}
         </button>
 
         {isPettyCashDealer && (

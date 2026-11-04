@@ -35,3 +35,4 @@ alter table public.disbursement_entries
   check (entry_type in ('cash', 'bank', 'old_balance'));
 
 notify pgrst, 'reload schema';
+

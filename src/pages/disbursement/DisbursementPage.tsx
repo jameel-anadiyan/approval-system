@@ -123,7 +123,10 @@ export const DisbursementPage: React.FC = () => {
   };
 
   // Non-disbursement requests (Discount, Non-Cash, Agreement, Audit Report, Stock Transfer) have no payment step.
-  const payable = requests.filter((r) => isDisbursementAssociated(typeOf(r)));
+  // Cancelled approvals are completely removed from all disbursement queues.
+  const payable = requests.filter(
+    (r) => isDisbursementAssociated(typeOf(r)) && r.status !== 'cancelled'
+  );
 
   // Entry Only user only receives requests assigned to them (or unassigned requests)
   const entryFilteredPayable = isEntryOnly
@@ -133,20 +136,30 @@ export const DisbursementPage: React.FC = () => {
   // Approved in scope
   const approvedInScope = entryFilteredPayable.filter((r) => r.status === 'approved');
 
-  // New Entry Wait: ONLY requests where a new entry is needed to proceed (entryAvailable > 0).
-  // Requests waiting for payment are NOT in this.
-  const newEntryWaitQueue = isPaymentOnly ? [] : approvedInScope.filter((r) => entryAvailable(r) > 0);
+  // Under Clarification: approved but waiting for Head's response
+  const underClarificationQueue = approvedInScope.filter((r) =>
+    (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
+  );
+
+  // New Entry Wait: ONLY requests where a new entry is needed to proceed (entryAvailable > 0)
+  // AND NOT currently waiting for Head clarification (those show strictly in the Clarification tab until resolved).
+  const newEntryWaitQueue = isPaymentOnly
+    ? []
+    : approvedInScope.filter(
+        (r) =>
+          entryAvailable(r) > 0 &&
+          !(r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
+      );
 
   // Awaiting Payment: approved requests where all entries have been created (entryAvailable <= 0) and are waiting for cashier payout.
   // For Payment-Only Cashiers: ONLY show requests that have at least one verified (approved) entry ready to be paid by THIS cashier!
   const awaitingPaymentQueue = isPaymentOnly
     ? payable.filter((r) => canPaymentUserViewAwaitingRequest(user, r, dir.users))
-    : approvedInScope.filter((r) => entryAvailable(r) <= 0);
-
-  // Under Clarification: approved but waiting for Head's response
-  const underClarificationQueue = approvedInScope.filter((r) =>
-    (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
-  );
+    : approvedInScope.filter(
+        (r) =>
+          entryAvailable(r) <= 0 &&
+          !(r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
+      );
 
   // Bill Missing Queue: requests where original bill is marked missing
   const billMissingQueue = payable.filter((r) => canUserViewBillMissingRequest(r, user));

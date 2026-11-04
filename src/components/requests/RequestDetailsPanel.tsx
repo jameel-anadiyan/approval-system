@@ -1,7 +1,8 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
 import { formatINR, formatISTDate, getExhibitionShopName, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
-import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store, Wallet, UserCheck, Building2, ShieldCheck } from 'lucide-react';
+import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store, Wallet, UserCheck, Building2, ShieldCheck, Clock, Sparkles } from 'lucide-react';
+import type { ExhibitionDaySchedule } from '../../types/database';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -445,11 +446,98 @@ export const RequestDetailsPanel: React.FC<{
     const provides = (d.provides || []).map((p) => (p === 'other' && d.provides_other ? `Other: ${d.provides_other}` : PROVIDE_LABELS[p] || p));
     const exhShopName = getExhibitionShopName(request);
     const isNotAssigned = exhShopName === 'Not Assigned';
+    const schedules: ExhibitionDaySchedule[] = Array.isArray(d.daily_schedules) ? (d.daily_schedules as ExhibitionDaySchedule[]) : [];
+    const totalDays = schedules.length > 0 ? schedules.length : Number(d.total_days || 1);
+    const totalHours = schedules.reduce((s, row) => s + (Number(row.hours) || 0), 0) || Number(d.total_hours || 0);
+
     return (
       <div className="bg-white rounded-2xl border border-brand-200 p-5 sm:p-6 shadow-xs divide-y divide-slate-100">
         <h3 className="text-sm font-bold text-slate-900 font-display pb-3 flex items-center gap-2">
           <CalendarDays className="w-4 h-4 text-brand-600" /> Exhibition / event sponsorship
         </h3>
+
+        {/* Prominently Highlighted Event Schedule Section */}
+        <div className="pt-4 first:pt-0">
+          <div className="rounded-2xl border-2 border-indigo-200 bg-linear-to-br from-indigo-50/90 via-white to-indigo-50/50 p-4 sm:p-5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-extrabold text-indigo-950 font-display">
+                    Event Schedule & Daily Timing
+                  </h4>
+                  <p className="text-[11px] text-indigo-700 font-medium">
+                    {d.event_dates || 'Event Duration Breakdown'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-extrabold shadow-xs flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span>{totalDays} Day{totalDays === 1 ? '' : 's'}</span>
+                  <span>•</span>
+                  <span>{totalHours.toFixed(1)} Hours Total</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Day-by-Day Table / Grid */}
+            {schedules.length > 0 ? (
+              <div className="overflow-x-auto rounded-xl border border-indigo-100 bg-white shadow-2xs">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-indigo-900 text-white font-bold text-[10px] uppercase tracking-wider">
+                      <th className="py-2 px-3">Day</th>
+                      <th className="py-2 px-3">Date</th>
+                      <th className="py-2 px-3">From Time</th>
+                      <th className="py-2 px-3">To Time</th>
+                      <th className="py-2 px-3 text-right">Hours</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {schedules.map((row, idx) => (
+                      <tr key={row.date || idx} className={idx % 2 === 1 ? 'bg-indigo-50/30' : 'bg-white'}>
+                        <td className="py-2.5 px-3 font-extrabold text-indigo-700">
+                          Day {row.day_number || idx + 1}
+                        </td>
+                        <td className="py-2.5 px-3 font-medium text-slate-800">
+                          {row.day_name ? `${row.day_name} (${row.date})` : row.date}
+                        </td>
+                        <td className="py-2.5 px-3 font-semibold text-slate-700">
+                          {row.from_time}
+                        </td>
+                        <td className="py-2.5 px-3 font-semibold text-slate-700">
+                          {row.to_time}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <span className="inline-block px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-900 font-extrabold text-[11px]">
+                            {Number(row.hours || 0).toFixed(1)} hrs
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-indigo-50/80 border-t border-indigo-200 font-extrabold text-indigo-950 text-xs">
+                      <td colSpan={4} className="py-2 px-3">Total Duration across {totalDays} Day(s)</td>
+                      <td className="py-2 px-3 text-right text-indigo-900 font-display font-extrabold">
+                        {totalHours.toFixed(1)} hrs
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            ) : (
+              <div className="p-3 bg-white rounded-xl border border-indigo-100 text-xs text-indigo-900 flex items-center justify-between">
+                <span>Window: <strong>{d.event_dates || '-'}</strong></span>
+                {totalHours > 0 && <span>Duration: <strong>{totalHours.toFixed(1)} hrs</strong></span>}
+              </div>
+            )}
+          </div>
+        </div>
+
         <Section title="Event details">
           <div className="col-span-2 flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
             <div className="min-w-0">

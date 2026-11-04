@@ -2,9 +2,9 @@
 // New Request page and the Edit Draft modal. Values are kept as strings while
 // typing and converted to RequestDetails with toDiscountDetails / toExhibitionDetails.
 import React from 'react';
-import { RequestDetails, ExhibitionProvide, RequestShopChoice, RequestShopOption } from '../../types/database';
+import { RequestDetails, ExhibitionProvide, ExhibitionDaySchedule, RequestShopChoice, RequestShopOption } from '../../types/database';
 import { formatINR, PROVIDE_LABELS } from '../../lib/formatters';
-import { Percent, CalendarDays, Megaphone, Target, IndianRupee, CheckCircle2, AlertTriangle, FileCheck, Store, Building2, ShieldCheck } from 'lucide-react';
+import { Percent, CalendarDays, Megaphone, Target, IndianRupee, CheckCircle2, AlertTriangle, FileCheck, Store, Building2, ShieldCheck, Clock, Copy, Sparkles } from 'lucide-react';
 import { GstSelector } from './GstSelector';
 import type { ExhibitionQuotaStatus } from '../../lib/exhibitionQuota';
 
@@ -160,6 +160,9 @@ export interface ExhibitionForm {
   event_dates: string;
   event_start: string;
   event_end: string;
+  daily_schedules: ExhibitionDaySchedule[];
+  total_days: number;
+  total_hours: number;
   expected_footfall: string;
   stall_size_location: string;
   amount_excl_gst: string;
@@ -183,9 +186,76 @@ export interface ExhibitionForm {
   is_waitlist?: boolean;
 }
 
+export function calculateScheduleHours(fromTime?: string, toTime?: string): number {
+  if (!fromTime || !toTime) return 0;
+  const [fH, fM] = fromTime.split(':').map((v) => parseInt(v, 10));
+  const [tH, tM] = toTime.split(':').map((v) => parseInt(v, 10));
+  if (isNaN(fH) || isNaN(fM) || isNaN(tH) || isNaN(tM)) return 0;
+  let diffMin = tH * 60 + tM - (fH * 60 + fM);
+  if (diffMin < 0) {
+    diffMin += 24 * 60; // support timings extending past midnight
+  }
+  const hrs = Math.round((diffMin / 60) * 100) / 100;
+  return Math.max(0, hrs);
+}
+
+export function generateDailySchedules(
+  startDateStr?: string | null,
+  endDateStr?: string | null,
+  existingSchedules?: ExhibitionDaySchedule[]
+): ExhibitionDaySchedule[] {
+  if (!startDateStr) return [];
+  const startDay = startDateStr.slice(0, 10);
+  const endDay = (endDateStr || startDateStr).slice(0, 10);
+  if (endDay < startDay) return [];
+
+  const existingMap = new Map<string, ExhibitionDaySchedule>();
+  if (Array.isArray(existingSchedules)) {
+    for (const s of existingSchedules) {
+      if (s && s.date) existingMap.set(s.date, s);
+    }
+  }
+
+  const defaultFrom = existingSchedules?.[0]?.from_time || '09:00';
+  const defaultTo = existingSchedules?.[0]?.to_time || '18:00';
+
+  const result: ExhibitionDaySchedule[] = [];
+  const cur = new Date(`${startDay}T00:00:00`);
+  const end = new Date(`${endDay}T00:00:00`);
+  let dayNum = 1;
+
+  while (cur <= end && dayNum <= 60) {
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, '0');
+    const d = String(cur.getDate()).padStart(2, '0');
+    const dateKey = `${y}-${m}-${d}`;
+    const dayName = cur.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+
+    const existing = existingMap.get(dateKey);
+    const from_time = existing?.from_time || defaultFrom;
+    const to_time = existing?.to_time || defaultTo;
+    const hours = calculateScheduleHours(from_time, to_time);
+
+    result.push({
+      date: dateKey,
+      day_number: dayNum,
+      day_name: dayName,
+      from_time,
+      to_time,
+      hours,
+    });
+
+    cur.setDate(cur.getDate() + 1);
+    dayNum += 1;
+  }
+
+  return result;
+}
+
 export const emptyExhibition: ExhibitionForm = {
   conducting_shop_id: '', conducting_shop_name: '',
   event_name: '', organiser_contact: '', venue: '', event_dates: '', event_start: '', event_end: '',
+  daily_schedules: [], total_days: 0, total_hours: 0,
   expected_footfall: '', stall_size_location: '',
   amount_excl_gst: '', payment_mode_due: '', organiser_gstin: '',
   gst_invoice: true,
@@ -195,25 +265,41 @@ export const emptyExhibition: ExhibitionForm = {
   is_waitlist: false,
 };
 
-export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm => ({
-  ...emptyExhibition,
-  conducting_shop_id: str(d?.conducting_shop_id),
-  conducting_shop_name: str(d?.conducting_shop_name),
-  event_name: str(d?.event_name), organiser_contact: str(d?.organiser_contact), venue: str(d?.venue),
-  event_dates: str(d?.event_dates), event_start: str(d?.event_start), event_end: str(d?.event_end),
-  expected_footfall: str(d?.expected_footfall),
-  stall_size_location: str(d?.stall_size_location), amount_excl_gst: str(d?.amount_excl_gst),
-  payment_mode_due: str(d?.payment_mode_due), organiser_gstin: str(d?.organiser_gstin),
-  gst_invoice: d?.gst_invoice === undefined || d?.gst_invoice === null ? true : !!d.gst_invoice,
-  gst_rate: d?.gst_pct !== undefined && d?.gst_pct !== null ? String(d.gst_pct) : '18',
-  provides: (d?.provides ?? []) as ExhibitionProvide[],
-  provides_other: str(d?.provides_other), voucher_1000_qty: str(d?.voucher_1000_qty || ''),
-  voucher_500_qty: str(d?.voucher_500_qty || ''), voucher_1000_min: str(d?.voucher_1000_min),
-  voucher_500_min: str(d?.voucher_500_min), voucher_validity: str(d?.voucher_validity),
-  lucky_draw: str(d?.lucky_draw), winners_draw: str(d?.winners_draw), other_costs: str(d?.other_costs || ''),
-  total_budget: str(d?.total_budget), purpose: str(d?.purpose),
-  is_waitlist: !!d?.is_waitlist,
-});
+export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm => {
+  const rawStart = str(d?.event_start);
+  const rawEnd = str(d?.event_end);
+  const rawSchedules = Array.isArray(d?.daily_schedules) ? (d?.daily_schedules as ExhibitionDaySchedule[]) : [];
+  const daily = rawSchedules.length > 0
+    ? rawSchedules
+    : generateDailySchedules(rawStart, rawEnd);
+  const totalDays = Number(d?.total_days) || daily.length;
+  const totalHours = Number(d?.total_hours) || daily.reduce((s, row) => s + (Number(row.hours) || 0), 0);
+
+  return {
+    ...emptyExhibition,
+    conducting_shop_id: str(d?.conducting_shop_id),
+    conducting_shop_name: str(d?.conducting_shop_name),
+    event_name: str(d?.event_name), organiser_contact: str(d?.organiser_contact), venue: str(d?.venue),
+    event_dates: str(d?.event_dates),
+    event_start: rawStart,
+    event_end: rawEnd,
+    daily_schedules: daily,
+    total_days: totalDays,
+    total_hours: totalHours,
+    expected_footfall: str(d?.expected_footfall),
+    stall_size_location: str(d?.stall_size_location), amount_excl_gst: str(d?.amount_excl_gst),
+    payment_mode_due: str(d?.payment_mode_due), organiser_gstin: str(d?.organiser_gstin),
+    gst_invoice: d?.gst_invoice === undefined || d?.gst_invoice === null ? true : !!d.gst_invoice,
+    gst_rate: d?.gst_pct !== undefined && d?.gst_pct !== null ? String(d.gst_pct) : '18',
+    provides: (d?.provides ?? []) as ExhibitionProvide[],
+    provides_other: str(d?.provides_other), voucher_1000_qty: str(d?.voucher_1000_qty || ''),
+    voucher_500_qty: str(d?.voucher_500_qty || ''), voucher_1000_min: str(d?.voucher_1000_min),
+    voucher_500_min: str(d?.voucher_500_min), voucher_validity: str(d?.voucher_validity),
+    lucky_draw: str(d?.lucky_draw), winners_draw: str(d?.winners_draw), other_costs: str(d?.other_costs || ''),
+    total_budget: str(d?.total_budget), purpose: str(d?.purpose),
+    is_waitlist: !!d?.is_waitlist,
+  };
+};
 
 export function exhibitionCalc(f: ExhibitionForm) {
   const excl = num(f.amount_excl_gst);
@@ -238,6 +324,17 @@ export function validateExhibition(
   if (!f.event_start) return 'Pick the event start date & time.';
   if (!f.event_end) return 'Pick the event end date & time.';
   if (f.event_end < f.event_start) return 'Event end must be after the start.';
+  if (f.daily_schedules.length > 0) {
+    for (let i = 0; i < f.daily_schedules.length; i++) {
+      const row = f.daily_schedules[i];
+      if (!row.from_time || !row.to_time) {
+        return `Please set the From Time and To Time for Day ${row.day_number || i + 1} (${row.date}).`;
+      }
+      if (row.hours <= 0) {
+        return `Day ${row.day_number || i + 1} (${row.date}) has zero duration. Check the from and to times.`;
+      }
+    }
+  }
   if (num(f.amount_excl_gst) <= 0) return 'Sponsorship amount (excl. GST) must be more than zero.';
   if (f.gst_invoice === null) return 'Select whether a GST invoice is provided (Yes / No).';
   if (!f.purpose.trim()) return 'Purpose / expected result is required.';
@@ -249,6 +346,9 @@ export const toExhibitionDetails = (f: ExhibitionForm): RequestDetails => {
   const opt = (s: string) => (s.trim() ? num(s) : null);
   const shopId = f.conducting_shop_id.trim() || null;
   const shopName = f.conducting_shop_name.trim() || null;
+  const totalDays = f.daily_schedules.length > 0 ? f.daily_schedules.length : (f.total_days || 1);
+  const totalHours = f.daily_schedules.reduce((s, row) => s + (Number(row.hours) || 0), 0) || f.total_hours;
+
   return {
     conducting_shop_id: shopId,
     conducting_shop_name: shopName,
@@ -257,6 +357,9 @@ export const toExhibitionDetails = (f: ExhibitionForm): RequestDetails => {
     event_name: f.event_name.trim(), organiser_contact: f.organiser_contact.trim() || null, venue: f.venue.trim(),
     event_dates: f.event_start ? formatEventWindow(f.event_start, f.event_end) : f.event_dates.trim(),
     event_start: f.event_start || null, event_end: f.event_end || null,
+    daily_schedules: f.daily_schedules,
+    total_days: totalDays,
+    total_hours: totalHours,
     expected_footfall: f.expected_footfall.trim() || null,
     stall_size_location: f.stall_size_location.trim() || null,
     amount_excl_gst: c.excl,
@@ -387,9 +490,18 @@ export const ExhibitionFields: React.FC<{
               value={value.event_start}
               onChange={(e) => {
                 const start = e.target.value;
-                // keep end valid: default / bump it to the start when empty or earlier
                 const end = !value.event_end || value.event_end < start ? start : value.event_end;
-                onChange({ ...value, event_start: start, event_end: end });
+                const schedules = generateDailySchedules(start, end, value.daily_schedules);
+                const totalDays = schedules.length;
+                const totalHours = schedules.reduce((s, row) => s + (Number(row.hours) || 0), 0);
+                onChange({
+                  ...value,
+                  event_start: start,
+                  event_end: end,
+                  daily_schedules: schedules,
+                  total_days: totalDays,
+                  total_hours: totalHours,
+                });
               }}
               className={inputCls}
             />
@@ -403,7 +515,19 @@ export const ExhibitionFields: React.FC<{
               type="datetime-local"
               value={value.event_end}
               min={value.event_start || undefined}
-              onChange={set('event_end')}
+              onChange={(e) => {
+                const end = e.target.value;
+                const schedules = generateDailySchedules(value.event_start, end, value.daily_schedules);
+                const totalDays = schedules.length;
+                const totalHours = schedules.reduce((s, row) => s + (Number(row.hours) || 0), 0);
+                onChange({
+                  ...value,
+                  event_end: end,
+                  daily_schedules: schedules,
+                  total_days: totalDays,
+                  total_hours: totalHours,
+                });
+              }}
               className={inputCls}
             />
           </div>
@@ -416,6 +540,133 @@ export const ExhibitionFields: React.FC<{
               Previously entered: “{value.event_dates}”. Please pick the dates above.
             </span>
           ) : null}
+
+          {/* Daily Schedule & Timings (Dynamic calculation for each day) */}
+          {value.daily_schedules && value.daily_schedules.length > 0 && (
+            <div className="sm:col-span-2 rounded-2xl border border-indigo-200/90 bg-indigo-50/40 p-3.5 sm:p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-indigo-600" />
+                  <span className="text-xs font-bold text-indigo-950 uppercase tracking-wide">
+                    Daily Schedule & Hours ({value.daily_schedules.length} Day{value.daily_schedules.length === 1 ? '' : 's'})
+                  </span>
+                </div>
+                {value.daily_schedules.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const day1 = value.daily_schedules[0];
+                      if (!day1) return;
+                      const updated = value.daily_schedules.map((row) => ({
+                        ...row,
+                        from_time: day1.from_time,
+                        to_time: day1.to_time,
+                        hours: calculateScheduleHours(day1.from_time, day1.to_time),
+                      }));
+                      const totalHours = updated.reduce((s, row) => s + (Number(row.hours) || 0), 0);
+                      onChange({
+                        ...value,
+                        daily_schedules: updated,
+                        total_hours: totalHours,
+                      });
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-white hover:bg-indigo-100/80 border border-indigo-300 rounded-lg px-2.5 py-1 transition-colors cursor-pointer"
+                    title="Copy Day 1 timings to all other days"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Apply Day 1 Timing to All Days</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {value.daily_schedules.map((day, idx) => (
+                  <div
+                    key={day.date || idx}
+                    className="bg-white rounded-xl border border-slate-200/90 p-2.5 sm:p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs"
+                  >
+                    <div className="min-w-0 sm:w-1/3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-extrabold flex items-center justify-center shrink-0">
+                          {day.day_number || idx + 1}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800">
+                          {day.day_name || day.date}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 block ml-6.5">
+                        {day.date}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 sm:gap-3 flex-1 flex-wrap sm:flex-nowrap">
+                      <div className="flex-1 min-w-[110px]">
+                        <label className="text-[10px] font-bold text-slate-500 block mb-0.5">From Time</label>
+                        <input
+                          type="time"
+                          value={day.from_time}
+                          onChange={(e) => {
+                            const newFrom = e.target.value;
+                            const updated = value.daily_schedules.map((row, i) => {
+                              if (i !== idx) return row;
+                              const hrs = calculateScheduleHours(newFrom, row.to_time);
+                              return { ...row, from_time: newFrom, hours: hrs };
+                            });
+                            const totalHours = updated.reduce((s, row) => s + (Number(row.hours) || 0), 0);
+                            onChange({
+                              ...value,
+                              daily_schedules: updated,
+                              total_hours: totalHours,
+                            });
+                          }}
+                          disabled={disabled}
+                          className="w-full text-xs font-semibold px-2 py-1.5 rounded-lg border border-slate-200 focus:border-indigo-500 outline-hidden bg-slate-50"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-[110px]">
+                        <label className="text-[10px] font-bold text-slate-500 block mb-0.5">To Time</label>
+                        <input
+                          type="time"
+                          value={day.to_time}
+                          onChange={(e) => {
+                            const newTo = e.target.value;
+                            const updated = value.daily_schedules.map((row, i) => {
+                              if (i !== idx) return row;
+                              const hrs = calculateScheduleHours(row.from_time, newTo);
+                              return { ...row, to_time: newTo, hours: hrs };
+                            });
+                            const totalHours = updated.reduce((s, row) => s + (Number(row.hours) || 0), 0);
+                            onChange({
+                              ...value,
+                              daily_schedules: updated,
+                              total_hours: totalHours,
+                            });
+                          }}
+                          disabled={disabled}
+                          className="w-full text-xs font-semibold px-2 py-1.5 rounded-lg border border-slate-200 focus:border-indigo-500 outline-hidden bg-slate-50"
+                        />
+                      </div>
+                      <div className="sm:w-28 shrink-0 text-right sm:text-center pt-2 sm:pt-0">
+                        <span className="inline-block px-2.5 py-1 rounded-md bg-indigo-100 text-indigo-900 font-extrabold text-[11px]">
+                          {day.hours.toFixed(1)} hrs
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-indigo-950 text-white text-xs font-bold shadow-xs">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Total Event Duration:</span>
+                </span>
+                <span className="text-amber-300 font-extrabold text-sm font-display">
+                  {value.total_days} Day(s) · {value.total_hours.toFixed(1)} Hours Total
+                </span>
+              </div>
+            </div>
+          )}
 
           {quotaStatus && quotaStatus.eventDate && (
             <div className="sm:col-span-2">

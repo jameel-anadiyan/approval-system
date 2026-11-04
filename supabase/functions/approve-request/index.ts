@@ -86,11 +86,23 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
     };
   }
   if (r.request_type === "exhibition") {
+    // Skip duplicate server form if client already synced Exhibition_Event_Approval_Form.pdf into files
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("exhibition_event_approval_form")
+    );
+    if (alreadyUploaded) return null;
+
     const provides = (Array.isArray(d.provides) ? d.provides : []).map((p: string) => PROVIDES[p] ?? p);
     if (d.provides_other) provides.push(`Other: ${d.provides_other}`);
     const exhShop = typeof d.conducting_shop_name === "string" && d.conducting_shop_name.trim()
       ? d.conducting_shop_name.trim()
       : "Not Assigned";
+    const schedules = Array.isArray(d.daily_schedules) ? d.daily_schedules : [];
+    const scheduleSummary = schedules.length > 0
+      ? `${schedules.length} Day(s) (${Number(d.total_hours || 0).toFixed(1)} hrs total) · ${schedules.map((s: any) => `Day ${s.day_number || ''} [${s.date}]: ${s.from_time}-${s.to_time} (${s.hours}h)`).join(', ')}`
+      : txt(d.event_dates);
+
     return {
       subtitle: "EVENT SPONSORSHIP & PROMOTION APPROVAL FORM",
       sections: [
@@ -102,6 +114,7 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
           ["Conducting Shop", exhShop],
           ["Event Name", txt(d.event_name)], ["Organiser & Contact", txt(d.organiser_contact)],
           ["Venue", txt(d.venue)], ["Event Date(s) & Time", txt(d.event_dates)],
+          ["Daily Schedule & Hours", scheduleSummary],
           ["Expected Footfall", txt(d.expected_footfall)], ["Stall Size & Location", txt(d.stall_size_location)],
         ] },
         { title: "2  Sponsorship amount", rows: [

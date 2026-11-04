@@ -116,6 +116,44 @@ export const DiscountReportPage: React.FC = () => {
 
   // option lists come from the date-window rows so they're always relevant
   const shops = useMemo(() => groupBy(rows, (r) => r.shop_id ?? 'none', (r) => r.shop_name).sort((a, b) => a.name.localeCompare(b.name)), [rows]);
+
+  // Total discount requests against each shop breakdown across the selected window
+  const shopBreakdown = useMemo(() => {
+    const m = new Map<string, {
+      shopId: string;
+      shopName: string;
+      totalRequests: number;
+      approvedRequests: number;
+      pendingRequests: number;
+      rejectedRequests: number;
+      totalDiscount: number;
+      totalBilled: number;
+      maxPct: number;
+    }>();
+    for (const r of rows) {
+      const k = r.shop_id ?? 'none';
+      const existing = m.get(k) ?? {
+        shopId: k,
+        shopName: r.shop_name || 'Not Assigned',
+        totalRequests: 0,
+        approvedRequests: 0,
+        pendingRequests: 0,
+        rejectedRequests: 0,
+        totalDiscount: 0,
+        totalBilled: 0,
+        maxPct: 0,
+      };
+      existing.totalRequests += 1;
+      if (r.status === 'approved' || r.status === 'paid') existing.approvedRequests += 1;
+      else if (['rejected', 'withdrawn', 'cancelled'].includes(r.status)) existing.rejectedRequests += 1;
+      else existing.pendingRequests += 1;
+      existing.totalDiscount += r.discount_amount;
+      existing.totalBilled += r.before_amount;
+      existing.maxPct = Math.max(existing.maxPct, r.discount_pct);
+      m.set(k, existing);
+    }
+    return [...m.values()].sort((a, b) => b.totalRequests - a.totalRequests);
+  }, [rows]);
   const depts = useMemo(
     () => groupBy(rows, (r) => r.department_id ?? 'none', (r) => r.department_name ?? '—').sort((a, b) => a.name.localeCompare(b.name)),
     [rows]
@@ -387,6 +425,77 @@ export const DiscountReportPage: React.FC = () => {
             </div>
           ) : (
             <>
+              {/* Total Number of Discount Requests Against Each Shop Summary */}
+              <section className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-4 sm:px-5 py-3.5 border-b border-slate-100 bg-slate-50/50">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-900 font-display flex items-center gap-2">
+                      <Store className="w-4 h-4 text-brand-600" /> Total Discount Requests Against Each Shop
+                    </h2>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Complete breakdown of discount requests count submitted, approved, and pending against each shop.
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 text-xs font-extrabold border border-brand-200">
+                    {shopBreakdown.length} Shops
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-slate-100/75 text-slate-700 font-bold text-[10px] uppercase tracking-wider border-b border-slate-200">
+                        <th className="py-2.5 px-4">#</th>
+                        <th className="py-2.5 px-4">Shop Name</th>
+                        <th className="py-2.5 px-4 text-center">Total Requests</th>
+                        <th className="py-2.5 px-4 text-center">Approved</th>
+                        <th className="py-2.5 px-4 text-center">Pending</th>
+                        <th className="py-2.5 px-4 text-right">Discount Amount</th>
+                        <th className="py-2.5 px-4 text-right">Avg %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {shopBreakdown.map((sb, i) => (
+                        <tr
+                          key={sb.shopId}
+                          onClick={() => setShop(shop === sb.shopId ? '' : sb.shopId)}
+                          className={`hover:bg-slate-50/80 cursor-pointer transition-colors ${
+                            shop === sb.shopId ? 'bg-brand-50/70 font-semibold' : ''
+                          }`}
+                          title="Click to filter by this shop"
+                        >
+                          <td className="py-2.5 px-4 font-bold text-slate-400">{i + 1}</td>
+                          <td className="py-2.5 px-4 font-bold text-slate-900">
+                            <span className="hover:text-brand-600">{sb.shopName}</span>
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-slate-900 text-white font-extrabold text-[11px] shadow-2xs">
+                              {sb.totalRequests}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-bold text-[11px] border border-emerald-200">
+                              {sb.approvedRequests}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-bold text-[11px] border border-amber-200">
+                              {sb.pendingRequests}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-extrabold text-slate-900">
+                            {formatINRWhole(sb.totalDiscount)}
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-bold text-brand-700">
+                            {avgPct({ value: sb.totalDiscount, before: sb.totalBilled }).toFixed(1)}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
               {/* Shop-wise */}
               <section className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
                 <div className="flex items-center justify-between gap-2 px-4 sm:px-5 py-3 border-b border-slate-100 flex-wrap">
@@ -421,8 +530,10 @@ export const DiscountReportPage: React.FC = () => {
                           }`}>{i + 1}</span>
                           <span className="font-semibold text-sm text-slate-800 truncate">{s.name}</span>
                         </div>
-                        <div className="flex items-center gap-3 sm:gap-6 text-xs shrink-0">
-                          <span className="text-slate-500 hidden sm:inline">{s.count} req</span>
+                        <div className="flex items-center gap-2 sm:gap-4 text-xs shrink-0">
+                          <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 font-extrabold text-[11px] border border-slate-200 shadow-2xs">
+                            {s.count} {s.count === 1 ? 'req' : 'reqs'}
+                          </span>
                           <span className="font-bold text-brand-700 w-14 text-right">{avgPct(s).toFixed(1)}%</span>
                           <span className="font-extrabold text-slate-900 w-24 text-right">{formatINRWhole(s.value)}</span>
                         </div>

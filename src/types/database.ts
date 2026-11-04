@@ -91,6 +91,15 @@ export type ExhibitionProvide =
   | 'stall_space' | 'table_chairs' | 'electricity_lights' | 'logo_stage_banners'
   | 'stage_announcements' | 'social_media' | 'other';
 
+export interface ExhibitionDaySchedule {
+  date: string; // YYYY-MM-DD
+  day_number: number; // 1, 2, 3...
+  day_name?: string; // "Wed", "Wednesday", etc.
+  from_time: string; // e.g. "09:00"
+  to_time: string; // e.g. "18:00"
+  hours: number; // calculated e.g. 9
+}
+
 export interface ExhibitionDetails {
   conducting_shop_id?: string | null;
   conducting_shop_name?: string | null;
@@ -101,6 +110,9 @@ export interface ExhibitionDetails {
   /** datetime-local values, e.g. "2026-11-12T10:00" */
   event_start?: string | null;
   event_end?: string | null;
+  daily_schedules?: ExhibitionDaySchedule[];
+  total_days?: number | null;
+  total_hours?: number | null;
   expected_footfall?: string | null;
   stall_size_location?: string | null;
   amount_excl_gst: number;
@@ -573,7 +585,7 @@ export const entryAvailable = (
   return Math.max(0, round2(Number(r.amount || 0) - Number(r.paid_amount || 0) - reserved));
 };
 
-export type DisbursementClarificationStatus = 'pending_head' | 'clarified';
+export type DisbursementClarificationStatus = 'pending_head' | 'clarified' | 'declined';
 
 export interface DisbursementClarification {
   id: string;

@@ -36,7 +36,7 @@ export const DisbursementClarificationSection: React.FC<DisbursementClarificatio
   const [isAskingAgain, setIsAskingAgain] = useState(false);
 
   const clarifications = request.disbursement_clarifications || [];
-  if (clarifications.length === 0) return null;
+  if (clarifications.length === 0 || request.status === 'cancelled') return null;
 
   const latest = clarifications[0];
   const isPending = latest.status === 'pending_head';
