@@ -141,3 +141,4 @@ $$;
 
 revoke execute on function public.track_request(text) from public, anon;
 grant execute on function public.track_request(text) to authenticated;
+

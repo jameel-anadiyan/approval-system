@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RequestRecord, isDisbursementAssociated, isNonCashRequestType } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
@@ -6,9 +6,10 @@ import { useRequests } from '../../context/RequestContext';
 import { useAuth } from '../../context/AuthContext';
 import { canHeadChangeRoute } from '../../lib/workflow';
 import { StatusBadge, TypeBadge } from '../common/StatusBadge';
-import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote, AlertTriangle, ArrowLeftRight, Clock, Users } from 'lucide-react';
+import { ChevronRight, Paperclip, Mic, ShieldAlert, Store, UserCheck, HelpCircle, Tag, Trash2, PackageCheck, Truck, Landmark, Banknote, AlertTriangle, ArrowLeftRight, Clock, Users, Eye } from 'lucide-react';
 import { BillMissingBanner } from './BillMissingBanner';
 import { ChangeRouteModal } from '../portals/ChangeRouteModal';
+import { DocumentPreviewModal, type DocumentPreviewItem } from './DocumentPreviewModal';
 
 interface RequestCardProps {
   request: RequestRecord;
@@ -30,6 +31,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   const { user } = useAuth();
   const { threshold, deleteSpecificRequest, headChangeRoute } = useRequests();
   const [showChangeRouteModal, setShowChangeRouteModal] = useState(false);
+  const [showDocPreview, setShowDocPreview] = useState(false);
   const rType = typeOf(request);
   const isPettyCash = rType === 'petty_cash';
   const isHighValue = rType === 'general' && request.amount > threshold;
@@ -50,6 +52,56 @@ export const RequestCard: React.FC<RequestCardProps> = ({
       : discBefore > 0
       ? (discValue / discBefore) * 100
       : 0;
+
+  // Collect documents & signed packets for instant preview on the card
+  const documentFiles = useMemo(
+    () => (request.files || []).filter((f) => f.kind === 'document'),
+    [request.files]
+  );
+  const signedFiles = useMemo(
+    () => request.signed_files || [],
+    [request.signed_files]
+  );
+
+  const previewItems: DocumentPreviewItem[] = useMemo(() => {
+    const items: DocumentPreviewItem[] = [];
+
+    documentFiles.forEach((f) => {
+      const lower = f.original_name.toLowerCase();
+      const badge = f.mime_type?.includes('pdf') || lower.endsWith('.pdf')
+        ? 'PDF'
+        : lower.match(/\.(xls|xlsx|csv)$/i)
+        ? 'Excel'
+        : lower.match(/\.(doc|docx|rtf)$/i)
+        ? 'Word'
+        : 'Image';
+      items.push({
+        id: f.id,
+        name: f.original_name,
+        storagePath: f.storage_path,
+        publicUrl: f.public_url,
+        bucket: 'request-files',
+        mimeType: f.mime_type,
+        sizeBytes: f.size_bytes,
+        pageCount: f.page_count,
+        badge,
+      });
+    });
+
+    signedFiles.forEach((s) => {
+      items.push({
+        id: s.id,
+        name: s.file_name || 'Signed_Approval_Packet.pdf',
+        storagePath: s.storage_path,
+        bucket: 'signed-documents',
+        mimeType: 'application/pdf',
+        pageCount: s.page_count,
+        badge: 'Signed Seal',
+      });
+    });
+
+    return items;
+  }, [documentFiles, signedFiles]);
 
   const isApprovalQueueStage = ['pending_head_approval', 'pending_head_review', 'pending_admin_approval'].includes(
     request.status
@@ -341,13 +393,30 @@ export const RequestCard: React.FC<RequestCardProps> = ({
         </div>
       </div>
 
-      {/* Attachments indicators & Chevron */}
-      <div className="flex items-center justify-between text-slate-400 pt-1 text-[11px]">
-        <div className="flex items-center gap-2">
-          {docCount > 0 && (
-            <span className="flex items-center gap-0.5">
-              <Paperclip className="w-3.5 h-3.5 text-slate-500" />
-              <span>{docCount}</span>
+      {/* Attachments indicators & Actions */}
+      <div className="flex items-center justify-between text-slate-400 pt-1 text-[11px] gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {previewItems.length > 0 ? (
+            <button
+              type="button"
+              id={`card-preview-doc-${request.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDocPreview(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200/90 font-bold text-xs transition-all shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer"
+              title="Preview attached documents, bills, or invoices"
+            >
+              <Eye className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Preview Doc</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-indigo-200/70 text-indigo-900 text-[10px] font-black">
+                {previewItems.length}
+              </span>
+            </button>
+          ) : (
+            <span className="text-[11px] text-slate-400 flex items-center gap-1">
+              <Paperclip className="w-3 h-3 text-slate-300" />
+              <span>No docs</span>
             </span>
           )}
           {hasVoiceNote && (
@@ -391,6 +460,18 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               const res = await headChangeRoute(request.id, newRoute, rm, v);
               if (!res.success) throw new Error(res.error || 'Failed to change route');
             }}
+          />
+        </div>
+      )}
+
+      {showDocPreview && previewItems.length > 0 && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <DocumentPreviewModal
+            isOpen={showDocPreview}
+            onClose={() => setShowDocPreview(false)}
+            files={previewItems}
+            title={`Request ${request.request_no || ''} · ${request.title}`}
+            approvalNo={request.approval_no}
           />
         </div>
       )}
