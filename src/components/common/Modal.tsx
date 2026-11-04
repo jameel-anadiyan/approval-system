@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -20,15 +20,30 @@ export const Modal: React.FC<ModalProps> = ({
   maxWidth = 'md',
   zIndex = 'z-50',
 }) => {
+  const savedScrollYRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (isOpen) {
+      savedScrollYRef.current =
+        window.scrollY ??
+        document.documentElement.scrollTop ??
+        document.body.scrollTop ??
+        0;
+      const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        const targetY = savedScrollYRef.current;
+        if (typeof targetY === 'number') {
+          window.scrollTo({ top: targetY, behavior: 'instant' as ScrollBehavior });
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: targetY, behavior: 'instant' as ScrollBehavior });
+          });
+        }
+      };
     } else {
       document.body.style.overflow = 'unset';
     }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
   }, [isOpen]);
 
   if (!isOpen) return null;

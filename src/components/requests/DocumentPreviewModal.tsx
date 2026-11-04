@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -23,8 +24,6 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
   Trash2,
   X,
@@ -480,6 +479,63 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     typeof window !== 'undefined' ? window.innerWidth : 800
   );
 
+  // Preserve background scroll position and lock background scrolling while preview is open
+  const savedScrollYRef = useRef<number | null>(null);
+  const prevActiveElementRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Capture the current scroll position of the window when entering preview
+    const currentScrollY =
+      window.scrollY ??
+      document.documentElement.scrollTop ??
+      document.body.scrollTop ??
+      0;
+    savedScrollYRef.current = currentScrollY;
+
+    // Remember the element that had focus before opening the preview modal (e.g. Preview button on the card)
+    if (document.activeElement instanceof HTMLElement) {
+      prevActiveElementRef.current = document.activeElement;
+    }
+
+    // Lock body scrolling
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      // Restore body overflow
+      document.body.style.overflow = originalOverflow;
+
+      // Blur whatever element was active inside the modal before it unmounts
+      // to prevent browser from scrolling to top upon activeElement removal
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
+      // Safely restore focus to previous trigger element without scrolling the page
+      if (prevActiveElementRef.current && typeof prevActiveElementRef.current.focus === 'function') {
+        try {
+          prevActiveElementRef.current.focus({ preventScroll: true });
+        } catch {
+          // ignore
+        }
+      }
+
+      // Restore exact window scroll position immediately and on next frames
+      const targetY = savedScrollYRef.current;
+      if (typeof targetY === 'number') {
+        window.scrollTo({ top: targetY, behavior: 'instant' as ScrollBehavior });
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: targetY, behavior: 'instant' as ScrollBehavior });
+        });
+        setTimeout(() => {
+          window.scrollTo({ top: targetY, behavior: 'instant' as ScrollBehavior });
+        }, 50);
+      }
+    };
+  }, [isOpen]);
+
   // Compute approval permission if request is supplied
   const approvalCheck = useMemo(() => {
     if (!request || !user) return { canApprove: false };
@@ -542,14 +598,21 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return () => window.removeEventListener('resize', updateSize);
   }, [isOpen]);
 
-  // Jump to initialIndex when opened
+  // Jump to initialIndex when opened using container-only scrolling (never scrolling the window!)
   useEffect(() => {
     if (isOpen) {
       setActiveIndex(Math.max(0, Math.min(initialIndex, files.length - 1)));
       setDocMultipliers({});
       if (initialIndex > 0 && initialIndex < files.length) {
         setTimeout(() => {
-          docRefs.current[initialIndex]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          const container = scrollContainerRef.current;
+          const target = docRefs.current[initialIndex];
+          if (container && target) {
+            const containerRect = container.getBoundingClientRect();
+            const targetRect = target.getBoundingClientRect();
+            const topOffset = container.scrollTop + (targetRect.top - containerRect.top);
+            container.scrollTo({ top: Math.max(0, topOffset), behavior: 'smooth' });
+          }
         }, 200);
       }
     }
@@ -583,9 +646,17 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return () => container.removeEventListener('scroll', handleScroll);
   }, [isOpen, files.length]);
 
+  // Scroll to doc strictly inside the modal container without affecting window scroll
   const scrollToDoc = (idx: number) => {
     setActiveIndex(idx);
-    docRefs.current[idx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const container = scrollContainerRef.current;
+    const target = docRefs.current[idx];
+    if (container && target) {
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const topOffset = container.scrollTop + (targetRect.top - containerRect.top);
+      container.scrollTo({ top: Math.max(0, topOffset), behavior: 'smooth' });
+    }
   };
 
   // Keyboard navigation: Escape to close, 1-5 for zoom
@@ -610,16 +681,23 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const currentFile = files[activeIndex] || files[0];
 
-  return (
+  const modalNode = (
     <div
       role="dialog"
       aria-modal="true"
       aria-label={title || currentFile?.name || 'Document Preview'}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
       className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xs transition-all ${
         isFullScreen ? 'p-0' : 'p-0 sm:p-3 md:p-4'
       }`}
     >
       <div
+        onClick={(e) => e.stopPropagation()}
         className={`bg-slate-950 flex flex-col overflow-hidden border border-slate-800 transition-all ${
           isFullScreen
             ? 'w-full h-full rounded-none'
@@ -767,7 +845,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             {/* Close Button */}
             <button
               type="button"
-              onClick={onClose}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onClose();
+              }}
               className="inline-flex items-center gap-1 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/70 hover:text-rose-200 hover:border-rose-800 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
               title="Close preview (Esc)"
             >
@@ -887,4 +969,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined'
+    ? createPortal(modalNode, document.body)
+    : modalNode;
 };

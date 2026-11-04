@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RequestRecord, isDisbursementAssociated, isNonCashRequestType } from '../../types/database';
 import { formatINR, formatINRWhole, formatISTDate, typeOf } from '../../lib/formatters';
@@ -32,6 +32,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   const { threshold, deleteSpecificRequest, headChangeRoute } = useRequests();
   const [showChangeRouteModal, setShowChangeRouteModal] = useState(false);
   const [showDocPreview, setShowDocPreview] = useState(false);
+  const cardScrollYRef = useRef<number | null>(null);
   const rType = typeOf(request);
   const isPettyCash = rType === 'petty_cash';
   const isHighValue = rType === 'general' && request.amount > threshold;
@@ -109,7 +110,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   const pendingConsultations = (request.consultations || []).filter((c) => c.status === 'pending');
   const hasPendingConsultationInApproval = isApprovalQueueStage && pendingConsultations.length > 0;
 
-  const docCount =
+  const _docCount =
     request.files?.filter((f) => f.kind === 'document' && f.original_name !== 'Petty_Cash_Form_Below_1000.pdf')
       .length || 0;
   const hasVoiceNote = request.files?.some((f) => f.kind === 'voice_note');
@@ -401,7 +402,14 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               type="button"
               id={`card-preview-doc-${request.id}`}
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
+                // Record the exact page scroll offset when opening preview from this card
+                cardScrollYRef.current =
+                  window.scrollY ??
+                  document.documentElement.scrollTop ??
+                  document.body.scrollTop ??
+                  0;
                 setShowDocPreview(true);
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200/90 font-bold text-xs transition-all shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer"
@@ -468,7 +476,23 @@ export const RequestCard: React.FC<RequestCardProps> = ({
         <div onClick={(e) => e.stopPropagation()}>
           <DocumentPreviewModal
             isOpen={showDocPreview}
-            onClose={() => setShowDocPreview(false)}
+            onClose={() => {
+              const savedY = cardScrollYRef.current;
+              setShowDocPreview(false);
+              if (typeof savedY === 'number') {
+                window.scrollTo({ top: savedY, behavior: 'instant' as ScrollBehavior });
+                requestAnimationFrame(() => {
+                  window.scrollTo({ top: savedY, behavior: 'instant' as ScrollBehavior });
+                  const card = document.getElementById(`request-card-${request.id}`);
+                  if (card && Math.abs((window.scrollY || 0) - savedY) > 80) {
+                    card.scrollIntoView({ block: 'nearest', behavior: 'instant' as ScrollBehavior });
+                  }
+                });
+                setTimeout(() => {
+                  window.scrollTo({ top: savedY, behavior: 'instant' as ScrollBehavior });
+                }, 50);
+              }
+            }}
             files={previewItems}
             title={`Request ${request.request_no || ''} · ${request.title}`}
             approvalNo={request.approval_no}
