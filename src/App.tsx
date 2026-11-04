@@ -59,6 +59,7 @@ const StockTransferMonitorPage = page(() => import('./pages/stock/StockTransferM
 const StockTransferReportPage = page(() => import('./pages/reports/StockTransferReportPage'), 'StockTransferReportPage');
 const EntryApprovalsPage = page(() => import('./pages/disbursement/EntryApprovalsPage'), 'EntryApprovalsPage');
 const HeadTrackingPage = page(() => import('./pages/head/HeadTrackingPage'), 'HeadTrackingPage');
+const AdminGeminiVoicePage = page(() => import('./pages/admin/AdminGeminiVoicePage'), 'AdminGeminiVoicePage');
 
 const PageSpinner: React.FC = () => (
   <div className="min-h-[50vh] flex items-center justify-center">
@@ -327,6 +328,7 @@ export const App: React.FC = () => {
                 {/* Admin routes */}
                 <Route element={<RequireRole roles={['admin']} />}>
                   <Route path="admin" element={<AdminDashboardPage />} />
+                  <Route path="admin/gemini-voice" element={<AdminGeminiVoicePage />} />
                   <Route path="admin/approve" element={<AdminApprovePage />} />
                   <Route path="admin/requests" element={<AdminAllRequestsPage />} />
                   <Route path="admin/regions" element={<AdminRegionsPage />} />

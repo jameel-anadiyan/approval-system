@@ -34,6 +34,7 @@ import {
   FileSignature,
   Landmark,
   ClipboardCheck,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -62,6 +63,7 @@ interface NavItem {
   isWaitlistTab?: boolean;
   isBillMissingTab?: boolean;
   isPettyCashTab?: boolean;
+  isVoiceAi?: boolean;
 }
 
 export const Navigation: React.FC = () => {
@@ -378,6 +380,7 @@ export const Navigation: React.FC = () => {
     case 'admin':
       mainNavItems = [
         { label: 'Dashboard', path: '/admin', icon: ShieldCheck },
+        { label: 'Gemini Voice', path: '/admin/gemini-voice', icon: Sparkles, isVoiceAi: true },
         { label: 'To Approve', path: '/admin/approve', icon: CheckCircle, badge: adminToApproveCount },
         pettyCashNavItem,
         ...specialNavItems,
@@ -483,7 +486,11 @@ export const Navigation: React.FC = () => {
               }
               className={({ isActive }) =>
                 `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-all ${
-                  item.isBillMissingTab
+                  item.isVoiceAi
+                    ? isActive
+                      ? 'bg-linear-to-r from-violet-600 via-purple-600 to-indigo-600 text-white shadow-md shadow-violet-500/30 font-bold ring-1 ring-violet-300'
+                      : 'bg-violet-50/80 text-violet-800 border border-violet-200/90 font-bold hover:bg-violet-100 hover:border-violet-300 shadow-xs'
+                    : item.isBillMissingTab
                     ? isActive
                       ? 'bg-linear-to-r from-rose-600 via-red-600 to-rose-700 text-white shadow-xl shadow-rose-600/40 ring-2 ring-rose-400 ring-offset-2 font-black animate-pulse'
                       : (item.badge && item.badge > 0)
@@ -512,6 +519,8 @@ export const Navigation: React.FC = () => {
                       className={`w-4 h-4 shrink-0 ${
                         isActive
                           ? 'text-white'
+                          : item.isVoiceAi
+                          ? 'text-violet-600 animate-pulse'
                           : item.isBillMissingTab
                           ? 'text-rose-600 animate-pulse'
                           : item.isPettyCashTab
@@ -525,6 +534,17 @@ export const Navigation: React.FC = () => {
                     />
                     <span>{item.label}</span>
                   </div>
+                  {item.isVoiceAi && (
+                    <span
+                      className={`px-1.5 py-0.5 text-[9px] font-black uppercase rounded-full tracking-wider transition-all ${
+                        isActive
+                          ? 'bg-white/20 text-white'
+                          : 'bg-violet-200 text-violet-900 border border-violet-300'
+                      }`}
+                    >
+                      AI
+                    </span>
+                  )}
                   {item.badge !== undefined && item.badge > 0 && (
                     <span
                       className={`px-2 py-0.5 text-xs font-bold rounded-full transition-all ${
@@ -574,7 +594,11 @@ export const Navigation: React.FC = () => {
               }
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center shrink-0 min-w-[54px] sm:min-w-[64px] px-1 h-full relative transition-colors ${
-                  item.isBillMissingTab
+                  item.isVoiceAi
+                    ? isActive
+                      ? 'text-violet-700 font-bold bg-violet-100/90 rounded-xl my-1 border border-violet-400 shadow-xs'
+                      : 'text-violet-700 font-bold bg-violet-50/90 rounded-xl my-1 border border-violet-200'
+                    : item.isBillMissingTab
                     ? isActive
                       ? 'text-rose-700 font-black bg-rose-100/90 rounded-xl my-1 border border-rose-400 shadow-sm shadow-rose-500/30'
                       : 'text-rose-700 font-bold bg-rose-50/90 rounded-xl my-1 border border-rose-200/90 shadow-xs'
@@ -591,11 +615,13 @@ export const Navigation: React.FC = () => {
                     : 'text-slate-500 hover:text-slate-800'
                 }`
               }
-            >
+              >
               <div className="relative">
                 <item.icon
                   className={`w-5 h-5 ${
-                    item.isBillMissingTab
+                    item.isVoiceAi
+                      ? 'text-violet-600'
+                      : item.isBillMissingTab
                       ? 'text-rose-600 animate-pulse'
                       : item.isPettyCashTab
                       ? 'text-teal-600'
