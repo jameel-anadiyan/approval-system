@@ -292,6 +292,7 @@ export const RequestDetailPage: React.FC = () => {
   const isMandatoryHeadBlocked = Boolean(
     role === 'head' &&
     isOwningHead &&
+    request?.request_type !== 'petty_cash' &&
     user?.mandatory_head_consultation &&
     user?.mandatory_consultation_head_id &&
     designatedConsultation?.status !== 'agreed'
@@ -317,7 +318,9 @@ export const RequestDetailPage: React.FC = () => {
   const disagreedConsultations = consultations.filter((c) => c.status === 'disagreed');
   const hasPendingConsultations = pendingConsultations.length > 0;
   const hasDisagreedConsultations = disagreedConsultations.length > 0;
-  const isInterDeptBlocked = hasPendingConsultations || hasDisagreedConsultations;
+  const isInterDeptBlocked =
+    request?.request_type !== 'petty_cash' &&
+    (hasPendingConsultations || hasDisagreedConsultations);
 
   let interDeptBlockReason = '';
   if (hasPendingConsultations && hasDisagreedConsultations) {
@@ -335,6 +338,7 @@ export const RequestDetailPage: React.FC = () => {
   const canRequestConsultation =
     (isOwningHead || role === 'admin') &&
     request.status !== 'draft' &&
+    request?.request_type !== 'petty_cash' &&
     !isFinalized;
 
   const rType = typeOf(request);
