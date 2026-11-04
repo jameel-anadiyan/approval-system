@@ -615,16 +615,23 @@ CRITICAL IDENTITY & BEHAVIOR:
    - You have complete live access to all business requests, approvals, reports, shops, discounts, and disbursements.
    - When asked questions about data, numbers, approvals, or shops, use the provided tools OR the live snapshot below to give 100% accurate, factual figures.
    - Never hallucinate fake requests or numbers. If there are 0 pending requests, state that proudly to Kochu Muthalali.
-4. VOICE OUTPUT READINESS:
-   - Keep answers structured, conversational, and pleasing to hear when read aloud.
-   - Highlight key figures with currency symbols (₹).
+4. VOICE OUTPUT READINESS & CONCISE SPOKEN SUMMARY:
+   - Provide a direct, crystal-clear spoken summary in 2 to 4 sentences in natural Malayalam.
+   - State the key figures, pending counts, rupee amounts, and top shops directly upfront.
+   - Do NOT write massive markdown tables or endless raw lists in text; the app UI automatically renders interactive cards, tables, and buttons for Kochu Muthalali to browse.
+   - Tone: Quick, energetic, highly respectful, dedicated executive assistant to Kochu Muthalali.
 
 ${liveSnapshot}
 `;
 }
 
 /**
- * Calls Gemini 3.8 Flash with tool calling support
+ * Candidate models prioritized by response speed and quality
+ */
+const CANDIDATE_CHAT_MODELS = ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+
+/**
+ * Calls Gemini with tool calling support using ultra-fast Flash Lite models
  */
 export async function sendGeminiVoiceMessage(
   userText: string,
@@ -659,99 +666,108 @@ export async function sendGeminiVoiceMessage(
     tools: GEMINI_TOOLS,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 1024,
     },
   };
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
+  let lastError: Error | null = null;
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  });
+  for (const model of CANDIDATE_CHAT_MODELS) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
 
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    const errMsg = errData.error?.message || `Gemini API error (Status ${res.status})`;
-    throw new Error(errMsg);
-  }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `Model ${model} returned ${res.status}`);
+      }
 
-  const data = await res.json();
-  const candidate = data.candidates?.[0];
-  const parts = candidate?.content?.parts || [];
+      const data = await res.json();
+      const candidate = data.candidates?.[0];
+      const parts = candidate?.content?.parts || [];
 
-  let accumulatedWidget: GeminiChatMessage['widgetData'] | undefined;
+      let accumulatedWidget: GeminiChatMessage['widgetData'] | undefined;
 
-  // Check if Gemini invoked a tool (functionCall)
-  const fnCallPart = parts.find((p: Record<string, unknown>) => p.functionCall);
+      // Check if Gemini invoked a tool (functionCall)
+      const fnCallPart = parts.find((p: Record<string, unknown>) => p.functionCall);
 
-  if (fnCallPart && fnCallPart.functionCall) {
-    const fnName = fnCallPart.functionCall.name;
-    const fnArgs = (fnCallPart.functionCall.args as Record<string, unknown>) || {};
-    const thoughtSig = fnCallPart.thoughtSignature;
-    const callId = fnCallPart.functionCall.id;
+      if (fnCallPart && fnCallPart.functionCall) {
+        const fnName = fnCallPart.functionCall.name;
+        const fnArgs = (fnCallPart.functionCall.args as Record<string, unknown>) || {};
+        const thoughtSig = fnCallPart.thoughtSignature;
+        const callId = fnCallPart.functionCall.id;
 
-    // Execute tool locally
-    const { result, widget } = executeGeminiTool(fnName, fnArgs, ctx);
-    accumulatedWidget = widget;
+        // Execute tool locally
+        const { result, widget } = executeGeminiTool(fnName, fnArgs, ctx);
+        accumulatedWidget = widget;
 
-    // Build the second turn with the function result
-    const modelPartWithSig: Record<string, unknown> = {
-      functionCall: {
-        name: fnName,
-        args: fnArgs,
-        ...(callId ? { id: callId } : {}),
-      },
-    };
-    if (thoughtSig) {
-      modelPartWithSig.thoughtSignature = thoughtSig;
-    }
-
-    const multiTurnContents = [
-      ...contents,
-      {
-        role: 'model',
-        parts: [modelPartWithSig],
-      },
-      {
-        role: 'user',
-        parts: [
-          {
-            functionResponse: {
-              name: fnName,
-              response: { result },
-            },
+        // Build the second turn with the function result
+        const modelPartWithSig: Record<string, unknown> = {
+          functionCall: {
+            name: fnName,
+            args: fnArgs,
+            ...(callId ? { id: callId } : {}),
           },
-        ],
-      },
-    ];
+        };
+        if (thoughtSig) {
+          modelPartWithSig.thoughtSignature = thoughtSig;
+        }
 
-    const followUpRes = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: multiTurnContents,
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        tools: GEMINI_TOOLS,
-      }),
-    });
+        const multiTurnContents = [
+          ...contents,
+          {
+            role: 'model',
+            parts: [modelPartWithSig],
+          },
+          {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: fnName,
+                  response: { result },
+                },
+              },
+            ],
+          },
+        ];
 
-    if (followUpRes.ok) {
-      const followUpData = await followUpRes.json();
-      const followUpParts = followUpData.candidates?.[0]?.content?.parts || [];
-      const textPart = followUpParts.find((p: Record<string, unknown>) => typeof p.text === 'string');
-      if (textPart) {
+        const followUpRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: multiTurnContents,
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            tools: GEMINI_TOOLS,
+          }),
+        });
+
+        if (followUpRes.ok) {
+          const followUpData = await followUpRes.json();
+          const followUpParts = followUpData.candidates?.[0]?.content?.parts || [];
+          const textPart = followUpParts.find((p: Record<string, unknown>) => typeof p.text === 'string');
+          if (textPart) {
+            return { text: textPart.text, widgetData: accumulatedWidget };
+          }
+        }
+      }
+
+      // Regular text response
+      const textPart = parts.find((p: Record<string, unknown>) => typeof p.text === 'string');
+      if (textPart?.text) {
         return { text: textPart.text, widgetData: accumulatedWidget };
       }
+    } catch (err: any) {
+      console.warn(`Query with model ${model} failed, trying next:`, err);
+      lastError = err;
     }
   }
 
-  // Regular text response
-  const textPart = parts.find((p: Record<string, unknown>) => typeof p.text === 'string');
-  const responseText = textPart?.text || 'ക്ഷമിക്കണം കൊച്ചു മുതലാളി, വിവരം എടുക്കുന്നതിൽ ചെറിയ തടസ്സം നേരിട്ടു.';
-
-  return { text: responseText, widgetData: accumulatedWidget };
+  throw lastError || new Error('All candidate models failed to generate response');
 }
 
 /**
@@ -795,21 +811,63 @@ export function pcmToWavBlob(pcmData: Uint8Array, sampleRate = 24000, numChannel
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
-export function cleanTextForSpeech(text: string): string {
-  return text
+/**
+ * Immediate Verbal Acknowledgment for Kochu Muthalali
+ */
+export const IMMEDIATE_ACK_MALAYALAM =
+  'ശരി കൊച്ചു മുതലാളി, വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും. ഞാൻ ഡാറ്റ പരിശോധിച്ച് ഇപ്പോൾ തന്നെ വായിക്കാം.';
+
+const ackAudioBlobCache: Record<string, string> = {};
+
+/**
+ * Pre-load or fetch cached audio for the immediate acknowledgment
+ */
+export async function getOrPreloadAckAudio(
+  voiceName: GeminiVoiceName = getPreferredVoice()
+): Promise<string> {
+  if (ackAudioBlobCache[voiceName]) {
+    return ackAudioBlobCache[voiceName];
+  }
+  try {
+    const url = await generateNativeMalayalamAudio(IMMEDIATE_ACK_MALAYALAM, voiceName);
+    ackAudioBlobCache[voiceName] = url;
+    return url;
+  } catch (err) {
+    console.warn('Fallback ack audio cache error:', err);
+    const encoded = encodeURIComponent(IMMEDIATE_ACK_MALAYALAM.slice(0, 250));
+    const fallback = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ml&client=tw-ob`;
+    ackAudioBlobCache[voiceName] = fallback;
+    return fallback;
+  }
+}
+
+export function cleanTextForSpeech(text: string, maxChars = 380): string {
+  let cleaned = text
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/\*(.*?)\*/g, '$1')
     .replace(/\[(.*?)\]\(.*?\)/g, '$1')
     .replace(/REQ-\d{4}-\d+/gi, (m) => `റിക്വസ്റ്റ് ${m.replace('REQ-', '')}`)
     .replace(/APR-\d{4}-\d+/gi, (m) => `അപ്രൂവൽ ${m.replace('APR-', '')}`)
     .replace(/₹\s?([\d,]+)/g, '$1 രൂപ')
-    .replace(/[#_~`]/g, '')
+    .replace(/[#_~`|]/g, '')
+    .replace(/\n+/g, '. ')
     .trim();
+
+  // If text is long, limit to key opening summary sentences for speedy audio generation
+  if (cleaned.length > maxChars) {
+    const periodIdx = cleaned.indexOf('.', maxChars - 100);
+    if (periodIdx !== -1 && periodIdx <= maxChars + 80) {
+      cleaned = cleaned.slice(0, periodIdx + 1);
+    } else {
+      cleaned = cleaned.slice(0, maxChars) + '.';
+    }
+  }
+  return cleaned;
 }
 
 /**
- * Generates ultra-realistic Native Neural Audio in Malayalam using Gemini 2.5 Flash TTS
- * with instant fallback to Google Native Malayalam Audio
+ * Generates ultra-realistic Native Neural Audio in Malayalam using fast Gemini Flash Lite TTS
+ * with progressive fallback to Gemini 2.5 Flash TTS and Google Native Malayalam
  */
 export async function generateNativeMalayalamAudio(
   text: string,
@@ -828,55 +886,60 @@ export async function generateNativeMalayalamAudio(
     return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ml&client=tw-ob`;
   }
 
-  try {
-    const body = {
-      contents: [{ parts: [{ text: cleanText }] }],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: voiceName || 'Aoede',
+  const ttsCandidateModels = ['gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts'];
+
+  for (const model of ttsCandidateModels) {
+    try {
+      const body = {
+        contents: [{ parts: [{ text: cleanText }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voiceName || 'Aoede',
+              },
             },
           },
         },
-      },
-    };
+      };
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      );
+
+      if (!res.ok) {
+        continue;
       }
-    );
 
-    if (!res.ok) {
-      throw new Error(`Gemini TTS API responded with ${res.status}`);
+      const json = await res.json();
+      const b64Audio = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+      if (!b64Audio) {
+        continue;
+      }
+
+      const binaryStr = atob(b64Audio);
+      const pcmBytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        pcmBytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const wavBlob = pcmToWavBlob(pcmBytes, 24000, 1);
+      return URL.createObjectURL(wavBlob);
+    } catch (err) {
+      console.warn(`TTS generation with ${model} failed, trying next:`, err);
     }
-
-    const json = await res.json();
-    const b64Audio = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-
-    if (!b64Audio) {
-      throw new Error('No audio inlineData in Gemini response');
-    }
-
-    const binaryStr = atob(b64Audio);
-    const pcmBytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      pcmBytes[i] = binaryStr.charCodeAt(i);
-    }
-
-    const wavBlob = pcmToWavBlob(pcmBytes, 24000, 1);
-    return URL.createObjectURL(wavBlob);
-  } catch (err) {
-    console.warn('Gemini 2.5 Flash TTS fallback to Google Native Malayalam voice:', err);
-    // Instant fallback to dedicated Google Native Malayalam Voice
-    const encoded = encodeURIComponent(cleanText.slice(0, 300));
-    return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ml&client=tw-ob`;
   }
+
+  // Instant fallback to dedicated Google Native Malayalam Voice
+  const encoded = encodeURIComponent(cleanText.slice(0, 300));
+  return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ml&client=tw-ob`;
 }
 
 /**

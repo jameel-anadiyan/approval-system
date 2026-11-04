@@ -8,6 +8,8 @@ import {
   sendGeminiVoiceMessage,
   speakNativeMalayalam,
   playNativeAudio,
+  generateNativeMalayalamAudio,
+  getOrPreloadAckAudio,
   stopSpeaking,
   isSpeaking,
   getPreferredVoice,
@@ -119,6 +121,12 @@ export const AdminGeminiVoicePage: React.FC = () => {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
+  const speechSessionIdRef = useRef<number>(0);
+
+  // Pre-load acknowledgment audio for the active voice so it plays with 0ms delay
+  useEffect(() => {
+    getOrPreloadAckAudio(preferredVoice).catch(() => {});
+  }, [preferredVoice]);
 
   // Auto-scroll to bottom of messages
   const scrollToBottom = () => {
@@ -144,6 +152,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
 
   // Stop currently playing speech
   const handleStopSpeaking = () => {
+    speechSessionIdRef.current += 1;
     stopSpeaking();
     setIsAudioSpeaking(false);
     setActivePlayingId(null);
@@ -157,6 +166,8 @@ export const AdminGeminiVoicePage: React.FC = () => {
       handleStopSpeaking();
       return;
     }
+    speechSessionIdRef.current += 1;
+    const currentSessionId = speechSessionIdRef.current;
     setActivePlayingId('welcome-1');
     setIsAudioSpeaking(true);
     try {
@@ -165,16 +176,22 @@ export const AdminGeminiVoicePage: React.FC = () => {
         playNativeAudio(
           welcomeMsg.audioUrl,
           () => {
-            setIsAudioSpeaking(true);
-            setActivePlayingId('welcome-1');
+            if (speechSessionIdRef.current === currentSessionId) {
+              setIsAudioSpeaking(true);
+              setActivePlayingId('welcome-1');
+            }
           },
           () => {
-            setIsAudioSpeaking(false);
-            setActivePlayingId(null);
+            if (speechSessionIdRef.current === currentSessionId) {
+              setIsAudioSpeaking(false);
+              setActivePlayingId(null);
+            }
           },
           () => {
-            setIsAudioSpeaking(false);
-            setActivePlayingId(null);
+            if (speechSessionIdRef.current === currentSessionId) {
+              setIsAudioSpeaking(false);
+              setActivePlayingId(null);
+            }
           }
         );
       } else {
@@ -183,23 +200,31 @@ export const AdminGeminiVoicePage: React.FC = () => {
           INITIAL_WELCOME_MALAYALAM,
           preferredVoice,
           () => {
-            setIsAudioSpeaking(true);
-            setActivePlayingId('welcome-1');
-            setAudioLoadingId(null);
+            if (speechSessionIdRef.current === currentSessionId) {
+              setIsAudioSpeaking(true);
+              setActivePlayingId('welcome-1');
+              setAudioLoadingId(null);
+            }
           },
           () => {
-            setIsAudioSpeaking(false);
-            setActivePlayingId(null);
+            if (speechSessionIdRef.current === currentSessionId) {
+              setIsAudioSpeaking(false);
+              setActivePlayingId(null);
+            }
           },
           () => {
-            setIsAudioSpeaking(false);
-            setActivePlayingId(null);
-            setAudioLoadingId(null);
+            if (speechSessionIdRef.current === currentSessionId) {
+              setIsAudioSpeaking(false);
+              setActivePlayingId(null);
+              setAudioLoadingId(null);
+            }
           }
         );
-        setMessages((prev) =>
-          prev.map((m) => (m.id === 'welcome-1' ? { ...m, audioUrl } : m))
-        );
+        if (speechSessionIdRef.current === currentSessionId) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === 'welcome-1' ? { ...m, audioUrl } : m))
+          );
+        }
       }
     } catch (err) {
       console.error('Welcome audio error:', err);
@@ -307,6 +332,10 @@ export const AdminGeminiVoicePage: React.FC = () => {
       stopSpeaking();
       setIsAudioSpeaking(false);
       setActivePlayingId(null);
+      setAudioLoadingId(null);
+
+      speechSessionIdRef.current += 1;
+      const currentSessionId = speechSessionIdRef.current;
 
       const userMsg: GeminiChatMessage = {
         id: `user-${Date.now()}`,
@@ -320,6 +349,36 @@ export const AdminGeminiVoicePage: React.FC = () => {
       setLiveTranscript('');
       setIsProcessing(true);
 
+      // 1. Immediately play verbal acknowledgment: "ശരി കൊച്ചു മുതലാളി, വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും. ഇപ്പോൾ തന്നെ തയ്യാറാക്കി വായിക്കാം."
+      let ackFinishPromise = Promise.resolve();
+      if (autoSpeak) {
+        setIsAudioSpeaking(true);
+        ackFinishPromise = new Promise<void>((resolve) => {
+          getOrPreloadAckAudio(preferredVoice)
+            .then((ackUrl) => {
+              if (speechSessionIdRef.current !== currentSessionId) {
+                resolve();
+                return;
+              }
+              playNativeAudio(
+                ackUrl,
+                () => {
+                  if (speechSessionIdRef.current === currentSessionId) {
+                    setIsAudioSpeaking(true);
+                  }
+                },
+                () => {
+                  resolve();
+                },
+                () => {
+                  resolve();
+                }
+              );
+            })
+            .catch(() => resolve());
+        });
+      }
+
       const liveContext = {
         requests,
         shops,
@@ -330,7 +389,22 @@ export const AdminGeminiVoicePage: React.FC = () => {
 
       try {
         const history = messages.map((m) => ({ role: m.role, text: m.text }));
+        // Start ultra-fast Gemini data query
         const res = await sendGeminiVoiceMessage(trimmed, history, liveContext);
+        if (speechSessionIdRef.current !== currentSessionId) return;
+
+        // In parallel, start generating neural response audio for the data
+        let audioUrlPromise: Promise<string> | null = null;
+        if (autoSpeak) {
+          audioUrlPromise = generateNativeMalayalamAudio(res.text, preferredVoice).catch((err) => {
+            console.warn('Response audio generation error:', err);
+            return '';
+          });
+        }
+
+        // Wait for verbal acknowledgment to conclude (so speech doesn't overlap)
+        await ackFinishPromise;
+        if (speechSessionIdRef.current !== currentSessionId) return;
 
         const aiMsgId = `ai-${Date.now()}`;
         const aiMsg: GeminiChatMessage = {
@@ -341,45 +415,54 @@ export const AdminGeminiVoicePage: React.FC = () => {
           widgetData: res.widgetData,
         };
 
+        // Render response card and interactive data widgets
         setMessages((prev) => [...prev, aiMsg]);
 
-        // Speak aloud automatically in native Malayalam if autoSpeak is enabled
-        if (autoSpeak) {
+        // Speak aloud the prepared response in native Malayalam
+        if (autoSpeak && audioUrlPromise) {
           setIsAudioSpeaking(true);
           setActivePlayingId(aiMsgId);
           setAudioLoadingId(aiMsgId);
-          try {
-            const audioUrl = await speakNativeMalayalam(
-              res.text,
-              preferredVoice,
+
+          const audioUrl = await audioUrlPromise;
+          if (speechSessionIdRef.current !== currentSessionId) return;
+
+          setAudioLoadingId(null);
+          if (audioUrl) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === aiMsgId ? { ...m, audioUrl } : m))
+            );
+            playNativeAudio(
+              audioUrl,
               () => {
-                setIsAudioSpeaking(true);
-                setActivePlayingId(aiMsgId);
-                setAudioLoadingId(null);
+                if (speechSessionIdRef.current === currentSessionId) {
+                  setIsAudioSpeaking(true);
+                  setActivePlayingId(aiMsgId);
+                }
               },
               () => {
-                setIsAudioSpeaking(false);
-                setActivePlayingId(null);
+                if (speechSessionIdRef.current === currentSessionId) {
+                  setIsAudioSpeaking(false);
+                  setActivePlayingId(null);
+                }
               },
               () => {
-                setIsAudioSpeaking(false);
-                setActivePlayingId(null);
-                setAudioLoadingId(null);
+                if (speechSessionIdRef.current === currentSessionId) {
+                  setIsAudioSpeaking(false);
+                  setActivePlayingId(null);
+                }
               }
             );
-            if (audioUrl) {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === aiMsgId ? { ...m, audioUrl } : m))
-              );
-            }
-          } catch (audioErr) {
-            console.warn('Auto speak error:', audioErr);
+          } else {
             setIsAudioSpeaking(false);
             setActivePlayingId(null);
-            setAudioLoadingId(null);
           }
+        } else {
+          setIsAudioSpeaking(false);
+          setActivePlayingId(null);
         }
       } catch (err: any) {
+        if (speechSessionIdRef.current !== currentSessionId) return;
         console.error('Gemini Voice Error:', err);
         const errMsg: GeminiChatMessage = {
           id: `err-${Date.now()}`,
@@ -388,8 +471,13 @@ export const AdminGeminiVoicePage: React.FC = () => {
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errMsg]);
+        setIsAudioSpeaking(false);
+        setActivePlayingId(null);
+        setAudioLoadingId(null);
       } finally {
-        setIsProcessing(false);
+        if (speechSessionIdRef.current === currentSessionId) {
+          setIsProcessing(false);
+        }
       }
     },
     [autoSpeak, isProcessing, messages, preferredVoice, requests, shops, departments, users, threshold]
@@ -625,8 +713,8 @@ export const AdminGeminiVoicePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Audio Waveform Banner when speaking or listening */}
-      {(isListening || isAudioSpeaking) && (
+      {/* Audio Waveform Banner when speaking, listening, or processing */}
+      {(isListening || isAudioSpeaking || isProcessing) && (
         <div className="bg-linear-to-r from-violet-900/40 via-indigo-900/40 to-teal-900/40 border border-violet-500/30 rounded-2xl px-4 py-2.5 mb-2 flex items-center justify-between animate-in fade-in shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1">
@@ -637,14 +725,18 @@ export const AdminGeminiVoicePage: React.FC = () => {
             </div>
             <div>
               <p className="text-xs font-bold text-white">
-                {isListening ? 'ശ്രദ്ധിച്ചു കേൾക്കുന്നു... സംസാരിക്കൂ' : 'കൊച്ചു മുതലാളിയോട് സംസാരിക്കുന്നു...'}
+                {isListening
+                  ? 'ശ്രദ്ധിച്ചു കേൾക്കുന്നു... സംസാരിക്കൂ'
+                  : isProcessing
+                  ? 'വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും... തയ്യാറാക്കി ഇപ്പോൾ തന്നെ വായിക്കാം'
+                  : 'കൊച്ചു മുതലാളിയോട് സംസാരിക്കുന്നു...'}
               </p>
               {liveTranscript && (
                 <p className="text-[11px] text-violet-200 font-mono italic">"{liveTranscript}"</p>
               )}
             </div>
           </div>
-          {isAudioSpeaking && (
+          {(isAudioSpeaking || isProcessing) && (
             <button
               type="button"
               onClick={handleStopSpeaking}
@@ -795,7 +887,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
             </div>
             <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-300 text-xs flex items-center gap-2 shadow-md">
               <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
-              <span>ഡാറ്റ പരിശോധിക്കുന്നു, കൊച്ചു മുതലാളിക്ക് മറുപടി തയ്യാറാക്കുന്നു…</span>
+              <span>വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും... തയ്യാറാക്കി ഇപ്പോൾ തന്നെ വായിക്കാം…</span>
             </div>
           </div>
         )}
