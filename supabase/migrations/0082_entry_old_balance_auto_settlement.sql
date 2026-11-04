@@ -26,7 +26,35 @@
 --    the system seamlessly treats the full amount as Old Balance adjustment (amt = 0).
 -- ============================================================================
 
--- 1. Extend entry_type check constraint on disbursement_entries
+-- 1. Clean up old/restrictive amount & adjustment constraints on disbursement_entries
+do $$
+declare
+  c record;
+begin
+  for c in
+    select conname
+      from pg_constraint
+     where conrelid = 'public.disbursement_entries'::regclass
+       and contype = 'c'
+       and (conname ilike '%adjustment%' or conname ilike '%amount%')
+       and conname not in ('disbursement_entries_tds_amount_check')
+  loop
+    execute 'alter table public.disbursement_entries drop constraint if exists ' || quote_ident(c.conname);
+  end loop;
+end $$;
+
+-- Explicit drops as an extra safeguard
+alter table public.disbursement_entries drop constraint if exists disbursement_entries_adjustment_check;
+alter table public.disbursement_entries drop constraint if exists disbursement_entries_adjustment_amount_check;
+alter table public.disbursement_entries drop constraint if exists disbursement_entries_amount_check;
+alter table public.disbursement_entries drop constraint if exists disbursement_entries_amounts_check;
+
+-- Allow amount = 0 when entry carries an adjustment (amount >= 0, adjustment >= 0, amount + adjustment > 0)
+alter table public.disbursement_entries
+  add constraint disbursement_entries_amounts_check
+  check (amount >= 0 and coalesce(adjustment_amount, 0) >= 0 and (amount + coalesce(adjustment_amount, 0)) > 0);
+
+-- Extend entry_type check constraint on disbursement_entries
 alter table public.disbursement_entries drop constraint if exists disbursement_entries_entry_type_check;
 alter table public.disbursement_entries
   add constraint disbursement_entries_entry_type_check
@@ -484,3 +512,4 @@ revoke execute on function public.edit_rejected_disbursement_entry(uuid, numeric
 grant execute on function public.edit_rejected_disbursement_entry(uuid, numeric, text, boolean, text, numeric, numeric, text) to authenticated;
 
 notify pgrst, 'reload schema';
+
