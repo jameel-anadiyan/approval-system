@@ -279,4 +279,84 @@ export function canUserViewBillMissingRequest(r: RequestRecord, me: Me): boolean
   return false;
 }
 
+/**
+ * Checks whether the current user (Department Head or Admin) is authorized to approve the request,
+ * and returns whether approval is allowed along with any blocking reason.
+ */
+export function canUserApproveRequest(
+  r: RequestRecord,
+  me: Me
+): { canApprove: boolean; blockedReason?: string } {
+  if (!me || !r) return { canApprove: false };
+
+  const isHead = me.role === 'head';
+  const isAdmin = me.role === 'admin';
+  if (!isHead && !isAdmin) return { canApprove: false };
+
+  // Status check
+  if (isHead) {
+    if (r.status !== 'pending_head_approval') {
+      return { canApprove: false, blockedReason: 'Request is not waiting for Head approval' };
+    }
+    if (r.request_type === 'audit_report') {
+      return { canApprove: false, blockedReason: 'Audit Report requests can only be approved by Admin' };
+    }
+    if (!isOwningDepartmentHead(r, me)) {
+      return { canApprove: false, blockedReason: 'Request does not belong to your department' };
+    }
+  } else if (isAdmin) {
+    const isApprovingStale =
+      r.status === 'approving' &&
+      (!r.approving_started_at || Date.now() - new Date(r.approving_started_at).getTime() > 60000);
+    if (r.status !== 'pending_admin_approval' && !isApprovingStale) {
+      return { canApprove: false, blockedReason: 'Request is not waiting for Admin approval' };
+    }
+  }
+
+  // Asset quotations check
+  if (
+    (r.request_type === 'asset' || r.request_type === 'asset_below_20k') &&
+    !r.selected_quote_id
+  ) {
+    return { canApprove: false, blockedReason: 'Select quotation before approving' };
+  }
+
+  // Inter-department consultations check
+  const consultations = r.consultations || [];
+  const pendingConsults = consultations.filter((c) => c.status === 'pending');
+  const disagreedConsults = consultations.filter((c) => c.status === 'disagreed');
+  if (pendingConsults.length > 0) {
+    return {
+      canApprove: false,
+      blockedReason: `Awaiting response from ${pendingConsults.map((c) => c.head_name).join(', ')}`,
+    };
+  }
+  if (disagreedConsults.length > 0) {
+    return {
+      canApprove: false,
+      blockedReason: `Consulted head (${disagreedConsults.map((c) => c.head_name).join(', ')}) disagreed`,
+    };
+  }
+
+  // Mandatory head consultation check (only applies to Head approving their own department staff request)
+  if (
+    isHead &&
+    r.request_type !== 'petty_cash' &&
+    r.requester_role !== 'head' &&
+    me.mandatory_head_consultation &&
+    me.mandatory_consultation_head_id
+  ) {
+    const designated = consultations.find((c) => c.head_id === me.mandatory_consultation_head_id);
+    if (designated?.status !== 'agreed') {
+      const name = me.mandatory_consultation_head_name || designated?.head_name || 'designated head';
+      return {
+        canApprove: false,
+        blockedReason: `Mandatory consultation with ${name} must be agreed first`,
+      };
+    }
+  }
+
+  return { canApprove: true };
+}
+
 

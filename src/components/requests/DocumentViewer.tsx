@@ -17,7 +17,7 @@ import {
   AlertCircle,
   FileSpreadsheet,
 } from 'lucide-react';
-import { RequestFile } from '../../types/database';
+import { RequestFile, RequestRecord } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -33,6 +33,10 @@ interface DocumentViewerProps {
   canAddDocs?: boolean;
   canDeleteDocs?: boolean;
   allowExtendedDocs?: boolean;
+  request?: RequestRecord;
+  canApprove?: boolean;
+  approveDisabledReason?: string;
+  onApprove?: () => void;
 }
 
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({
@@ -42,6 +46,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   canAddDocs = false,
   canDeleteDocs = false,
   allowExtendedDocs = false,
+  request,
+  canApprove,
+  approveDisabledReason,
+  onApprove,
 }) => {
   const { isBackendConnected, user } = useAuth();
   const { addExtraDocuments, removeExtraDocument } = useRequests();
@@ -769,6 +777,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         files={previewItems}
         initialIndex={modalInitialIndex}
         title={title}
+        request={request}
+        canApprove={canApprove}
+        approveDisabledReason={approveDisabledReason}
+        onApprove={onApprove}
       />
 
       {/* Add Extra Documents Modal */}

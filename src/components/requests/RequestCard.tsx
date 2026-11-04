@@ -472,6 +472,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             files={previewItems}
             title={`Request ${request.request_no || ''} · ${request.title}`}
             approvalNo={request.approval_no}
+            request={request}
           />
         </div>
       )}

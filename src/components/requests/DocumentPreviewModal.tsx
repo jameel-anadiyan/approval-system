@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -7,8 +7,12 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 import { useAuth } from '../../context/AuthContext';
+import { useRequests } from '../../context/RequestContext';
 import { useSignedUrl, downloadStoredFile, Bucket } from '../../lib/files';
-import { formatFileSize } from '../../lib/formatters';
+import { formatFileSize, formatINR } from '../../lib/formatters';
+import { canUserApproveRequest } from '../../lib/workflow';
+import { ApproveModal } from '../portals/ApproveModal';
+import { RequestRecord } from '../../types/database';
 import {
   Download,
   ExternalLink,
@@ -26,6 +30,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  CheckCircle2,
 } from 'lucide-react';
 
 export interface DocumentPreviewItem {
@@ -49,6 +54,10 @@ interface DocumentPreviewModalProps {
   approvalNo?: string | null;
   onDeleteFile?: (file: DocumentPreviewItem) => Promise<boolean | void> | boolean | void;
   canDelete?: boolean;
+  request?: RequestRecord;
+  canApprove?: boolean;
+  approveDisabledReason?: string;
+  onApprove?: () => void;
 }
 
 interface SingleDocViewerProps {
@@ -454,8 +463,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   approvalNo,
   onDeleteFile,
   canDelete = false,
+  request,
+  canApprove: propCanApprove,
+  approveDisabledReason: propApproveDisabledReason,
+  onApprove,
 }) => {
-  const { isBackendConnected } = useAuth();
+  const { isBackendConnected, user } = useAuth();
+  const { approveRequest } = useRequests();
+  const [showApproveModal, setShowApproveModal] = useState(false);
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [docMultipliers, setDocMultipliers] = useState<Record<number, number>>({});
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -464,6 +479,19 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [containerWidth, setContainerWidth] = useState<number>(
     typeof window !== 'undefined' ? window.innerWidth : 800
   );
+
+  // Compute approval permission if request is supplied
+  const approvalCheck = useMemo(() => {
+    if (!request || !user) return { canApprove: false };
+    return canUserApproveRequest(request, user);
+  }, [request, user]);
+
+  const effectiveCanApprove = propCanApprove ?? (
+    approvalCheck.canApprove ||
+    (user?.role === 'head' && request?.status === 'pending_head_approval') ||
+    (user?.role === 'admin' && request?.status === 'pending_admin_approval')
+  );
+  const effectiveApproveDisabledReason = propApproveDisabledReason ?? approvalCheck.blockedReason;
 
   const getDocMultiplier = useCallback(
     (idx: number) => docMultipliers[idx] ?? 1,
@@ -622,6 +650,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     {approvalNo}
                   </span>
                 )}
+                {request && typeof request.amount === 'number' && (
+                  <span className="text-[10px] sm:text-[11px] font-extrabold text-emerald-300 font-display bg-emerald-950/90 border border-emerald-700/80 px-2 py-0.5 rounded shrink-0">
+                    {formatINR(request.amount)}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
                 {files.length > 1 ? (
@@ -636,7 +669,33 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Approval Button in Doc Preview Window */}
+            {effectiveCanApprove && (
+              <button
+                type="button"
+                id="preview-doc-approve-btn"
+                disabled={Boolean(effectiveApproveDisabledReason)}
+                title={effectiveApproveDisabledReason || 'Approve & Digital Sign this request directly from preview'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onApprove) {
+                    onApprove();
+                  } else {
+                    setShowApproveModal(true);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer shrink-0 ${
+                  effectiveApproveDisabledReason
+                    ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed shadow-none'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/60 hover:shadow-emerald-900/80 animate-pulse hover:animate-none'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-200" />
+                <span>Approve & Sign</span>
+              </button>
+            )}
+
             {/* Main Top Bar Zoom Controls: Zooms all documents together */}
             {(() => {
               const activeMultiplier = getDocMultiplier(activeIndex);
@@ -804,6 +863,27 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             <span>to exit</span>
           </div>
         </div>
+
+        {/* Approve Modal Triggered Directly From Preview Doc Window */}
+        {showApproveModal && request && (
+          <div className="relative z-[70]" onClick={(e) => e.stopPropagation()}>
+            <ApproveModal
+              isOpen={showApproveModal}
+              onClose={() => setShowApproveModal(false)}
+              request={request}
+              onApprove={async (voice) => {
+                const res = await approveRequest(request.id, voice);
+                if (res.success) {
+                  setTimeout(() => {
+                    setShowApproveModal(false);
+                    onClose();
+                  }, 1200);
+                }
+                return res;
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

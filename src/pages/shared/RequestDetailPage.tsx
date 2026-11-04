@@ -1393,6 +1393,10 @@ export const RequestDetailPage: React.FC = () => {
               canAddDocs={canHeadAddDocs}
               canDeleteDocs={canDeleteDocsOnReturned}
               allowExtendedDocs={isSpecialRequestType(rType)}
+              request={request}
+              canApprove={(isOwningHead && request.status === 'pending_head_approval') || (role === 'admin' && request.status === 'pending_admin_approval')}
+              approveDisabledReason={approveBlocked ? approveBlockReason : undefined}
+              onApprove={() => setModalState('approve')}
             />
           )}
 

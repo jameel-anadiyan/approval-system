@@ -234,6 +234,7 @@ export const ApproveModal: React.FC<ApproveModalProps> = ({
           : `Request ${request.request_no || ''} for ${formatINR(request.amount)}`
       }
       maxWidth="md"
+      zIndex="z-[70]"
     >
       {step === 'preview' && (
         <div className="space-y-4">
