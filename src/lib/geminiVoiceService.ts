@@ -1,6 +1,6 @@
 /**
  * Gemini Voice Intelligence Service for SWA Diamonds Approvals
- * Dedicated AI Executive Assistant for Kochu Muthalali (Managing Director / Admin)
+ * Dedicated AI Executive Assistant for Sir (Managing Director / Admin)
  * Primary Language: Malayalam (മലയാളം)
  */
 
@@ -164,7 +164,7 @@ export const GEMINI_TOOLS = [
       },
       {
         name: 'get_pending_admin_requests',
-        description: 'Returns the full list of requests currently awaiting approval by Admin (Kochu Muthalali) with request number, title, amount, shop, department, and requester.',
+        description: 'Returns the full list of requests currently awaiting approval by Admin (Sir) with request number, title, amount, shop, department, and requester.',
         parameters: {
           type: 'object',
           properties: {
@@ -597,33 +597,36 @@ export function executeGeminiTool(
 }
 
 /**
- * System Instructions for Kochu Muthalali
+ * System Instructions for Sir (Managing Director / Admin)
  */
-export function getKochuMuthalaliSystemInstruction(ctx: LiveAppContext): string {
+export function getAdminSystemInstruction(ctx: LiveAppContext): string {
   const liveSnapshot = buildLiveSystemSnapshot(ctx);
 
   return `
-You are the personal AI Executive Intelligence Voice Assistant for "കൊച്ചു മുതലാളി" (Kochu Muthalali), the respected Managing Director / Chief Executive / Admin of SWA Diamonds Approvals System.
+You are the personal AI Executive Intelligence Voice Assistant for "സർ" (Sir), the respected Managing Director / Chief Executive / Admin of SWA Diamonds Approvals System.
 
 CRITICAL IDENTITY & BEHAVIOR:
-1. ALWAYS address the user respectfully and warmly as "കൊച്ചു മുതലാളി" (Kochu Muthalali) in every single reply.
+1. ALWAYS address the user respectfully as "സർ" (Sir) or "സാറിന്" in Malayalam in every single reply.
+   - NEVER call the user "മുതലാളി" or "കൊച്ചു മുതലാളി". You must ONLY address the user as "സർ" (Sir).
 2. PRIMARY LANGUAGE IS MALAYALAM (മലയാളം script).
    - Your speech and text MUST be natural, polite, respectful, and crystal-clear Malayalam.
    - You may incorporate exact reference codes in English for accuracy (e.g. "REQ-2026-000152", "APR-2026-000045", "₹54,000", "Route A", "Route B").
-   - Tone: Dedicated, loyal, highly capable executive assistant (e.g., "തീർച്ചയായും കൊച്ചു മുതലാളി", "നമസ്കാരം കൊച്ചു മുതലാളി", "ഇതാ കൊച്ചു മുതലാളി ചോദിച്ച വിവരങ്ങൾ").
+   - Tone: Dedicated, loyal, highly capable executive assistant (e.g., "തീർച്ചയായും സർ", "നമസ്കാരം സർ", "ഇതാ സർ ചോദിച്ച വിവരങ്ങൾ", "സാറിന് എന്താണ് ഇന്ന് അറിയേണ്ടത്?").
 3. FULL DATA ACCESS:
    - You have complete live access to all business requests, approvals, reports, shops, discounts, and disbursements.
    - When asked questions about data, numbers, approvals, or shops, use the provided tools OR the live snapshot below to give 100% accurate, factual figures.
-   - Never hallucinate fake requests or numbers. If there are 0 pending requests, state that proudly to Kochu Muthalali.
+   - Never hallucinate fake requests or numbers. If there are 0 pending requests, state that proudly to Sir.
 4. VOICE OUTPUT READINESS & CONCISE SPOKEN SUMMARY:
-   - Provide a direct, crystal-clear spoken summary in 2 to 4 sentences in natural Malayalam.
+   - Provide a direct, crystal-clear spoken summary in 2 to 4 sentences in natural Malayalam addressing Sir ("സർ").
    - State the key figures, pending counts, rupee amounts, and top shops directly upfront.
-   - Do NOT write massive markdown tables or endless raw lists in text; the app UI automatically renders interactive cards, tables, and buttons for Kochu Muthalali to browse.
-   - Tone: Quick, energetic, highly respectful, dedicated executive assistant to Kochu Muthalali.
+   - Do NOT write massive markdown tables or endless raw lists in text; the app UI automatically renders interactive cards, tables, and buttons for Sir to browse.
+   - Tone: Quick, energetic, highly respectful, dedicated executive assistant to Sir.
 
 ${liveSnapshot}
 `;
 }
+
+export const getKochuMuthalaliSystemInstruction = getAdminSystemInstruction;
 
 /**
  * Candidate models prioritized by response speed and quality
@@ -639,7 +642,7 @@ export async function sendGeminiVoiceMessage(
   ctx: LiveAppContext
 ): Promise<{ text: string; widgetData?: GeminiChatMessage['widgetData'] }> {
   const apiKey = getGeminiApiKey();
-  const systemInstruction = getKochuMuthalaliSystemInstruction(ctx);
+  const systemInstruction = getAdminSystemInstruction(ctx);
 
   // Format contents for Gemini API
   const contents: Array<Record<string, unknown>> = [];
@@ -812,10 +815,10 @@ export function pcmToWavBlob(pcmData: Uint8Array, sampleRate = 24000, numChannel
 }
 
 /**
- * Immediate Verbal Acknowledgment for Kochu Muthalali
+ * Immediate Verbal Acknowledgment for Sir
  */
 export const IMMEDIATE_ACK_MALAYALAM =
-  'ശരി കൊച്ചു മുതലാളി, വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും. ഞാൻ ഡാറ്റ പരിശോധിച്ച് ഇപ്പോൾ തന്നെ വായിക്കാം.';
+  'ശരി സർ, വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും. ഞാൻ ഡാറ്റ പരിശോധിച്ച് ഇപ്പോൾ തന്നെ വായിക്കാം.';
 
 const ackAudioBlobCache: Record<string, string> = {};
 

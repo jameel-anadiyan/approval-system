@@ -44,7 +44,7 @@ interface IWindow extends Window {
 }
 
 const INITIAL_WELCOME_MALAYALAM =
-  'നമസ്കാരം കൊച്ചു മുതലാളി! ഞാൻ നിങ്ങളുടെ Gemini AI വോയ്‌സ് അസിസ്റ്റൻ്റാണ്. അപ്രൂവലുകൾ, റിപ്പോർട്ടുകൾ, പെൻഡിങ് റിക്വസ്റ്റുകൾ, ഡിസ്ബേഴ്സ്മെന്റുകൾ തുടങ്ങിയ എല്ലാ വിവരങ്ങളും എന്നോട് ചോദിക്കാം. എന്താണ് കൊച്ചു മുതലാളിക്ക് ഇന്ന് അറിയേണ്ടത്?';
+  'നമസ്കാരം സർ! ഞാൻ നിങ്ങളുടെ Gemini AI വോയ്‌സ് അസിസ്റ്റൻ്റാണ്. അപ്രൂവലുകൾ, റിപ്പോർട്ടുകൾ, പെൻഡിങ് റിക്വസ്റ്റുകൾ, ഡിസ്ബേഴ്സ്മെന്റുകൾ തുടങ്ങിയ എല്ലാ വിവരങ്ങളും എന്നോട് ചോദിക്കാം. എന്താണ് സാറിന് ഇന്ന് അറിയേണ്ടത്?';
 
 const VOICE_OPTIONS: { id: GeminiVoiceName; label: string; tag: string; desc: string }[] = [
   {
@@ -304,7 +304,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
     setIsAudioSpeaking(true);
     try {
       await speakNativeMalayalam(
-        'നമസ്കാരം കൊച്ചു മുതലാളി, എന്റെ ശബ്ദം വ്യക്തമായി കേൾക്കാൻ കഴിയുന്നുണ്ടോ?',
+        'നമസ്കാരം സർ, എന്റെ ശബ്ദം വ്യക്തമായി കേൾക്കാൻ കഴിയുന്നുണ്ടോ?',
         voice,
         () => setIsAudioSpeaking(true),
         () => {
@@ -349,7 +349,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
       setLiveTranscript('');
       setIsProcessing(true);
 
-      // 1. Immediately play verbal acknowledgment: "ശരി കൊച്ചു മുതലാളി, വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും. ഇപ്പോൾ തന്നെ തയ്യാറാക്കി വായിക്കാം."
+      // 1. Immediately play verbal acknowledgment: "ശരി സർ, വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും. ഇപ്പോൾ തന്നെ തയ്യാറാക്കി വായിക്കാം."
       let ackFinishPromise = Promise.resolve();
       if (autoSpeak) {
         setIsAudioSpeaking(true);
@@ -467,7 +467,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
         const errMsg: GeminiChatMessage = {
           id: `err-${Date.now()}`,
           role: 'model',
-          text: `ക്ഷമിക്കണം കൊച്ചു മുതലാളി, എന്തോ തടസ്സം നേരിട്ടു: ${err.message || 'Error communicating with Gemini'}`,
+          text: `ക്ഷമിക്കണം സർ, എന്തോ തടസ്സം നേരിട്ടു: ${err.message || 'Error communicating with Gemini'}`,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errMsg]);
@@ -589,7 +589,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             </div>
             <p className="text-[11px] text-slate-400 font-medium">
-              Dedicated Executive Assistant for <strong className="text-amber-300 font-bold">കൊച്ചു മുതലാളി</strong>
+              Dedicated Executive Assistant for <strong className="text-amber-300 font-bold">Sir (Managing Director)</strong>
             </p>
           </div>
         </div>
@@ -729,7 +729,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
                   ? 'ശ്രദ്ധിച്ചു കേൾക്കുന്നു... സംസാരിക്കൂ'
                   : isProcessing
                   ? 'വിവരങ്ങൾ ശേഖരിക്കാൻ ഏതാനും സെക്കൻഡുകൾ എടുക്കും... തയ്യാറാക്കി ഇപ്പോൾ തന്നെ വായിക്കാം'
-                  : 'കൊച്ചു മുതലാളിയോട് സംസാരിക്കുന്നു...'}
+                  : 'സാറിനോട് സംസാരിക്കുന്നു...'}
               </p>
               {liveTranscript && (
                 <p className="text-[11px] text-violet-200 font-mono italic">"{liveTranscript}"</p>
@@ -774,7 +774,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
                   {/* Sender title & Audio Action */}
                   <div className="flex items-center justify-between gap-3 mb-1.5 pb-1 border-b border-white/10 text-[11px]">
                     <span className="font-bold tracking-wide text-violet-300">
-                      {isModel ? 'Gemini Voice AI' : 'കൊച്ചു മുതലാളി'}
+                      {isModel ? 'Gemini Voice AI' : 'സർ'}
                     </span>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] text-slate-400">
@@ -951,7 +951,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
               placeholder={
                 isListening
                   ? 'നിങ്ങളുടെ ശബ്ദം കേൾക്കുന്നു…'
-                  : 'കൊച്ചു മുതലാളിക്ക് എന്തും ചോദിക്കാം (സംസാരിക്കുക അല്ലെങ്കിൽ ടൈപ്പ് ചെയ്യുക)…'
+                  : 'സാറിന് എന്തും ചോദിക്കാം (സംസാരിക്കുക അല്ലെങ്കിൽ ടൈപ്പ് ചെയ്യുക)…'
               }
               disabled={isProcessing}
               className="w-full bg-slate-950 border border-slate-800 focus:border-violet-500 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-hidden transition-colors"
@@ -976,7 +976,7 @@ export const AdminGeminiVoicePage: React.FC = () => {
           isOpen={showKeyModal}
           onClose={() => setShowKeyModal(false)}
           title="Gemini AI Voice & Settings"
-          description="Manage the Google Gemini API key and choose the native Malayalam neural voice for Kochu Muthalali."
+          description="Manage the Google Gemini API key and choose the native Malayalam neural voice for Sir."
         >
           <div className="space-y-4">
             {keySavedBanner && (
