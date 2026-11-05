@@ -184,3 +184,4 @@ $$;
 
 revoke execute on function public.get_petty_cash_dealers() from public, anon;
 grant execute on function public.get_petty_cash_dealers() to authenticated;
+

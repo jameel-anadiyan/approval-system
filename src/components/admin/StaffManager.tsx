@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck, MessageSquare, FileSignature, Landmark, ClipboardCheck, Star } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck, MessageSquare, FileSignature, Landmark, ClipboardCheck, Star, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { cleanWhatsAppNumber, formatWhatsAppDisplay } from '../../lib/whatsapp';
@@ -216,14 +216,19 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const handleSetDefaultDealer = async (u: Profile) => {
     setBusyId(u.id);
     const nextVal = !u.is_default_petty_cash_dealer;
-    const res = await dir.setDefaultPettyCashDealer(u.id, nextVal);
-    setBusyId(null);
-    show(
-      res.success
-        ? `${u.full_name} ${nextVal ? 'set as Default Petty Cash Dealer.' : 'is no longer default.'}`
-        : res.error || 'Failed to update Default Petty Cash Dealer setting',
-      res.success
-    );
+    try {
+      const res = await dir.setDefaultPettyCashDealer(u.id, nextVal);
+      show(
+        res.success
+          ? `${u.full_name} ${nextVal ? 'set as Default Petty Cash Dealer.' : 'is no longer default.'}`
+          : res.error || 'Failed to update Default Petty Cash Dealer setting',
+        res.success
+      );
+    } catch {
+      show('Failed to update Default Petty Cash Dealer setting', false);
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const toggleDeptSpecialRequest = async (
@@ -756,23 +761,51 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                           <Star className={`w-3.5 h-3.5 ${u.is_default_petty_cash_dealer ? 'text-amber-500 fill-amber-400' : 'text-slate-400'}`} />
                           <span>Default Petty Cash Dealer</span>
                         </span>
-                        {u.is_default_petty_cash_dealer ? (
-                          <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-2xs">
-                            <Check className="w-3 h-3 text-amber-700" />
-                            Default (Auto-Selected)
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={busyId === u.id}
-                            onClick={() => handleSetDefaultDealer(u)}
-                            className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-white hover:bg-teal-100 text-teal-800 border border-teal-300 hover:border-teal-400 transition-all cursor-pointer shadow-2xs flex items-center gap-1"
-                            title="Set as the only Default Petty Cash Dealer for all staff"
-                          >
-                            <Star className="w-3 h-3 text-amber-500" />
-                            <span>Set as Default</span>
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          {u.is_default_petty_cash_dealer ? (
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={true}
+                              disabled={busyId === u.id}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleSetDefaultDealer(u);
+                              }}
+                              className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition-all cursor-pointer shadow-2xs flex items-center gap-1 disabled:opacity-50"
+                              title="Currently default. Click to remove as default"
+                            >
+                              {busyId === u.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin text-amber-700" />
+                              ) : (
+                                <Check className="w-3 h-3 text-amber-700" />
+                              )}
+                              <span>Default (Active)</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={false}
+                              disabled={busyId === u.id}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleSetDefaultDealer(u);
+                              }}
+                              className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-white hover:bg-teal-100 text-teal-800 border border-teal-300 hover:border-teal-400 transition-all cursor-pointer shadow-2xs flex items-center gap-1 disabled:opacity-50"
+                              title="Set as the only Default Petty Cash Dealer for all staff"
+                            >
+                              {busyId === u.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin text-teal-600" />
+                              ) : (
+                                <Star className="w-3 h-3 text-amber-500" />
+                              )}
+                              <span>Set as Default</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
