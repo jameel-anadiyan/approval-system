@@ -115,7 +115,9 @@ export const RequestCard: React.FC<RequestCardProps> = ({
       .length || 0;
   const hasVoiceNote = request.files?.some((f) => f.kind === 'voice_note');
   const latestClarification = (request.disbursement_clarifications || [])[0];
-  const isPendingClarification = latestClarification?.status === 'pending_head';
+  const isPendingClarification =
+    request.status === 'approved' &&
+    latestClarification?.status === 'pending_head';
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();

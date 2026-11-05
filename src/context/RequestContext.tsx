@@ -2633,6 +2633,11 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               decided_at: new Date().toISOString(),
               approver_role: user.role,
               updated_at: new Date().toISOString(),
+              disbursement_clarifications: (r.disbursement_clarifications || []).map((c) =>
+                c.status === 'pending_head'
+                  ? { ...c, status: 'declined', response_note: `Request rejected: ${reason}`, responded_at: new Date().toISOString() }
+                  : c
+              ),
               actions: [action, ...(r.actions || [])],
             }
           : r

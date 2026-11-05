@@ -88,9 +88,11 @@ export const HeadDashboardPage: React.FC = () => {
     return count + pendingForMe;
   }, 0);
 
-  // Pending clarifications requested by disbursement
-  const pendingDisbursementClarifications = deptRequests.filter((r) =>
-    (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
+  // Pending clarifications requested by disbursement (strictly only shown for active approved requests; hidden when cancelled, rejected, or holding cancelled)
+  const pendingDisbursementClarifications = deptRequests.filter(
+    (r) =>
+      r.status === 'approved' &&
+      (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
   );
 
   // Total department amount approved/paid (non-disbursement items are not payouts)

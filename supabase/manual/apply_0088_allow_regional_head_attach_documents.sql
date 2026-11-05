@@ -304,3 +304,4 @@ create policy request_files_delete on public.request_files for delete to authent
 grant select, delete on public.request_files to authenticated;
 
 notify pgrst, 'reload schema';
+

@@ -516,7 +516,9 @@ export const RequestDetailPage: React.FC = () => {
   });
   const clarifications = request.disbursement_clarifications || [];
   const latestClarification = clarifications[0];
-  const isPendingDisbursementClarification = latestClarification?.status === 'pending_head';
+  const isPendingDisbursementClarification =
+    request.status === 'approved' &&
+    latestClarification?.status === 'pending_head';
   // Owner Head (or current head of the request's department) may cancel any time before full payment.
   const canCancelApproval =
     role === 'head' &&
