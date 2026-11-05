@@ -98,17 +98,23 @@ export const ApprovedRequestsPage: React.FC = () => {
   }, [dir.shops, approvedList]);
 
   const adminApprovedCount = useMemo(() => {
+    const adminUserIds = new Set(
+      dir.users.filter((u) => u.role === 'admin').map((u) => u.id)
+    );
     return approvedList.filter(
       (r) =>
         r.approver_role === 'admin' ||
         r.route === 'A' ||
+        (r.decided_by && adminUserIds.has(r.decided_by)) ||
         (r.actions || []).some(
           (a) =>
             (a.action === 'approved' || a.action === 'admin_approved') &&
-            a.actor_role === 'admin'
+            (a.actor_role === 'admin' ||
+              (a.actor_id && adminUserIds.has(a.actor_id)) ||
+              (a.actor_name || '').toLowerCase().includes('admin'))
         )
     ).length;
-  }, [approvedList]);
+  }, [approvedList, dir.users]);
 
   const handleToggleTodayOnly = () => {
     if (dateRange === 'today') {
@@ -202,13 +208,19 @@ export const ApprovedRequestsPage: React.FC = () => {
 
       // Admin Approved Only filter
       if (adminOnly) {
+        const adminUserIds = new Set(
+          dir.users.filter((u) => u.role === 'admin').map((u) => u.id)
+        );
         const isApprovedByAdmin =
           r.approver_role === 'admin' ||
           r.route === 'A' ||
+          (r.decided_by && adminUserIds.has(r.decided_by)) ||
           (r.actions || []).some(
             (a) =>
               (a.action === 'approved' || a.action === 'admin_approved') &&
-              a.actor_role === 'admin'
+              (a.actor_role === 'admin' ||
+                (a.actor_id && adminUserIds.has(a.actor_id)) ||
+                (a.actor_name || '').toLowerCase().includes('admin'))
           );
         if (!isApprovedByAdmin) return false;
       }
@@ -245,7 +257,7 @@ export const ApprovedRequestsPage: React.FC = () => {
       }
       return true;
     });
-  }, [approvedList, selectedType, dateRange, fromDate, toDate, query]);
+  }, [approvedList, selectedType, selectedShop, adminOnly, dateRange, fromDate, toDate, query, dir.users]);
 
   const handleDownloadPacket = async (r: RequestRecord, e: React.MouseEvent) => {
     e.stopPropagation();

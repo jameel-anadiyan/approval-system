@@ -38,6 +38,7 @@ import { HeadConsultationsSection } from '../../components/requests/HeadConsulta
 import { DisbursementClarificationSection } from '../../components/requests/DisbursementClarificationSection';
 import { RequesterProfileCard } from '../../components/requests/RequesterProfileCard';
 import { UserAvatar } from '../../components/common/UserAvatar';
+import { VoiceRecorder } from '../../components/requests/VoiceRecorder';
 import { CompleteTransferModal } from '../../components/portals/CompleteTransferModal';
 import { errMsg } from '../../lib/errorUtils';
 import {
@@ -59,6 +60,7 @@ import {
   isNonCashRequestType,
   isSpecialRequestType,
   HeadConsultation,
+  RequestFile,
 } from '../../types/database';
 import { useDirectory } from '../../lib/directory';
 import { useEntryLock } from '../../lib/entryLock';
@@ -101,11 +103,11 @@ import {
   Truck,
   Eye,
   Lock,
-  ExternalLink,
   Paperclip,
   FileWarning,
   PauseCircle,
   MessageSquare,
+  Mic,
 } from 'lucide-react';
 
 export const RequestDetailPage: React.FC = () => {
@@ -136,6 +138,7 @@ export const RequestDetailPage: React.FC = () => {
     deleteSpecificRequest,
     markTransferComplete,
     requestHeadConsultations,
+    addFiles,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
@@ -1383,6 +1386,52 @@ export const RequestDetailPage: React.FC = () => {
 
           {/* Voice Notes (if present) */}
           {showOriginals && voiceNotes.map((vn) => <VoiceNoteItem key={vn.id} file={vn} />)}
+
+          {/* Quick Voice Note Recorder for Drafted / Returned Request */}
+          {editable && showOriginals && (
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Mic className="w-4 h-4 text-indigo-600" />
+                  <span>Spoken Explanation <span className="text-slate-400 font-normal text-xs">(optional voice note for draft)</span></span>
+                </span>
+                {voiceNotes.length > 0 && (
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    {voiceNotes.length} voice note(s) attached
+                  </span>
+                )}
+              </div>
+              <VoiceRecorder
+                onRecordingComplete={async (recorded) => {
+                  const rawType = (recorded.blob.type || '').split(';')[0];
+                  const mime = rawType.startsWith('audio/') ? rawType : 'audio/webm';
+                  const vf: RequestFile = {
+                    id: `voice-${Date.now()}`,
+                    request_id: request.id,
+                    kind: 'voice_note',
+                    storage_path: `mock/${request.id}/${recorded.name}`,
+                    original_name: recorded.name,
+                    mime_type: mime,
+                    size_bytes: recorded.blob.size,
+                    page_count: null,
+                    duration_sec: recorded.duration,
+                    sha256: null,
+                    created_at: new Date().toISOString(),
+                    public_url: URL.createObjectURL(recorded.blob),
+                    blob: recorded.blob,
+                  };
+                  setBusy(true);
+                  const res = await addFiles(request.id, [vf]);
+                  setBusy(false);
+                  if (res.success) {
+                    setBanner({ ok: true, text: 'Voice note attached to draft successfully.' });
+                  } else {
+                    setBanner({ ok: false, text: res.error || 'Failed to attach voice note' });
+                  }
+                }}
+              />
+            </div>
+          )}
 
           {/* Document Viewer (PDF, Photos, or Office Documents) */}
           {showOriginals && (originalDocs.length > 0 || canHeadAddDocs) && (

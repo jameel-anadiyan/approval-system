@@ -41,6 +41,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useDirectory, fetchActiveEntryOfficers, fetchPettyCashDealers } from '../../lib/directory';
 import { RequestShopField, useRequestShops, useExhibitionShops, needsShopPick } from './RequestShopField';
 import { DisbursementModeSelector } from './DisbursementModeSelector';
+import { VoiceRecorder } from './VoiceRecorder';
+import { ConsultationVoicePlayer } from './ConsultationVoicePlayer';
 
 interface EditDraftModalProps {
   isOpen: boolean;
@@ -112,6 +114,29 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   );
   const [quotes, setQuotes] = useState<QuoteRow[]>(() => quotesFromFiles(request.files, type === 'asset_below_20k' ? 1 : 2));
   const [newFiles, setNewFiles] = useState<RequestFile[]>([]);
+  const [voiceFile, setVoiceFile] = useState<RequestFile | null>(null);
+
+  const handleVoiceRecording = (recorded: { name: string; blob: Blob; duration: number }) => {
+    const tempUrl = URL.createObjectURL(recorded.blob);
+    const rawType = (recorded.blob.type || '').split(';')[0];
+    const mime = rawType.startsWith('audio/') ? rawType : 'audio/webm';
+    const voice: RequestFile = {
+      id: `voice-${Date.now()}`,
+      request_id: request.id,
+      kind: 'voice_note',
+      storage_path: `mock/${request.id}/${recorded.name}`,
+      original_name: recorded.name,
+      mime_type: mime,
+      size_bytes: recorded.blob.size,
+      page_count: null,
+      duration_sec: recorded.duration,
+      sha256: null,
+      created_at: new Date().toISOString(),
+      public_url: tempUrl,
+      blob: recorded.blob,
+    };
+    setVoiceFile(voice);
+  };
   const [targetHeadId, setTargetHeadId] = useState<string>(request.owner_head_id ?? '');
   const [assignedEntryUserId, setAssignedEntryUserId] = useState<string>(request.assigned_entry_user_id ?? '');
   const [pettyCashDealers, setPettyCashDealers] = useState<PettyCashDealer[]>([]);
@@ -448,7 +473,10 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
           if (!res.success) throw new Error(res.error);
         }
       }
-      const toAdd = isAsset ? newQuoteFiles(quotes) : newFiles;
+      const toAdd = [
+        ...(isAsset ? newQuoteFiles(quotes) : newFiles),
+        ...(voiceFile ? [voiceFile] : []),
+      ];
       if (toAdd.length) {
         const add = await addFiles(request.id, toAdd);
         if (!add.success) throw new Error(add.error);
@@ -848,6 +876,25 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden" />
         </div>
 
+        {/* Voice Note / Spoken Explanation */}
+        <div className="bg-slate-50/80 rounded-2xl border border-slate-200/90 p-4 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              <Mic className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Spoken Explanation <span className="text-slate-400 font-normal text-[11px]">(optional voice note)</span></span>
+            </label>
+            {voiceFile && (
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                New Voice Note Ready
+              </span>
+            )}
+          </div>
+          <VoiceRecorder
+            onRecordingComplete={handleVoiceRecording}
+            onClear={() => setVoiceFile(null)}
+          />
+        </div>
+
         {existing.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -916,7 +963,19 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      {!isVoice && (
+                      {isVoice ? (
+                        <div className="w-44 sm:w-56">
+                          {f.storage_path ? (
+                            <ConsultationVoicePlayer
+                              storagePath={f.storage_path}
+                              duration={f.duration_sec}
+                              title={f.original_name}
+                            />
+                          ) : f.public_url ? (
+                            <audio controls src={f.public_url} className="h-7 w-full" />
+                          ) : null}
+                        </div>
+                      ) : (
                         <button
                           type="button"
                           onClick={() => handlePreviewExisting(f.id)}

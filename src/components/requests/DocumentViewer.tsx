@@ -365,7 +365,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <div>
             <h4 className="text-sm font-bold text-slate-800 font-display">No Documents Attached Yet</h4>
             <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-              As Department Head, you can attach invoices, receipts, or supporting bills before approval.
+              As Reviewer / Approver, you can attach invoices, receipts, or supporting bills before approval.
             </p>
           </div>
           <button
