@@ -212,8 +212,9 @@ export const NewRequestPage: React.FC = () => {
         if (cancelled) return;
         setPettyCashDealers(dealers);
         if (user?.role !== 'head') {
+          const defaultDealer = dealers.find((d) => d.is_default) || dealers[0];
           setTargetHeadId((prev) =>
-            prev && dealers.some((d) => d.head_id === prev) ? prev : (dealers[0]?.head_id || '')
+            prev && dealers.some((d) => d.head_id === prev) ? prev : (defaultDealer?.head_id || '')
           );
         }
       })
@@ -768,11 +769,32 @@ export const NewRequestPage: React.FC = () => {
                     <option value="">-- Select Petty Cash Dealing Head --</option>
                     {pettyCashDealers.map((dealer) => (
                       <option key={dealer.head_id} value={dealer.head_id}>
-                        {dealer.head_name} ({dealer.department_name}){dealer.designation ? ` – ${dealer.designation}` : ''}
+                        {dealer.head_name} ({dealer.department_name})
+                        {dealer.is_default ? ' ★ (Default Petty Cash Dealer)' : ''}
+                        {dealer.designation ? ` – ${dealer.designation}` : ''}
                       </option>
                     ))}
                   </select>
                 )}
+                {(() => {
+                  const selectedDealer = pettyCashDealers.find((d) => d.head_id === targetHeadId);
+                  if (selectedDealer?.is_default) {
+                    return (
+                      <div className="flex items-center gap-1.5 text-[11px] text-teal-800 font-semibold bg-teal-100/70 border border-teal-300/80 rounded-lg px-2.5 py-1">
+                        <span className="text-amber-600 font-bold">★</span>
+                        <span>Default Petty Cash Dealer pre-selected (you can select another head from the list if needed).</span>
+                      </div>
+                    );
+                  }
+                  if (selectedDealer) {
+                    return (
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-600 bg-white/70 border border-slate-200 rounded-lg px-2.5 py-1">
+                        <span>Selected Head: <strong>{selectedDealer.head_name}</strong> ({selectedDealer.department_name})</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
                 <p className="text-[11px] text-teal-900/80 leading-relaxed">
                   {user?.role === 'employee' && user.regional_head_id
                     ? 'Forwarded to your Regional Head first (who can review or change the Petty Cash Dealing Head), then sent directly to the Head without clerk routing.'

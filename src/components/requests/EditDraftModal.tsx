@@ -169,7 +169,14 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
     let alive = true;
     if (isPettyCash) {
       fetchPettyCashDealers(isBackendConnected, dir.users).then((dealers) => {
-        if (alive) setPettyCashDealers(dealers);
+        if (alive) {
+          setPettyCashDealers(dealers);
+          setTargetHeadId((prev) => {
+            if (prev) return prev;
+            const def = dealers.find((d) => d.is_default) || dealers[0];
+            return def ? def.head_id : '';
+          });
+        }
       });
     }
     if (isPaymentNeeded) {
@@ -490,6 +497,7 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
               {pettyCashDealers.map((dealer) => (
                 <option key={dealer.head_id} value={dealer.head_id}>
                   {dealer.head_name} ({dealer.department_name})
+                  {dealer.is_default ? ' ★ (Default)' : ''}
                 </option>
               ))}
               {request.owner_head_id && !pettyCashDealers.some((d) => d.head_id === request.owner_head_id) && (

@@ -44,6 +44,8 @@ export interface NewUserInput {
   mandatory_consultation_head_id?: string | null;
   /** Department Head: enabled as Petty Cash Dealer */
   is_petty_cash_dealer?: boolean;
+  /** Department Head: set as Default Petty Cash Dealer */
+  is_default_petty_cash_dealer?: boolean;
   /** Entry / Payment account: people who share this login, each with their own 4-digit passkey */
   account_persons?: AccountPersonInput[];
   /** WhatsApp mobile number with country code */
@@ -79,6 +81,8 @@ export interface AccessInput {
   connected_entry_accounts?: string[];
   mandatory_head_consultation?: boolean;
   mandatory_consultation_head_id?: string | null;
+  is_petty_cash_dealer?: boolean;
+  is_default_petty_cash_dealer?: boolean;
 }
 
 /** Offline sandbox store for disbursement persons (live mode keeps them in the database). */
@@ -473,6 +477,9 @@ export function useDirectory() {
             .update({ is_petty_cash_dealer: true, updated_at: new Date().toISOString() })
             .eq('id', data.id);
         }
+        if (input.is_default_petty_cash_dealer) {
+          await setDefaultPettyCashDealer(data.id, true);
+        }
       }
 
       if (input.photo && data?.id) {
@@ -502,27 +509,34 @@ export function useDirectory() {
         });
       });
     }
-    setUsers((prev) => [{
-      id: newUserId, username: input.username, full_name: input.full_name,
-      designation: input.designation ?? null, role: input.role, department_id: input.department_id ?? null,
-      is_active: true, must_change_password: true, created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(), department: dept,
-      shop_id: input.shop_id ?? null, shop,
-      region_id: input.region_id ?? null, region,
-      allowed_types: input.allowed_types ?? ['general'],
-      photo_path: input.photo || null,
-      whatsapp_number: input.whatsapp_number || null,
-      disbursement_type: input.role === 'disbursement' ? (input.disbursement_type || 'entry_only') : null,
-      payment_dealer_type: input.role === 'disbursement' && input.disbursement_type === 'payment_only' ? (input.payment_dealer_type || 'both') : null,
-      connected_entry_accounts: toAccountObjs(input.connected_entry_accounts || [], users),
-      mandatory_head_consultation: input.role === 'head' ? !!input.mandatory_head_consultation : false,
-      mandatory_consultation_head_id: input.role === 'head' && input.mandatory_head_consultation ? input.mandatory_consultation_head_id : null,
-      mandatory_consultation_head_name: input.role === 'head' && input.mandatory_head_consultation && targetConsultHead ? targetConsultHead.full_name : null,
-      is_petty_cash_dealer: input.role === 'head' ? !!input.is_petty_cash_dealer : false,
-      rh_shops: (input.shop_ids || []).map((shop_id) => ({ shop_id })),
-      clerk_cats: (input.category_ids || []).map((category_id) => ({ category_id })),
-      user_heads: (input.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === input.default_head_id })),
-    }, ...prev]);
+    const isNewDefaultDealer = input.role === 'head' && input.is_petty_cash_dealer && !!input.is_default_petty_cash_dealer;
+    setUsers((prev) => {
+      const sanitizedPrev = isNewDefaultDealer
+        ? prev.map((u) => (u.is_default_petty_cash_dealer ? { ...u, is_default_petty_cash_dealer: false } : u))
+        : prev;
+      return [{
+        id: newUserId, username: input.username, full_name: input.full_name,
+        designation: input.designation ?? null, role: input.role, department_id: input.department_id ?? null,
+        is_active: true, must_change_password: true, created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(), department: dept,
+        shop_id: input.shop_id ?? null, shop,
+        region_id: input.region_id ?? null, region,
+        allowed_types: input.allowed_types ?? ['general'],
+        photo_path: input.photo || null,
+        whatsapp_number: input.whatsapp_number || null,
+        disbursement_type: input.role === 'disbursement' ? (input.disbursement_type || 'entry_only') : null,
+        payment_dealer_type: input.role === 'disbursement' && input.disbursement_type === 'payment_only' ? (input.payment_dealer_type || 'both') : null,
+        connected_entry_accounts: toAccountObjs(input.connected_entry_accounts || [], users),
+        mandatory_head_consultation: input.role === 'head' ? !!input.mandatory_head_consultation : false,
+        mandatory_consultation_head_id: input.role === 'head' && input.mandatory_head_consultation ? input.mandatory_consultation_head_id : null,
+        mandatory_consultation_head_name: input.role === 'head' && input.mandatory_head_consultation && targetConsultHead ? targetConsultHead.full_name : null,
+        is_petty_cash_dealer: input.role === 'head' ? !!input.is_petty_cash_dealer : false,
+        is_default_petty_cash_dealer: isNewDefaultDealer,
+        rh_shops: (input.shop_ids || []).map((shop_id) => ({ shop_id })),
+        clerk_cats: (input.category_ids || []).map((category_id) => ({ category_id })),
+        user_heads: (input.head_ids || []).map((head_id) => ({ head_id, is_default: head_id === input.default_head_id })),
+      }, ...sanitizedPrev];
+    });
     return { success: true };
   };
 
@@ -917,39 +931,147 @@ export function useDirectory() {
       if (error) {
         const { error: fallbackErr } = await supabase
           .from('profiles')
-          .update({ is_petty_cash_dealer: enabled, updated_at: new Date().toISOString() })
+          .update({
+            is_petty_cash_dealer: enabled,
+            ...(!enabled ? { is_default_petty_cash_dealer: false } : {}),
+            updated_at: new Date().toISOString()
+          })
           .eq('id', userId);
         if (fallbackErr) {
           return {
             success: false,
             error:
               error.message.includes('does not exist') || error.message.includes('schema cache')
-                ? 'Database migration required: please run supabase/manual/apply_0075_petty_cash.sql in Supabase SQL Editor.'
+                ? 'Database migration required: please run supabase/manual/apply_0087_default_petty_cash_dealer.sql in Supabase SQL Editor.'
                 : error.message,
           };
         }
       }
-      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, is_petty_cash_dealer: enabled } : u)));
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? { ...u, is_petty_cash_dealer: enabled, ...(!enabled ? { is_default_petty_cash_dealer: false } : {}) }
+            : u
+        )
+      );
       await reload();
       return { success: true };
     }
-      setUsers((prev) => {
-        const next = prev.map((u) => (u.id === userId ? { ...u, is_petty_cash_dealer: enabled } : u));
-        try {
-          const saved = localStorage.getItem('approval_app_sandbox_user');
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed.id === userId) {
-              parsed.is_petty_cash_dealer = enabled;
-              localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
-              window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
-            }
+    setUsers((prev) => {
+      const next = prev.map((u) =>
+        u.id === userId
+          ? { ...u, is_petty_cash_dealer: enabled, ...(!enabled ? { is_default_petty_cash_dealer: false } : {}) }
+          : u
+      );
+      try {
+        const saved = localStorage.getItem('approval_app_sandbox_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.id === userId) {
+            parsed.is_petty_cash_dealer = enabled;
+            if (!enabled) parsed.is_default_petty_cash_dealer = false;
+            localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
+            window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
           }
-        } catch { /* ignore */ }
-        return next;
+        }
+      } catch { /* ignore */ }
+      return next;
+    });
+    return { success: true };
+  };
+
+  /** Admin sets or unsets a Department Head as the Default Petty Cash Dealer (only ONE can be default). */
+  const setDefaultPettyCashDealer = async (userId: string, isDefault = true): Promise<Result> => {
+    if (live) {
+      const { error } = await supabase.rpc('set_default_petty_cash_dealer', {
+        p_user_id: userId,
+        p_is_default: isDefault,
       });
+      if (error) {
+        // Fallback direct updates if RPC not yet deployed
+        if (isDefault) {
+          await supabase
+            .from('profiles')
+            .update({ is_default_petty_cash_dealer: false })
+            .eq('is_default_petty_cash_dealer', true);
+
+          const { error: updateErr } = await supabase
+            .from('profiles')
+            .update({
+              is_default_petty_cash_dealer: true,
+              is_petty_cash_dealer: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId);
+
+          if (updateErr) {
+            return {
+              success: false,
+              error:
+                error.message.includes('does not exist') || error.message.includes('schema cache')
+                  ? 'Database migration required: please run supabase/manual/apply_0087_default_petty_cash_dealer.sql in Supabase SQL Editor.'
+                  : updateErr.message,
+            };
+          }
+        } else {
+          await supabase
+            .from('profiles')
+            .update({ is_default_petty_cash_dealer: false, updated_at: new Date().toISOString() })
+            .eq('id', userId);
+        }
+      }
+      setUsers((prev) =>
+        prev.map((u) => {
+          if (u.id === userId) {
+            return {
+              ...u,
+              is_default_petty_cash_dealer: isDefault,
+              ...(isDefault ? { is_petty_cash_dealer: true } : {}),
+            };
+          }
+          if (isDefault && u.is_default_petty_cash_dealer) {
+            return { ...u, is_default_petty_cash_dealer: false };
+          }
+          return u;
+        })
+      );
+      await reload();
       return { success: true };
-    };
+    }
+
+    // Mock / Offline sandbox mode
+    setUsers((prev) => {
+      const next = prev.map((u) => {
+        if (u.id === userId) {
+          return {
+            ...u,
+            is_default_petty_cash_dealer: isDefault,
+            ...(isDefault ? { is_petty_cash_dealer: true } : {}),
+          };
+        }
+        if (isDefault && u.is_default_petty_cash_dealer) {
+          return { ...u, is_default_petty_cash_dealer: false };
+        }
+        return u;
+      });
+      try {
+        const saved = localStorage.getItem('approval_app_sandbox_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.id === userId) {
+            parsed.is_default_petty_cash_dealer = isDefault;
+            if (isDefault) parsed.is_petty_cash_dealer = true;
+          } else if (isDefault && parsed.is_default_petty_cash_dealer) {
+            parsed.is_default_petty_cash_dealer = false;
+          }
+          localStorage.setItem('approval_app_sandbox_user', JSON.stringify(parsed));
+          window.dispatchEvent(new CustomEvent('approval_app_user_sync', { detail: parsed }));
+        }
+      } catch { /* ignore */ }
+      return next;
+    });
+    return { success: true };
+  };
 
   /** Admin enables / disables Agreement, Statutory Payment, or Audit Report for a Department Head and optionally their related Clerks, Employees & Regional Heads. */
   const setDepartmentSpecialRequestAccess = async (
@@ -1480,7 +1602,7 @@ export function useDirectory() {
   return {
     departments, shops, regions, users, categories, productCategories, loading, live, reload, saveDepartment, saveShop, saveRegion, setRegionActive,
     saveProductCategory, setProductCategoryActive,
-    createUser, updateAccess, setUserRegion, setDisbursementType, setPaymentDealerConfig, setHeadMandatoryConsultation, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, setPettyCashDealer, setDepartmentSpecialRequestAccess, resetPassword, setActive,
+    createUser, updateAccess, setUserRegion, setDisbursementType, setPaymentDealerConfig, setHeadMandatoryConsultation, saveCategory, setDiscountReportAccess, setStockTransferReportAccess, setExhibitionWaitlistAccess, setPettyCashDealer, setDefaultPettyCashDealer, setDepartmentSpecialRequestAccess, resetPassword, setActive,
     uploadCredential, setPhoto, removePhoto, updateUserDetails, checkCanDeleteUser, deleteUser,
     listDisbursementPersons, addDisbursementPerson, updateDisbursementPerson, getMyDisbursementPersonCount,
   };
@@ -1600,7 +1722,13 @@ export async function fetchPettyCashDealers(live: boolean, fallbackUsers?: Profi
         designation: u.designation ?? null,
         department_id: u.department_id,
         department_name: u.department?.name || MOCK_DEPARTMENTS.find((d) => d.id === u.department_id)?.name || 'Department',
-      }));
+        is_default: !!u.is_default_petty_cash_dealer,
+      }))
+      .sort((a, b) => {
+        if (a.is_default && !b.is_default) return -1;
+        if (!a.is_default && b.is_default) return 1;
+        return a.head_name.localeCompare(b.head_name);
+      });
   }
 
   const map = new Map<string, PettyCashDealer>();
@@ -1609,7 +1737,10 @@ export async function fetchPettyCashDealers(live: boolean, fallbackUsers?: Profi
     if (!error && Array.isArray(data)) {
       for (const row of data as PettyCashDealer[]) {
         if (row?.head_id) {
-          map.set(row.head_id, row);
+          map.set(row.head_id, {
+            ...row,
+            is_default: !!row.is_default,
+          });
         }
       }
     }
@@ -1621,7 +1752,7 @@ export async function fetchPettyCashDealers(live: boolean, fallbackUsers?: Profi
     try {
       const { data: rows } = await supabase
         .from('profiles')
-        .select('id, username, full_name, designation, department_id, is_petty_cash_dealer, department:departments(name)')
+        .select('id, username, full_name, designation, department_id, is_petty_cash_dealer, is_default_petty_cash_dealer, department:departments(name)')
         .eq('role', 'head')
         .eq('is_active', true)
         .eq('is_petty_cash_dealer', true)
@@ -1634,6 +1765,7 @@ export async function fetchPettyCashDealers(live: boolean, fallbackUsers?: Profi
           designation: r.designation ?? null,
           department_id: r.department_id ?? null,
           department_name: r.department?.name || 'Department',
+          is_default: !!r.is_default_petty_cash_dealer,
         });
       }
     } catch {
@@ -1651,12 +1783,17 @@ export async function fetchPettyCashDealers(live: boolean, fallbackUsers?: Profi
           designation: u.designation ?? null,
           department_id: u.department_id,
           department_name: u.department?.name || 'Department',
+          is_default: !!u.is_default_petty_cash_dealer,
         });
       }
     }
   }
 
-  return Array.from(map.values()).sort((a, b) => a.head_name.localeCompare(b.head_name));
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.is_default && !b.is_default) return -1;
+    if (!a.is_default && b.is_default) return 1;
+    return a.head_name.localeCompare(b.head_name);
+  });
 }
 
 

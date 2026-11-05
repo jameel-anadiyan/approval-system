@@ -213,6 +213,7 @@ export interface PettyCashDealer {
   designation?: string | null;
   department_id: string | null;
   department_name: string;
+  is_default?: boolean;
 }
 
 /** Shop picked on General / Non-Cash requests (moved to requests.shop_id by the server). */
@@ -285,6 +286,8 @@ export interface Profile {
   can_view_exhibition_waitlist?: boolean;
   /** Head only — enabled by Admin as a Petty Cash Dealing Head */
   is_petty_cash_dealer?: boolean;
+  /** Head only — marked by Admin as the Default Petty Cash Dealer */
+  is_default_petty_cash_dealer?: boolean;
   photo_path?: string | null;
   /** Regional Head only — assigned region from Region Master */
   region_id?: string | null;

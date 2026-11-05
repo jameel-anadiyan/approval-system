@@ -40,6 +40,7 @@ interface UserModalProps {
     mandatory_head_consultation?: boolean;
     mandatory_consultation_head_id?: string | null;
     is_petty_cash_dealer?: boolean;
+    is_default_petty_cash_dealer?: boolean;
     account_persons?: AccountPersonInput[];
     whatsapp_number?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
@@ -68,6 +69,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [mandatoryHeadConsultation, setMandatoryHeadConsultation] = useState(false);
   const [mandatoryConsultationHeadId, setMandatoryConsultationHeadId] = useState('');
   const [isPettyCashDealer, setIsPettyCashDealer] = useState(false);
+  const [isDefaultPettyCashDealer, setIsDefaultPettyCashDealer] = useState(false);
   const [accountPersons, setAccountPersons] = useState<AccountPersonInput[]>([
     { name: '', passkey: '' },
   ]);
@@ -83,6 +85,7 @@ export const UserModal: React.FC<UserModalProps> = ({
       setMandatoryHeadConsultation(false);
       setMandatoryConsultationHeadId('');
       setIsPettyCashDealer(false);
+      setIsDefaultPettyCashDealer(false);
       setAccountPersons([{ name: '', passkey: '' }]);
       setWhatsappNumber('');
     }
@@ -209,6 +212,7 @@ export const UserModal: React.FC<UserModalProps> = ({
               mandatory_head_consultation: mandatoryHeadConsultation,
               mandatory_consultation_head_id: mandatoryHeadConsultation ? mandatoryConsultationHeadId || null : null,
               is_petty_cash_dealer: isPettyCashDealer,
+              is_default_petty_cash_dealer: isPettyCashDealer && isDefaultPettyCashDealer,
             }
           : {}),
         ...(role === 'clerk' ? { category_ids: extra.categoryIds } : {}),
@@ -683,12 +687,15 @@ export const UserModal: React.FC<UserModalProps> = ({
 
         {role === 'head' && (
           <div className="space-y-3">
-            <div className="p-3.5 rounded-xl border border-teal-200 bg-teal-50/60">
+            <div className="p-3.5 rounded-xl border border-teal-200 bg-teal-50/60 space-y-2.5">
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={isPettyCashDealer}
-                  onChange={(e) => setIsPettyCashDealer(e.target.checked)}
+                  onChange={(e) => {
+                    setIsPettyCashDealer(e.target.checked);
+                    if (!e.target.checked) setIsDefaultPettyCashDealer(false);
+                  }}
                   className="mt-0.5 rounded-sm text-teal-600 focus:ring-teal-500"
                 />
                 <div>
@@ -700,6 +707,30 @@ export const UserModal: React.FC<UserModalProps> = ({
                   </span>
                 </div>
               </label>
+
+              {isPettyCashDealer && (
+                <div className="pl-6 pt-2 border-t border-teal-200/80">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isDefaultPettyCashDealer}
+                      onChange={(e) => setIsDefaultPettyCashDealer(e.target.checked)}
+                      className="mt-0.5 rounded-sm text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-teal-950 flex items-center gap-1.5 flex-wrap">
+                        <span>Set as Default Petty Cash Dealer</span>
+                        <span className="text-[10px] text-amber-900 bg-amber-100 font-extrabold px-1.5 py-0.5 rounded-sm border border-amber-300">
+                          Auto-Selected
+                        </span>
+                      </span>
+                      <span className="text-[11px] text-teal-800/80 block leading-tight mt-0.5">
+                        Only one Head can be default. Setting this head as default will automatically pre-select them when staff raise a Petty Cash request.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              )}
             </div>
 
           <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/50 space-y-2.5">

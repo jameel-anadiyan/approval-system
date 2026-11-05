@@ -103,7 +103,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
           head_name: d.head_name,
           department_id: d.department_id || '',
           department_name: d.department_name,
-          is_default: false,
+          is_default: !!d.is_default,
           is_current_request_head: d.head_id === request.owner_head_id,
         });
       }
@@ -363,7 +363,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
             >
               {headOptions.map((h) => {
                 const badges: string[] = [];
-                if (h.is_default) badges.push('Main Head');
+                if (h.is_default) badges.push(isPettyCash ? 'Default Dealer' : 'Main Head');
                 if (h.is_current_request_head && !h.is_default) badges.push('Current Request Head');
                 return (
                   <option key={h.head_id} value={h.head_id}>

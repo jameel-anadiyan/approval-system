@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck, MessageSquare, FileSignature, Landmark, ClipboardCheck } from 'lucide-react';
+import { KeyRound, Stamp, UserPlus, Check, ShieldAlert, Building2, Store, SlidersHorizontal, Percent, LucideIcon, Camera, UserCheck, Tags, Users, Globe, AlertOctagon, Pencil, Trash2, Wallet, Truck, MessageSquare, FileSignature, Landmark, ClipboardCheck, Star } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDirectory } from '../../lib/directory';
 import { cleanWhatsAppNumber, formatWhatsAppDisplay } from '../../lib/whatsapp';
@@ -209,6 +209,19 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
       res.success
         ? `${u.full_name} ${nextEnabled ? 'enabled as Petty Cash Dealer' : 'removed from Petty Cash Dealers'}.`
         : res.error || 'Failed to update Petty Cash Dealer setting',
+      res.success
+    );
+  };
+
+  const handleSetDefaultDealer = async (u: Profile) => {
+    setBusyId(u.id);
+    const nextVal = !u.is_default_petty_cash_dealer;
+    const res = await dir.setDefaultPettyCashDealer(u.id, nextVal);
+    setBusyId(null);
+    show(
+      res.success
+        ? `${u.full_name} ${nextVal ? 'set as Default Petty Cash Dealer.' : 'is no longer default.'}`
+        : res.error || 'Failed to update Default Petty Cash Dealer setting',
       res.success
     );
   };
@@ -435,8 +448,13 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                         {ROLE_LABELS[u.role]}
                       </span>
                       {u.role === 'head' && u.is_petty_cash_dealer && (
-                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border bg-teal-50 text-teal-800 border-teal-300">
-                          Petty Cash Dealer
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                          u.is_default_petty_cash_dealer
+                            ? 'bg-amber-100 text-amber-900 border-amber-300 shadow-2xs'
+                            : 'bg-teal-50 text-teal-800 border-teal-300'
+                        }`}>
+                          {u.is_default_petty_cash_dealer && <Star className="w-3 h-3 text-amber-600 fill-amber-400" />}
+                          <span>{u.is_default_petty_cash_dealer ? 'Default Petty Cash Dealer' : 'Petty Cash Dealer'}</span>
                         </span>
                       )}
                       {u.role === 'disbursement' && (
@@ -711,25 +729,53 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
 
               {me?.role === 'admin' && u.role === 'head' && (
                 <div className="space-y-2">
-                  <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-teal-200/90 bg-teal-50/70 cursor-pointer">
-                    <span className="flex items-center gap-2 text-xs text-teal-900">
-                      <Wallet className="w-3.5 h-3.5 text-teal-600" />
-                      <span><strong>Petty Cash Dealer</strong> (appears in Petty Cash Head list)</span>
-                    </span>
-                    <button
-                      type="button"
-                      role="switch"
-                      id={`petty-cash-dealer-${u.id}`}
-                      aria-checked={!!u.is_petty_cash_dealer}
-                      disabled={busyId === u.id}
-                      onClick={() => togglePettyCashDealer(u)}
-                      className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${u.is_petty_cash_dealer ? 'bg-teal-600' : 'bg-slate-300'
-                        }`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.is_petty_cash_dealer ? 'translate-x-4' : ''
-                        }`} />
-                    </button>
-                  </label>
+                  <div className="p-2.5 rounded-xl border border-teal-200/90 bg-teal-50/70 space-y-2">
+                    <label className="flex items-center justify-between gap-3 cursor-pointer">
+                      <span className="flex items-center gap-2 text-xs text-teal-900">
+                        <Wallet className="w-3.5 h-3.5 text-teal-600" />
+                        <span><strong>Petty Cash Dealer</strong> (appears in Petty Cash Head list)</span>
+                      </span>
+                      <button
+                        type="button"
+                        role="switch"
+                        id={`petty-cash-dealer-${u.id}`}
+                        aria-checked={!!u.is_petty_cash_dealer}
+                        disabled={busyId === u.id}
+                        onClick={() => togglePettyCashDealer(u)}
+                        className={`relative w-10 h-6 min-h-0 rounded-full transition-colors disabled:opacity-50 ${u.is_petty_cash_dealer ? 'bg-teal-600' : 'bg-slate-300'
+                          }`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.is_petty_cash_dealer ? 'translate-x-4' : ''
+                          }`} />
+                      </button>
+                    </label>
+
+                    {u.is_petty_cash_dealer && (
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-teal-200/80">
+                        <span className="flex items-center gap-1.5 text-xs text-teal-950 font-medium">
+                          <Star className={`w-3.5 h-3.5 ${u.is_default_petty_cash_dealer ? 'text-amber-500 fill-amber-400' : 'text-slate-400'}`} />
+                          <span>Default Petty Cash Dealer</span>
+                        </span>
+                        {u.is_default_petty_cash_dealer ? (
+                          <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-2xs">
+                            <Check className="w-3 h-3 text-amber-700" />
+                            Default (Auto-Selected)
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busyId === u.id}
+                            onClick={() => handleSetDefaultDealer(u)}
+                            className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-white hover:bg-teal-100 text-teal-800 border border-teal-300 hover:border-teal-400 transition-all cursor-pointer shadow-2xs flex items-center gap-1"
+                            title="Set as the only Default Petty Cash Dealer for all staff"
+                          >
+                            <Star className="w-3 h-3 text-amber-500" />
+                            <span>Set as Default</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   <label className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 cursor-pointer">
                     <span className="flex items-center gap-2 text-xs text-slate-700">
