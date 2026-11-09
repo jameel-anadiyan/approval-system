@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
-import { formatINR, typeOf } from '../../lib/formatters';
-import { isDisbursementAssociated } from '../../types/database';
+import { typeOf } from '../../lib/formatters';
 import { canUserViewBillMissingRequest, isOwningDepartmentHead } from '../../lib/workflow';
 import { useDirectory } from '../../lib/directory';
 import {
@@ -12,8 +11,6 @@ import {
   Clock,
   CheckCircle,
   PlusCircle,
-  Building2,
-  TrendingUp,
   Users,
   HelpCircle,
   AlertTriangle,
@@ -95,11 +92,6 @@ export const HeadDashboardPage: React.FC = () => {
       (r.disbursement_clarifications || []).some((c) => c.status === 'pending_head')
   );
 
-  // Total department amount approved/paid (non-disbursement items are not payouts)
-  const sanctionedTotal = deptRequests
-    .filter((r) => (r.status === 'approved' || r.status === 'paid') && isDisbursementAssociated(typeOf(r)))
-    .reduce((sum, r) => sum + r.amount, 0);
-
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
       {/* Welcome Banner */}
@@ -126,146 +118,155 @@ export const HeadDashboardPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Primary In-Page Tabs for Department Head */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none border-b border-slate-200/90 pt-1">
-        <button
-          type="button"
-          onClick={() => setSelectedQueue('to_approve')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs shrink-0 transition-all ${
-            selectedQueue === 'to_approve'
-              ? 'bg-purple-700 text-white'
-              : 'text-slate-700 hover:bg-slate-100'
-          }`}
-        >
-          <CheckCircle className="w-3.5 h-3.5" />
-          <span>To Approve (Route B)</span>
-          <span
-            className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-              selectedQueue === 'to_approve' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-            }`}
-          >
-            {toApproveQueue.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => navigate('/head/review')}
-          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors"
-        >
-          <Clock className="w-3.5 h-3.5 text-slate-400" />
-          <span>To Review (Route A)</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold">
-            {toReviewQueue.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => navigate('/head/review?tab=admin')}
-          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors"
-        >
-          <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
-          <span>Pending Admin Approval</span>
-          {pendingAdminQueue.length > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
-              {pendingAdminQueue.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => navigate('/head/tracking')}
-          className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
-        >
-          <Search className="w-3.5 h-3.5 text-purple-600" />
-          <span>Track Request</span>
-        </button>
-
-        {isPettyCashDealer && (
+      {/* Primary In-Page Navigation for Department Head (Structured Row by Row, No Horizontal Scroll) */}
+      <div className="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2.5">
+        {/* Row 1: Approval Workflows & Tracking */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <button
             type="button"
-            id="head-petty-cash-tab-btn"
-            onClick={() => navigate('/petty-cash')}
-            className="px-4 py-2 text-xs font-bold rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+            onClick={() => setSelectedQueue('to_approve')}
+            className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2 shadow-2xs shrink-0 transition-all cursor-pointer ${
+              selectedQueue === 'to_approve'
+                ? 'bg-purple-700 text-white shadow-purple-200 ring-2 ring-purple-600/30'
+                : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/80'
+            }`}
           >
-            <Wallet className="w-3.5 h-3.5 text-teal-600" />
-            <span>Petty Cash</span>
-            {pettyCashApproveCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-teal-600 text-white text-[10px] font-bold">
-                {pettyCashApproveCount}
+            <CheckCircle className="w-3.5 h-3.5" />
+            <span>To Approve (Route B)</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                selectedQueue === 'to_approve' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {toApproveQueue.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/head/review')}
+            className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-50 text-slate-700 hover:bg-indigo-50/60 hover:text-indigo-800 border border-slate-200/80 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+          >
+            <Clock className="w-3.5 h-3.5 text-indigo-600" />
+            <span>To Review (Route A)</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold">
+              {toReviewQueue.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/head/review?tab=admin')}
+            className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-50 text-slate-700 hover:bg-blue-50/60 hover:text-blue-800 border border-slate-200/80 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
+            <span>Pending Admin Approval</span>
+            {pendingAdminQueue.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
+                {pendingAdminQueue.length}
               </span>
             )}
           </button>
-        )}
 
-        {/* Glowing Red Bill Missing Tab */}
-        <button
-          type="button"
-          onClick={() => setSelectedQueue('bill_missing')}
-          className={`px-4 py-2 text-xs font-extrabold rounded-xl flex items-center gap-2 shrink-0 transition-all ${
-            selectedQueue === 'bill_missing'
-              ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400 ring-offset-2 animate-pulse'
-              : billMissingQueue.length > 0
-              ? 'bg-rose-50 text-rose-700 border-2 border-rose-400 hover:bg-rose-100 hover:border-rose-500 ring-2 ring-rose-200/50'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-          title="Requests with original bill missing"
-        >
-          <FileWarning className={`w-3.5 h-3.5 ${selectedQueue === 'bill_missing' ? 'text-white' : 'text-rose-600'}`} />
-          <span>Bill Missing</span>
-          {billMissingQueue.length > 0 && (
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                selectedQueue === 'bill_missing' ? 'bg-white text-rose-700' : 'bg-rose-600 text-white animate-bounce'
-              }`}
+          <button
+            type="button"
+            onClick={() => navigate('/head/tracking')}
+            className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-50 text-slate-700 hover:bg-purple-50/60 hover:text-purple-800 border border-slate-200/80 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+          >
+            <Search className="w-3.5 h-3.5 text-purple-600" />
+            <span>Track Request</span>
+          </button>
+
+          {isPettyCashDealer && (
+            <button
+              type="button"
+              id="head-petty-cash-tab-btn"
+              onClick={() => navigate('/petty-cash')}
+              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
             >
-              {billMissingQueue.length}
-            </span>
+              <Wallet className="w-3.5 h-3.5 text-teal-600" />
+              <span>Petty Cash</span>
+              {pettyCashApproveCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-teal-600 text-white text-[10px] font-bold">
+                  {pettyCashApproveCount}
+                </span>
+              )}
+            </button>
           )}
-        </button>
+        </div>
 
-        {canViewWaitlist && (
+        {/* Subtle row separator */}
+        <div className="h-px bg-slate-100 w-full" />
+
+        {/* Row 2: Special Queues & Auxiliary Portals (Starts with Bill Missing) */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+          {/* Glowing Red Bill Missing Tab */}
           <button
             type="button"
-            onClick={() => navigate('/head/exhibition-waitlist')}
-            className="px-4 py-2 text-xs font-extrabold rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border-2 border-rose-400 flex items-center gap-2 shrink-0 shadow-xs transition-all ring-2 ring-rose-200/50"
-            title="Dedicated Special Waiting List Exhibition Tab"
+            onClick={() => setSelectedQueue('bill_missing')}
+            className={`px-3.5 py-2 text-xs font-extrabold rounded-xl flex items-center gap-2 shrink-0 transition-all cursor-pointer ${
+              selectedQueue === 'bill_missing'
+                ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400 ring-offset-1 animate-pulse'
+                : billMissingQueue.length > 0
+                ? 'bg-rose-50 text-rose-700 border-2 border-rose-400 hover:bg-rose-100 hover:border-rose-500 ring-2 ring-rose-200/50'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/80'
+            }`}
+            title="Requests with original bill missing"
           >
-            <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping shrink-0" />
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-            <span className="text-rose-900">Waitlist Exhibitions</span>
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black shadow-xs">
-              {waitlistPendingCount}
-            </span>
+            <FileWarning className={`w-3.5 h-3.5 ${selectedQueue === 'bill_missing' ? 'text-white' : 'text-rose-600'}`} />
+            <span>Bill Missing</span>
+            {billMissingQueue.length > 0 && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  selectedQueue === 'bill_missing' ? 'bg-white text-rose-700' : 'bg-rose-600 text-white animate-bounce'
+                }`}
+              >
+                {billMissingQueue.length}
+              </span>
+            )}
           </button>
-        )}
 
-        {hasExhibitionAccess && (
+          {canViewWaitlist && (
+            <button
+              type="button"
+              onClick={() => navigate('/head/exhibition-waitlist')}
+              className="px-3.5 py-2 text-xs font-extrabold rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border-2 border-rose-400 flex items-center gap-2 shrink-0 shadow-2xs transition-all ring-2 ring-rose-200/50 cursor-pointer"
+              title="Dedicated Special Waiting List Exhibition Tab"
+            >
+              <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping shrink-0" />
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span className="text-rose-900">Waitlist Exhibitions</span>
+              <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black shadow-xs">
+                {waitlistPendingCount}
+              </span>
+            </button>
+          )}
+
+          {hasExhibitionAccess && (
+            <button
+              type="button"
+              onClick={() => navigate('/calendar/exhibitions')}
+              className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/80 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
+            >
+              <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Exhibition Calendar</span>
+            </button>
+          )}
+
           <button
             type="button"
-            onClick={() => navigate('/calendar/exhibitions')}
-            className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-100 border border-slate-200 flex items-center gap-2 shrink-0 transition-colors"
+            onClick={() => navigate('/head/consultations')}
+            className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-50 text-slate-700 hover:bg-purple-50/60 hover:text-purple-800 border border-slate-200/80 flex items-center gap-2 shrink-0 transition-colors cursor-pointer"
           >
-            <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Exhibition Calendar</span>
+            <Users className="w-3.5 h-3.5 text-slate-400" />
+            <span>Consultations</span>
+            {pendingConsultationsCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[10px] font-bold">
+                {pendingConsultationsCount}
+              </span>
+            )}
           </button>
-        )}
-
-        <button
-          type="button"
-          onClick={() => navigate('/head/consultations')}
-          className="px-4 py-2 text-xs font-medium rounded-xl text-slate-700 hover:bg-slate-100 flex items-center gap-2 shrink-0 transition-colors"
-        >
-          <Users className="w-3.5 h-3.5 text-slate-400" />
-          <span>Consultations</span>
-          {pendingConsultationsCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[10px] font-bold">
-              {pendingConsultationsCount}
-            </span>
-          )}
-        </button>
+        </div>
       </div>
 
       {/* Bill Missing Banner when queue has items and head is on to_approve */}
@@ -412,10 +413,14 @@ export const HeadDashboardPage: React.FC = () => {
       )}
 
       {/* KPI Cards */}
-      <div className={`grid grid-cols-2 ${canViewWaitlist ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} gap-3 sm:gap-4`}>
+      <div className={`grid grid-cols-2 ${canViewWaitlist ? 'sm:grid-cols-3 lg:grid-cols-5' : 'sm:grid-cols-2 lg:grid-cols-4'} gap-3 sm:gap-4`}>
         <div
           onClick={() => setSelectedQueue('to_approve')}
-          className="bg-white p-4 sm:p-5 rounded-2xl border border-purple-200/90 shadow-xs cursor-pointer hover:border-purple-300 transition-all"
+          className={`p-4 sm:p-5 rounded-2xl border shadow-xs cursor-pointer transition-all ${
+            selectedQueue === 'to_approve'
+              ? 'bg-purple-50/70 border-purple-300 ring-2 ring-purple-200/50'
+              : 'bg-white border-purple-200/90 hover:border-purple-300'
+          }`}
         >
           <div className="flex items-center justify-between text-purple-600 mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">To Approve (Route B)</span>
@@ -446,7 +451,7 @@ export const HeadDashboardPage: React.FC = () => {
             onClick={() => navigate('/head/exhibition-waitlist')}
             className={`p-4 sm:p-5 rounded-2xl border-2 shadow-xs cursor-pointer transition-all ${
               waitlistPendingCount > 0
-                ? 'bg-rose-50/70 border-rose-400 hover:border-rose-600 hover:bg-rose-100/70'
+                ? 'bg-rose-50/70 border-rose-400 hover:border-rose-600 hover:bg-rose-100/70 ring-2 ring-rose-200/50'
                 : 'bg-white border-rose-200 hover:border-rose-300'
             }`}
           >
@@ -470,7 +475,7 @@ export const HeadDashboardPage: React.FC = () => {
           onClick={() => navigate('/head/consultations')}
           className={`p-4 sm:p-5 rounded-2xl border shadow-xs cursor-pointer transition-all ${
             pendingConsultationsCount > 0
-              ? 'bg-purple-50/70 border-purple-300 hover:border-purple-400'
+              ? 'bg-purple-50/70 border-purple-300 hover:border-purple-400 ring-2 ring-purple-200/40'
               : 'bg-white border-slate-200 hover:border-slate-300'
           }`}
         >
@@ -486,36 +491,13 @@ export const HeadDashboardPage: React.FC = () => {
           </span>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs">
-          <div className="flex items-center justify-between text-emerald-600 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">Sanctioned Total</span>
-            <TrendingUp className="w-4 h-4" />
-          </div>
-          <div className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display truncate">
-            {formatINR(sanctionedTotal)}
-          </div>
-          <span className="text-[11px] text-slate-400 mt-1 block">Approved & Disbursed</span>
-        </div>
-
-        <div
-          onClick={() => navigate('/head/department')}
-          className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs cursor-pointer hover:border-slate-300 transition-all col-span-2 lg:col-span-1"
-        >
-          <div className="flex items-center justify-between text-slate-600 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">Total Dept Logs</span>
-            <Building2 className="w-4 h-4" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-display">
-            {deptRequests.length}
-          </div>
-          <span className="text-[11px] text-slate-400 mt-1 block">All department requests</span>
-        </div>
-
         {/* Bill Missing KPI Card */}
         <div
           onClick={() => setSelectedQueue('bill_missing')}
-          className={`p-4 sm:p-5 rounded-2xl border-2 shadow-xs cursor-pointer transition-all col-span-2 sm:col-span-1 ${
-            billMissingQueue.length > 0
+          className={`p-4 sm:p-5 rounded-2xl border-2 shadow-xs cursor-pointer transition-all ${
+            selectedQueue === 'bill_missing'
+              ? 'bg-rose-100/80 border-rose-500 ring-2 ring-rose-400/50 shadow-md'
+              : billMissingQueue.length > 0
               ? 'bg-rose-50/70 border-rose-400 hover:border-rose-600 hover:bg-rose-100/70 ring-2 ring-rose-300/40'
               : 'bg-white border-slate-200 hover:border-slate-300'
           }`}
