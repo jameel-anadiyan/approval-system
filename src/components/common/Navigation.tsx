@@ -357,6 +357,7 @@ export const Navigation: React.FC = () => {
         { label: 'From Other Heads', path: '/head/consultations', icon: Users, badge: headConsultationsCount },
         { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
         { label: 'Track Request', path: '/head/tracking', icon: Search },
+        ...(isPettyCashDealerHead ? [pettyCashNavItem] : []),
         ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
         ...(user?.can_view_exhibition_waitlist
           ? [{ label: 'Waitlist Exhibitions', path: '/head/exhibition-waitlist', icon: AlertTriangle, badge: headWaitlistCount, badgeVariant: 'rose' as const, isWaitlistTab: true }]
@@ -366,7 +367,6 @@ export const Navigation: React.FC = () => {
         ...(canViewDiscountReport(user) ? [{ label: 'Discount Report', path: '/reports/discounts', icon: Percent }] : []),
       ];
       moreNavItems = [
-        ...(isPettyCashDealerHead ? [pettyCashNavItem] : []),
         ...specialNavItems,
         { label: 'My Seal & Sign', path: '/head/credentials', icon: ShieldCheck },
         ...stockReportItem,
