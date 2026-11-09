@@ -352,23 +352,23 @@ export const Navigation: React.FC = () => {
     case 'head':
       mainNavItems = [
         { label: 'To Approve', path: '/head', icon: CheckCircle, badge: headToApproveCount },
-        ...(isPettyCashDealerHead ? [pettyCashNavItem] : []),
-        ...specialNavItems,
-        billMissingNavItem,
         { label: 'To Review', path: '/head/review', icon: Clock, badge: headToReviewCount },
+        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
+        { label: 'From Other Heads', path: '/head/consultations', icon: Users, badge: headConsultationsCount },
+        { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
         { label: 'Track Request', path: '/head/tracking', icon: Search },
+        ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
         ...(user?.can_view_exhibition_waitlist
           ? [{ label: 'Waitlist Exhibitions', path: '/head/exhibition-waitlist', icon: AlertTriangle, badge: headWaitlistCount, badgeVariant: 'rose' as const, isWaitlistTab: true }]
           : []),
-        ...(hasExhibitionAccess ? [{ label: 'Exhibition Calendar', path: '/calendar/exhibitions', icon: CalendarDays }] : []),
+        billMissingNavItem,
         { label: 'Returned', path: '/returned', icon: RotateCcw, badge: returnedCount, badgeVariant: 'amber' },
-        { label: 'Approved', path: '/approved', icon: CheckCircle2 },
-        { label: 'New Request', path: '/new', icon: PlusCircle, highlight: true },
+        ...(canViewDiscountReport(user) ? [{ label: 'Discount Report', path: '/reports/discounts', icon: Percent }] : []),
       ];
       moreNavItems = [
-        { label: 'From Other Heads', path: '/head/consultations', icon: Users, badge: headConsultationsCount },
+        ...(isPettyCashDealerHead ? [pettyCashNavItem] : []),
+        ...specialNavItems,
         { label: 'My Seal & Sign', path: '/head/credentials', icon: ShieldCheck },
-        ...(canViewDiscountReport(user) ? [{ label: 'Discount Report', path: '/reports/discounts', icon: Percent }] : []),
         ...stockReportItem,
         { label: 'Staff Users', path: '/head/users', icon: Users },
         { label: 'Dept Requests', path: '/head/department', icon: Building2 },
