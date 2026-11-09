@@ -1,8 +1,18 @@
 import React from 'react';
 import type { RequestRecord } from '../../types/database';
-import { formatINR, formatISTDate, getExhibitionShopName, PROVIDE_LABELS, typeOf } from '../../lib/formatters';
+import {
+  formatINR,
+  formatINRWhole,
+  formatISTDate,
+  getExhibitionShopName,
+  getPettyCashCategoryLabel,
+  getPettyCashLimit,
+  PROVIDE_LABELS,
+  typeOf,
+} from '../../lib/formatters';
 import { Percent, CalendarDays, Package, ArrowLeftRight, ArrowRight, FileCheck, Pencil, Store, Wallet, UserCheck, Building2, ShieldCheck, Clock, Sparkles } from 'lucide-react';
 import type { ExhibitionDaySchedule } from '../../types/database';
+import { generateDailySchedules } from './TypedRequestFields';
 
 const Row: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) =>
   value === undefined || value === null || value === '' ? null : (
@@ -30,16 +40,31 @@ export const RequestDetailsPanel: React.FC<{
   const t = typeOf(request);
   const d = request.details || {};
   if (t === 'petty_cash') {
+    const category = d.petty_cash_category;
+    const catLabel = getPettyCashCategoryLabel(category);
+    const catLimit = getPettyCashLimit(category);
     const modeLabel = (request.disbursement_mode || d.disbursement_mode || 'cash') === 'bank' ? 'Bank Transfer' : 'Cash';
+    const bottleQty = d.bottle_qty ? Number(d.bottle_qty) : null;
+    const perBottlePrice = d.per_bottle_price
+      ? Number(d.per_bottle_price)
+      : (bottleQty && request.amount ? Math.round((request.amount / bottleQty) * 100) / 100 : null);
+
     return (
       <div className="bg-white rounded-2xl border border-teal-200 p-5 sm:p-6 shadow-xs space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-teal-100 pb-3">
-          <h3 className="text-sm font-bold text-teal-950 font-display flex items-center gap-2">
-            <Wallet className="w-4 h-4 text-teal-600" />
-            <span>Petty Cash Form Below 1000</span>
-          </h3>
-          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
-            Max ₹1,000 · Skips Clerk
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <Wallet className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-teal-950 font-display flex items-center gap-1.5">
+                <span>{catLabel}</span>
+              </h3>
+              <p className="text-[11px] text-teal-700 font-medium">Petty Cash Request</p>
+            </div>
+          </div>
+          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
+            Max {formatINRWhole(catLimit)} · Skips Clerk
           </span>
         </div>
 
@@ -61,6 +86,24 @@ export const RequestDetailsPanel: React.FC<{
             </span>
           </div>
         </div>
+
+        {category === 'water_bottle' && bottleQty && (
+          <div className="p-3 bg-teal-50/50 border border-teal-200 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div>
+              <span className="text-[11px] text-teal-700 font-bold block">Number of Water Bottles</span>
+              <span className="text-sm font-extrabold text-teal-950">{bottleQty} Bottles</span>
+            </div>
+            <div>
+              <span className="text-[11px] text-teal-700 font-bold block">Price Per Bottle</span>
+              <span className="text-sm font-extrabold text-teal-950">
+                ₹{perBottlePrice?.toFixed(2) ?? '—'} / bottle
+                {perBottlePrice && perBottlePrice <= 6 && (
+                  <span className="text-[11px] font-normal text-teal-600 ml-1.5">(Compliant: ≤ ₹6.00)</span>
+                )}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="p-3 rounded-xl bg-teal-50/40 border border-teal-200/80 flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
@@ -84,7 +127,7 @@ export const RequestDetailsPanel: React.FC<{
         </div>
 
         <p className="text-[11px] text-slate-500">
-          Stamping is applied on <strong>Petty Cash Form Below 1000</strong> along with any attached supporting documents.
+          Stamping is applied on <strong>{catLabel} Form</strong> along with any attached supporting documents.
         </p>
       </div>
     );
@@ -446,7 +489,10 @@ export const RequestDetailsPanel: React.FC<{
     const provides = (d.provides || []).map((p) => (p === 'other' && d.provides_other ? `Other: ${d.provides_other}` : PROVIDE_LABELS[p] || p));
     const exhShopName = getExhibitionShopName(request);
     const isNotAssigned = exhShopName === 'Not Assigned';
-    const schedules: ExhibitionDaySchedule[] = Array.isArray(d.daily_schedules) ? (d.daily_schedules as ExhibitionDaySchedule[]) : [];
+    const rawSchedules = Array.isArray(d.daily_schedules) ? (d.daily_schedules as ExhibitionDaySchedule[]) : [];
+    const schedules: ExhibitionDaySchedule[] = rawSchedules.length > 0
+      ? rawSchedules
+      : generateDailySchedules(d.event_start, d.event_end);
     const totalDays = schedules.length > 0 ? schedules.length : Number(d.total_days || 1);
     const totalHours = schedules.reduce((s, row) => s + (Number(row.hours) || 0), 0) || Number(d.total_hours || 0);
 

@@ -1,4 +1,4 @@
-import { RequestStatus, AppRole, ApprovalRoute, RequestType } from '../types/database';
+import { RequestStatus, AppRole, ApprovalRoute, RequestType, PettyCashCategory } from '../types/database';
 
 export function formatINR(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -388,4 +388,44 @@ export function getExhibitionShopName(r: {
 }): string {
   const name = r.details?.conducting_shop_name?.trim();
   return name || 'Not Assigned';
+}
+
+export interface PettyCashCategoryConfig {
+  id: PettyCashCategory;
+  label: string;
+  limit: number;
+  description: string;
+}
+
+export const PETTY_CASH_CATEGORIES: PettyCashCategoryConfig[] = [
+  { id: 'normal', label: 'Normal Petty Cash', limit: 1000, description: 'General day-to-day petty expenses (up to ₹1,000)' },
+  { id: 'showroom_cleaning', label: 'Showroom Cleaning', limit: 4000, description: 'Showroom deep cleaning & maintenance (up to ₹4,000)' },
+  { id: 'accommodation_cleaning', label: 'Accommodation Cleaning', limit: 1500, description: 'Staff accommodation & room cleaning (up to ₹1,500)' },
+  { id: 'water_bottle', label: 'Water Bottle', limit: 2500, description: 'Packaged drinking water bottles (up to ₹2,500, max ₹6/bottle)' },
+];
+
+export function getPettyCashLimit(category?: PettyCashCategory | string | null): number {
+  switch (category) {
+    case 'showroom_cleaning':
+      return 4000;
+    case 'accommodation_cleaning':
+      return 1500;
+    case 'water_bottle':
+      return 2500;
+    default:
+      return 1000;
+  }
+}
+
+export function getPettyCashCategoryLabel(category?: PettyCashCategory | string | null): string {
+  switch (category) {
+    case 'showroom_cleaning':
+      return 'Showroom Cleaning';
+    case 'accommodation_cleaning':
+      return 'Accommodation Cleaning';
+    case 'water_bottle':
+      return 'Water Bottle';
+    default:
+      return 'Normal Petty Cash';
+  }
 }

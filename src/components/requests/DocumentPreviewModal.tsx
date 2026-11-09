@@ -24,6 +24,7 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
+  RotateCw,
   ChevronDown,
   Trash2,
   X,
@@ -116,6 +117,34 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
   const [pdfError, setPdfError] = useState<boolean>(false);
   const [downloading, setDownloading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Individual page rotation state for PDFs: Record<pageNumber, degrees> (0, 90, 180, 270)
+  const [pageRotations, setPageRotations] = useState<Record<number, number>>({});
+  // Rotation for image documents: degrees (0, 90, 180, 270)
+  const [imageRotation, setImageRotation] = useState<number>(0);
+
+  const handleRotatePage = (pageNum: number) => {
+    setPageRotations((prev) => ({
+      ...prev,
+      [pageNum]: ((prev[pageNum] || 0) + 90) % 360,
+    }));
+  };
+
+  const handleResetPage = (pageNum: number) => {
+    setPageRotations((prev) => {
+      const copy = { ...prev };
+      delete copy[pageNum];
+      return copy;
+    });
+  };
+
+  const handleRotateImage = () => {
+    setImageRotation((prev) => (prev + 90) % 360);
+  };
+
+  const handleResetImage = () => {
+    setImageRotation(0);
+  };
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -265,6 +294,31 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
             )}
           </div>
 
+          {/* Rotate control for Image */}
+          {isImage && (
+            <div className="flex items-center bg-slate-950/90 rounded-lg p-0.5 border border-slate-700/80 gap-0.5 shadow-2xs">
+              <button
+                type="button"
+                onClick={handleRotateImage}
+                className="px-2 py-1 rounded text-slate-200 hover:text-white hover:bg-slate-800 text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                title="Rotate image 90° clockwise"
+              >
+                <RotateCw className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Rotate{imageRotation > 0 ? ` (${imageRotation}°)` : ''}</span>
+              </button>
+              {imageRotation > 0 && (
+                <button
+                  type="button"
+                  onClick={handleResetImage}
+                  className="p-1 hover:bg-slate-800 text-amber-400 hover:text-amber-300 rounded transition-colors cursor-pointer"
+                  title="Reset image rotation"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
+
           {resolvedUrl && (
             <a
               href={resolvedUrl}
@@ -340,36 +394,74 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
                 }
                 className="w-full flex flex-col items-center"
               >
-                {Array.from({ length: numPages || 1 }, (_, pIdx) => (
-                  <div
-                    key={pIdx + 1}
-                    className="my-2.5 sm:my-3.5 flex flex-col items-center w-full"
-                  >
-                    <div className="max-w-full overflow-x-auto flex justify-center">
-                      <Page
-                        pageNumber={pIdx + 1}
-                        width={pageWidth}
-                        renderTextLayer={false}
-                        renderAnnotationLayer={false}
-                        className="shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white"
-                        loading={
-                          <div
-                            style={{ width: pageWidth, height: Math.round(pageWidth * 1.35) }}
-                            className="bg-slate-900 border border-slate-800 rounded-lg flex items-center justify-center text-slate-500 text-xs"
+                {Array.from({ length: numPages || 1 }, (_, pIdx) => {
+                  const pageNum = pIdx + 1;
+                  const rot = pageRotations[pageNum] || 0;
+                  return (
+                    <div
+                      key={pageNum}
+                      className="my-3 sm:my-4 flex flex-col items-center w-full"
+                    >
+                      {/* Individual Page Toolbar */}
+                      <div
+                        style={{ width: Math.min(pageWidth, containerWidth - 32) }}
+                        className="flex items-center justify-between mb-1.5 px-1 text-xs select-none"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono font-bold text-slate-300 bg-slate-900/90 px-2 py-0.5 rounded border border-slate-800 shadow-2xs">
+                            Page {pageNum}{(numPages || 1) > 1 ? ` of ${numPages}` : ''}
+                          </span>
+                          {rot > 0 && (
+                            <span className="text-[10px] font-mono font-bold text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-700/60">
+                              {rot}°
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRotatePage(pageNum)}
+                            className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                            title={`Rotate Page ${pageNum} 90° clockwise`}
                           >
-                            <Loader2 className="w-5 h-5 animate-spin mr-2 text-indigo-400" />
-                            <span>Page {pIdx + 1}…</span>
-                          </div>
-                        }
-                      />
+                            <RotateCw className="w-3 h-3 text-indigo-400" />
+                            <span>Rotate Page</span>
+                          </button>
+                          {rot > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleResetPage(pageNum)}
+                              className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border border-slate-700 text-[11px] transition-colors cursor-pointer"
+                              title={`Reset Page ${pageNum} rotation`}
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="max-w-full overflow-x-auto flex justify-center">
+                        <Page
+                          pageNumber={pageNum}
+                          width={pageWidth}
+                          rotate={rot}
+                          renderTextLayer={false}
+                          renderAnnotationLayer={false}
+                          className="shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white"
+                          loading={
+                            <div
+                              style={{ width: pageWidth, height: Math.round(pageWidth * 1.35) }}
+                              className="bg-slate-900 border border-slate-800 rounded-lg flex items-center justify-center text-slate-500 text-xs"
+                            >
+                              <Loader2 className="w-5 h-5 animate-spin mr-2 text-indigo-400" />
+                              <span>Page {pageNum}…</span>
+                            </div>
+                          }
+                        />
+                      </div>
                     </div>
-                    {(numPages || 1) > 1 && (
-                      <span className="text-[10px] font-mono text-slate-400 mt-1 bg-slate-900/90 px-2 py-0.5 rounded border border-slate-800">
-                        Page {pIdx + 1} of {numPages}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </Document>
             ) : (
               /* Fallback if PDF canvas fails (e.g. strict CORS or unsupported compression) */
@@ -393,7 +485,7 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
             )}
           </div>
         ) : isImage && resolvedUrl ? (
-          <div className="w-full max-w-full overflow-x-auto overflow-y-auto flex justify-center p-2">
+          <div className="w-full max-w-full overflow-x-auto overflow-y-auto flex justify-center p-4">
             <img
               src={resolvedUrl}
               alt={fileName}
@@ -402,6 +494,8 @@ const SingleDocViewer: React.FC<SingleDocViewerProps> = ({
                 maxWidth: multiplier > 1 ? 'none' : '100%',
                 maxHeight: multiplier > 1 ? 'none' : '85vh',
                 height: multiplier > 1 ? 'auto' : undefined,
+                transform: `rotate(${imageRotation}deg)`,
+                transition: 'transform 0.2s ease-in-out',
               }}
               className={`rounded-xl shadow-2xl transition-all duration-150 border border-slate-800 mx-auto ${
                 multiplier > 1 ? 'object-contain' : 'max-h-[85vh] object-contain'

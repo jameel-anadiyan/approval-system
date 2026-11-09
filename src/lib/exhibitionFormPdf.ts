@@ -1,6 +1,7 @@
 import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib';
 import type { RequestRecord, ExhibitionDaySchedule } from '../types/database';
 import { formatISTDate } from './formatters';
+import { generateDailySchedules } from '../components/requests/TypedRequestFields';
 
 export const EXHIBITION_FORM_FILE_NAME = 'Exhibition_Event_Approval_Form.pdf';
 
@@ -91,7 +92,10 @@ export async function generateExhibitionFormPdf(
   const page = pdfDoc.addPage([pageWidth, pageHeight]);
 
   const d = req.details ?? {};
-  const schedules: ExhibitionDaySchedule[] = Array.isArray(d.daily_schedules) ? d.daily_schedules : [];
+  const rawSchedules: ExhibitionDaySchedule[] = Array.isArray(d.daily_schedules) ? d.daily_schedules : [];
+  const schedules: ExhibitionDaySchedule[] = rawSchedules.length > 0
+    ? rawSchedules
+    : generateDailySchedules(d.event_start, d.event_end);
   const totalDays = schedules.length > 0 ? schedules.length : Number(d.total_days || 1);
   const totalHours = schedules.reduce((s, row) => s + (Number(row.hours) || 0), 0) || Number(d.total_hours || 0);
 

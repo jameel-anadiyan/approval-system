@@ -182,9 +182,14 @@ export interface NonCashDetails {
   associated_notes?: string | null;
 }
 
+export type PettyCashCategory = 'normal' | 'showroom_cleaning' | 'accommodation_cleaning' | 'water_bottle';
+
 export interface PettyCashDetails {
   petty_cash_form?: string | null;
+  petty_cash_category?: PettyCashCategory | null;
   max_limit?: number | null;
+  bottle_qty?: number | null;
+  per_bottle_price?: number | null;
   total_amount?: number | null;
 }
 

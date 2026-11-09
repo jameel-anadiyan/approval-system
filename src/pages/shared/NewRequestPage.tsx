@@ -9,6 +9,7 @@ import {
   Profile,
   DisbursementMode,
   PettyCashDealer,
+  PettyCashCategory,
   isDisbursementAssociated,
   isSpecialRequestType,
 } from '../../types/database';
@@ -32,8 +33,42 @@ import {
   StockTransferFields, StockTransferForm, emptyStockTransfer,
   toStockTransferDetails, validateStockTransfer, stockTransferCalc,
 } from '../../components/requests/StockTransferFields';
-import { formatINR, formatINRWhole, REQUEST_TYPES, TYPE_LABELS, TYPE_DESCRIPTIONS } from '../../lib/formatters';
-import { ShieldAlert, Send, Save, ArrowLeft, Receipt, BadgePercent, Store, Ban, Package, UserCheck, FileCheck, CalendarDays, ArrowLeftRight, Loader2, Wallet, FileSignature, Landmark, ClipboardCheck, Eye, FileText, CheckCircle2, Users } from 'lucide-react';
+import {
+  formatINR,
+  formatINRWhole,
+  REQUEST_TYPES,
+  TYPE_LABELS,
+  TYPE_DESCRIPTIONS,
+  PETTY_CASH_CATEGORIES,
+  getPettyCashLimit,
+  getPettyCashCategoryLabel,
+} from '../../lib/formatters';
+import {
+  ShieldAlert,
+  Send,
+  Save,
+  ArrowLeft,
+  Receipt,
+  BadgePercent,
+  Store,
+  Ban,
+  Package,
+  UserCheck,
+  FileCheck,
+  CalendarDays,
+  ArrowLeftRight,
+  Loader2,
+  Wallet,
+  FileSignature,
+  Landmark,
+  ClipboardCheck,
+  Eye,
+  FileText,
+  CheckCircle2,
+  Users,
+  Droplets,
+  Sparkles,
+} from 'lucide-react';
 import { WorkCategoryField, useCategoryOptions } from '../../components/requests/WorkCategoryField';
 import { TargetHeadField } from '../../components/requests/TargetHeadField';
 import { checkExhibitionQuota } from '../../lib/exhibitionQuota';
@@ -203,6 +238,10 @@ export const NewRequestPage: React.FC = () => {
   const [entryOfficers, setEntryOfficers] = useState<Profile[]>([]);
   const [loadingOfficers, setLoadingOfficers] = useState(false);
 
+  // Petty Cash category options & water bottle handling
+  const [pettyCashCategory, setPettyCashCategory] = useState<PettyCashCategory>('normal');
+  const [bottleQtyStr, setBottleQtyStr] = useState<string>('');
+
   useEffect(() => {
     if (!isPettyCash) return;
     let cancelled = false;
@@ -292,6 +331,11 @@ export const NewRequestPage: React.FC = () => {
   const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
   const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
 
+  const bottleQty = parseInt(bottleQtyStr, 10) || 0;
+  const perBottlePrice = bottleQty > 0 ? Math.round((baseAmount / bottleQty) * 100) / 100 : 0;
+  const isBottlePriceHigh = pettyCashCategory === 'water_bottle' && bottleQty > 0 && perBottlePrice > 6;
+  const pettyCashLimit = getPettyCashLimit(pettyCashCategory);
+
   const statutoryAmt = parseFloat(statutoryPayment.payment_amount) || 0;
   const quoteInfo = quoteSummary(quotes);
   const stockCalc = stockTransferCalc(stockTransfer);
@@ -356,7 +400,10 @@ export const NewRequestPage: React.FC = () => {
     else if (type === 'petty_cash') {
       d = {
         petty_cash_form: 'petty_cash_form_below_1000',
-        max_limit: 1000,
+        petty_cash_category: pettyCashCategory,
+        max_limit: pettyCashLimit,
+        bottle_qty: pettyCashCategory === 'water_bottle' ? bottleQty : null,
+        per_bottle_price: pettyCashCategory === 'water_bottle' ? perBottlePrice : null,
         total_amount: baseAmount,
         ...shopChoice(),
       };
@@ -402,7 +449,17 @@ export const NewRequestPage: React.FC = () => {
 
   const validate = (forDraft: boolean): string | null => {
     if (type === 'petty_cash') {
-      if (baseAmount > 1000) return 'Maximum amount for Petty Cash is ₹1,000.';
+      if (baseAmount > pettyCashLimit) {
+        return `Maximum amount for ${getPettyCashCategoryLabel(pettyCashCategory)} is ${formatINRWhole(pettyCashLimit)}.`;
+      }
+      if (pettyCashCategory === 'water_bottle') {
+        if (!forDraft && (!bottleQty || bottleQty <= 0)) {
+          return 'Please enter the number of water bottles.';
+        }
+        if (bottleQty > 0 && perBottlePrice > 6) {
+          return `Bottle price is high (₹${perBottlePrice.toFixed(2)}/bottle, maximum ₹6 allowed). Please put this in a General request.`;
+        }
+      }
       if (!forDraft) {
         if (user?.role !== 'head' && !targetHeadId) {
           return 'Please select a Petty Cash Dealing Head.';
@@ -411,7 +468,7 @@ export const NewRequestPage: React.FC = () => {
           return 'Please select a Disbursement Entry Account before submitting.';
         }
         if (baseAmount <= 0) {
-          return 'Please enter a valid Petty Cash amount greater than zero (up to ₹1,000).';
+          return `Please enter a valid Petty Cash amount greater than zero (up to ${formatINRWhole(pettyCashLimit)}).`;
         }
         if (disbursementMode !== 'cash' && disbursementMode !== 'bank') {
           return 'Please select Cash or Bank payment mode.';
@@ -1034,41 +1091,137 @@ export const NewRequestPage: React.FC = () => {
           )}
 
           {isPettyCash && (
-            <div className="space-y-2 bg-teal-50/40 p-4 rounded-xl border border-teal-200/80">
-              <div className="flex items-center justify-between gap-2">
-                <label htmlFor="petty-cash-amount" className="block text-xs font-bold text-slate-800">
-                  Amount in Rupees (₹) <span className="text-rose-500">*</span>
+            <div className="space-y-4 bg-teal-50/40 p-4 rounded-xl border border-teal-200/80">
+              {/* Category Selector */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  Petty Cash Category <span className="text-rose-500">*</span>
                 </label>
-                <span className="text-[11px] font-bold text-teal-700">Maximum ₹1,000.00</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {PETTY_CASH_CATEGORIES.map((cat) => {
+                    const isSelected = pettyCashCategory === cat.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setPettyCashCategory(cat.id)}
+                        className={`text-left p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-teal-200 hover:border-teal-400 hover:bg-teal-50/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-900'}`}>
+                            {cat.label}
+                          </span>
+                          <span
+                            className={`text-[11px] font-bold px-1.5 py-0.5 rounded-md ${
+                              isSelected ? 'bg-teal-700/60 text-teal-100' : 'bg-teal-100 text-teal-800'
+                            }`}
+                          >
+                            Max {formatINRWhole(cat.limit)}
+                          </span>
+                        </div>
+                        <p className={`text-[11px] leading-snug ${isSelected ? 'text-teal-100' : 'text-slate-500'}`}>
+                          {cat.description}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="relative">
-                <span className="absolute left-3.5 top-3.5 font-bold text-teal-600 text-base">₹</span>
-                <input
-                  id="petty-cash-amount"
-                  type="number"
-                  step="0.01"
-                  min="1"
-                  max="1000"
-                  inputMode="decimal"
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(e.target.value)}
-                  placeholder="0.00 (up to 1000)"
-                  className={`w-full text-base sm:text-sm pl-8 pr-4 py-3 rounded-xl border bg-white outline-hidden font-display font-semibold transition-colors ${
-                    baseAmount > 1000
-                      ? 'border-rose-400 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-rose-700'
-                      : 'border-teal-300 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 text-slate-900'
-                  }`}
-                />
+
+              {/* Water Bottle Quantity Field */}
+              {pettyCashCategory === 'water_bottle' && (
+                <div className="bg-white p-3.5 rounded-xl border border-teal-200 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor="water-bottle-qty" className="block text-xs font-bold text-slate-800">
+                      Number of Water Bottles <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[11px] font-semibold text-teal-700">Max ₹6.00 / bottle</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="water-bottle-qty"
+                      type="number"
+                      min="1"
+                      step="1"
+                      inputMode="numeric"
+                      value={bottleQtyStr}
+                      onChange={(e) => setBottleQtyStr(e.target.value)}
+                      placeholder="e.g. 100"
+                      className="w-full text-sm px-3 py-2 rounded-lg border border-teal-300 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 bg-white text-slate-900 outline-hidden font-semibold"
+                    />
+                  </div>
+                  {bottleQty > 0 && baseAmount > 0 && (
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-teal-100">
+                      <span className="text-slate-600">Calculated price per bottle:</span>
+                      <span className={`font-bold ${isBottlePriceHigh ? 'text-rose-600' : 'text-teal-800'}`}>
+                        ₹{perBottlePrice.toFixed(2)} / bottle
+                      </span>
+                    </div>
+                  )}
+                  {isBottlePriceHigh && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold text-rose-700 flex items-start gap-2">
+                      <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p>Bottle price is high please put this in general request.</p>
+                        <p className="text-[11px] font-normal text-rose-600 mt-0.5">
+                          Calculated: ₹{perBottlePrice.toFixed(2)} / bottle (Maximum allowed in Petty Cash is ₹6.00 per bottle).
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Amount Field */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="petty-cash-amount" className="block text-xs font-bold text-slate-800">
+                    Amount in Rupees (₹) <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[11px] font-bold text-teal-700">
+                    Maximum {formatINRWhole(pettyCashLimit)}
+                  </span>
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-3.5 font-bold text-teal-600 text-base">₹</span>
+                  <input
+                    id="petty-cash-amount"
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    max={pettyCashLimit}
+                    inputMode="decimal"
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(e.target.value)}
+                    placeholder={`0.00 (up to ${pettyCashLimit})`}
+                    className={`w-full text-base sm:text-sm pl-8 pr-4 py-3 rounded-xl border bg-white outline-hidden font-display font-semibold transition-colors ${
+                      baseAmount > pettyCashLimit
+                        ? 'border-rose-400 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-rose-700'
+                        : 'border-teal-300 focus:border-teal-600 focus:ring-1 focus:ring-teal-600 text-slate-900'
+                    }`}
+                  />
+                </div>
+                {baseAmount > pettyCashLimit ? (
+                  <p className="text-xs font-bold text-rose-600">
+                    Amount exceeds {formatINRWhole(pettyCashLimit)}. Maximum limit for {getPettyCashCategoryLabel(pettyCashCategory)} is {formatINRWhole(pettyCashLimit)}.
+                  </p>
+                ) : baseAmount > 0 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-teal-800 pt-0.5">
+                    <span>
+                      {getPettyCashCategoryLabel(pettyCashCategory)}: {formatINR(baseAmount)}
+                    </span>
+                    {pettyCashCategory === 'water_bottle' && bottleQty > 0 && (
+                      <span className="text-teal-700">
+                        ({bottleQty} bottles @ ₹{perBottlePrice.toFixed(2)}/ea)
+                      </span>
+                    )}
+                  </div>
+                ) : null}
               </div>
-              {baseAmount > 1000 ? (
-                <p className="text-xs font-bold text-rose-600">
-                  Amount exceeds ₹1,000. Petty Cash requests are strictly for amounts up to ₹1,000.
-                </p>
-              ) : baseAmount > 0 ? (
-                <span className="text-xs font-semibold text-teal-800 block">
-                  Petty Cash amount: {formatINR(baseAmount)}
-                </span>
-              ) : null}
             </div>
           )}
 

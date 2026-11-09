@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   AlertCircle,
   FileSpreadsheet,
+  RotateCw,
+  RotateCcw,
 } from 'lucide-react';
 import { RequestFile, RequestRecord } from '../../types/database';
 import { formatFileSize } from '../../lib/formatters';
@@ -56,6 +58,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   const [activeFileIndex, setActiveFileIndex] = useState(0);
   const [multiplier, setMultiplier] = useState(1);
+  const [rotation, setRotation] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialIndex, setModalInitialIndex] = useState(0);
   const [downloading, setDownloading] = useState(false);
@@ -512,6 +515,20 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             ))}
           </div>
 
+          {/* Rotate Control for Image */}
+          {isImage && (
+            <button
+              type="button"
+              onClick={() => setRotation((prev) => (prev + 90) % 360)}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition-colors inline-flex items-center gap-1 cursor-pointer"
+              title="Rotate image 90° clockwise"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline text-xs font-semibold">Rotate</span>
+              {rotation > 0 && <span className="text-[10px] text-indigo-300 font-mono">({rotation}°)</span>}
+            </button>
+          )}
+
           {/* Add Extra Docs Button for Head/Admin before approval */}
           {canAddDocs && requestId && (
             <button
@@ -614,6 +631,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 onClick={() => {
                   setActiveFileIndex(idx);
                   setMultiplier(1);
+                  setRotation(0);
                 }}
                 className={`px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
                   idx === activeFileIndex
@@ -702,6 +720,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               style={{
                 width: `${multiplier * 100}%`,
                 maxWidth: 'none',
+                transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                transition: 'transform 0.2s ease-in-out',
               }}
               className="rounded-lg shadow-lg bg-white object-contain border border-slate-800"
             />
