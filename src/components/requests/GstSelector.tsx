@@ -1,51 +1,82 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { formatINR } from '../../lib/formatters';
-import { Percent } from 'lucide-react';
+import { IndianRupee } from 'lucide-react';
 
 const STANDARD_RATES = [5, 12, 18, 28];
 
-interface GstSelectorProps {
+export interface GstSelectorProps {
   hasGst: boolean;
   onHasGstChange: (hasGst: boolean) => void;
-  gstRate: number;
-  onGstRateChange: (rate: number) => void;
-  baseAmount: number;
   gstAmount: number;
+  onGstAmountChange: (amount: number) => void;
+  baseAmount: number;
   totalAmount: number;
+  roundOff?: number;
   baseLabel?: string;
   totalLabel?: string;
+  gstRate?: number;
+  onGstRateChange?: (rate: number) => void;
 }
 
 export const GstSelector: React.FC<GstSelectorProps> = ({
   hasGst,
   onHasGstChange,
-  gstRate,
-  onGstRateChange,
-  baseAmount,
   gstAmount,
+  onGstAmountChange,
+  baseAmount,
   totalAmount,
+  roundOff,
   baseLabel = 'Base Amount (Excl. GST)',
   totalLabel = 'Total (Incl. GST)',
+  gstRate,
+  onGstRateChange,
 }) => {
-  const [isCustomRate, setIsCustomRate] = useState(!STANDARD_RATES.includes(gstRate));
+  const [typedGstStr, setTypedGstStr] = useState<string>(() =>
+    gstAmount > 0 ? String(gstAmount) : ''
+  );
 
-  const handleSelectStandardRate = (rate: number) => {
-    setIsCustomRate(false);
-    onGstRateChange(rate);
-  };
+  // Keep local string in sync if parent changes gstAmount externally
+  useEffect(() => {
+    if (gstAmount > 0) {
+      const parsed = parseFloat(typedGstStr);
+      if (isNaN(parsed) || Math.abs(parsed - gstAmount) > 0.001) {
+        setTypedGstStr(String(gstAmount));
+      }
+    } else if (!hasGst || gstAmount === 0) {
+      if (typedGstStr !== '' && typedGstStr !== '0') {
+        setTypedGstStr('');
+      }
+    }
+  }, [gstAmount, hasGst]);
 
-  const handleCustomRateToggle = () => {
-    setIsCustomRate(true);
-  };
-
-  const handleCustomRateInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    if (!isNaN(val) && val >= 0) {
-      onGstRateChange(val);
-    } else if (e.target.value === '') {
-      onGstRateChange(0);
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valStr = e.target.value;
+    setTypedGstStr(valStr);
+    const parsed = parseFloat(valStr);
+    const amt = !isNaN(parsed) && parsed >= 0 ? parsed : 0;
+    onGstAmountChange(amt);
+    if (baseAmount > 0 && onGstRateChange) {
+      const effRate = amt > 0 ? Math.round((amt / baseAmount) * 10000) / 100 : 0;
+      onGstRateChange(effRate);
     }
   };
+
+  const handleQuickFill = (rate: number) => {
+    const calculated = Math.round(baseAmount * (rate / 100) * 100) / 100;
+    setTypedGstStr(String(calculated));
+    onGstAmountChange(calculated);
+    if (onGstRateChange) {
+      onGstRateChange(rate);
+    }
+  };
+
+  // Calculate effective rate for display
+  const effectivePct =
+    baseAmount > 0 && gstAmount > 0
+      ? ((gstAmount / baseAmount) * 100).toFixed(2).replace(/\.00$/, '')
+      : gstRate
+      ? String(gstRate)
+      : null;
 
   return (
     <div className="space-y-3">
@@ -54,19 +85,24 @@ export const GstSelector: React.FC<GstSelectorProps> = ({
           <span>
             Is GST applicable? <span className="text-rose-500">*</span>
           </span>
-          {hasGst && (
+          {hasGst && effectivePct && (
             <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-              GST {gstRate}% Applied
+              ~{effectivePct}% Effective GST
             </span>
           )}
         </label>
 
-        {/* GST Toggle Buttons: No GST vs Yes, Add GST (18% default) */}
+        {/* GST Toggle Buttons: No GST vs Yes, Add GST */}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             id="gst-toggle-no"
-            onClick={() => onHasGstChange(false)}
+            onClick={() => {
+              onHasGstChange(false);
+              onGstAmountChange(0);
+              setTypedGstStr('');
+              if (onGstRateChange) onGstRateChange(0);
+            }}
             className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
               !hasGst
                 ? 'bg-white border-indigo-600 text-indigo-700 shadow-xs ring-1 ring-indigo-600'
@@ -80,7 +116,12 @@ export const GstSelector: React.FC<GstSelectorProps> = ({
             id="gst-toggle-yes"
             onClick={() => {
               onHasGstChange(true);
-              if (!gstRate) onGstRateChange(18);
+              if (gstAmount === 0 && baseAmount > 0) {
+                const defaultAmt = Math.round(baseAmount * 0.18 * 100) / 100;
+                setTypedGstStr(String(defaultAmt));
+                onGstAmountChange(defaultAmt);
+                if (onGstRateChange) onGstRateChange(18);
+              }
             }}
             className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
               hasGst
@@ -88,73 +129,68 @@ export const GstSelector: React.FC<GstSelectorProps> = ({
                 : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
             }`}
           >
-            Yes, Add GST (18% Default)
+            Yes, Add GST
           </button>
         </div>
       </div>
 
-      {/* Slabs / Rate Selector (when GST is applicable) */}
+      {/* Typed GST Amount Input Field (When GST is applicable) */}
       {hasGst && (
-        <div className="p-3 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-2.5">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
-              <Percent className="w-3 h-3 text-indigo-600" />
-              <span>Select GST Rate Slab (Change if needed):</span>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {STANDARD_RATES.map((rate) => {
-              const isSelected = !isCustomRate && gstRate === rate;
-              return (
-                <button
-                  key={rate}
-                  type="button"
-                  id={`gst-rate-${rate}`}
-                  onClick={() => handleSelectStandardRate(rate)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
-                  }`}
-                >
-                  {rate}% {rate === 18 ? '(Default)' : ''}
-                </button>
-              );
-            })}
-
-            <button
-              type="button"
-              id="gst-rate-custom-toggle"
-              onClick={handleCustomRateToggle}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                isCustomRate
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                  : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
-              }`}
-            >
-              Custom %
-            </button>
-          </div>
-
-          {/* Custom % input field */}
-          {isCustomRate && (
-            <div className="pt-1 flex items-center gap-2">
-              <span className="text-xs text-slate-600 font-medium">Custom Rate:</span>
-              <div className="relative w-28">
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={gstRate}
-                  onChange={handleCustomRateInput}
-                  className="w-full px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden pr-6"
-                  placeholder="e.g. 18"
-                />
-                <span className="absolute right-2 top-1 text-xs font-bold text-slate-400 pointer-events-none">
-                  %
+        <div className="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <IndianRupee className="w-3.5 h-3.5 text-indigo-600" />
+                <span>GST Amount in Rupees (₹)</span>
+                <span className="text-rose-500">*</span>
+              </span>
+              {effectivePct && (
+                <span className="text-[11px] font-medium text-slate-500">
+                  Approx. {effectivePct}% of base
                 </span>
+              )}
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400 pointer-events-none">
+                ₹
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                id="typed-gst-amount-input"
+                value={typedGstStr}
+                onChange={handleInputChange}
+                placeholder="Type exact GST amount from bill (e.g. 180.00)"
+                className="w-full pl-7 pr-3 py-2 text-sm font-bold rounded-xl border border-slate-300 bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-hidden"
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Type the exact GST amount shown on the bill/tax invoice copy.
+            </p>
+          </div>
+
+          {/* Quick Auto-Fill Buttons based on standard slabs */}
+          {baseAmount > 0 && (
+            <div className="pt-2 border-t border-indigo-100/80">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-semibold text-slate-500 mr-0.5">
+                  Quick calculate:
+                </span>
+                {STANDARD_RATES.map((rate) => {
+                  const calculated = Math.round(baseAmount * (rate / 100) * 100) / 100;
+                  return (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => handleQuickFill(rate)}
+                      className="px-2.5 py-1 text-xs font-bold rounded-lg bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-300 transition-colors cursor-pointer"
+                      title={`Auto-fill ${rate}% GST: ₹${calculated}`}
+                    >
+                      {rate}% (₹{calculated})
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -162,27 +198,40 @@ export const GstSelector: React.FC<GstSelectorProps> = ({
       )}
 
       {/* Real-time Calculation Breakdown */}
-      {baseAmount > 0 && hasGst && (
+      {baseAmount > 0 && (
         <div className="pt-2 border-t border-slate-200/80 space-y-1.5 text-xs text-slate-600">
           <div className="flex justify-between items-center">
             <span>{baseLabel}:</span>
             <span className="font-mono font-medium">{formatINR(baseAmount)}</span>
           </div>
-          <div className="flex justify-between items-center text-indigo-700 font-medium">
-            <span>GST @ {gstRate}%:</span>
-            <span className="font-mono font-bold">+{formatINR(gstAmount)}</span>
-          </div>
-          <div className="flex justify-between items-center pt-1 border-t border-dashed border-slate-200 text-sm font-bold text-slate-900">
-            <span>{totalLabel}:</span>
-            <span className="font-mono text-indigo-600 font-extrabold">{formatINR(totalAmount)}</span>
-          </div>
-        </div>
-      )}
 
-      {baseAmount > 0 && !hasGst && (
-        <div className="pt-2 border-t border-slate-200/80 flex justify-between items-center text-sm font-bold text-slate-900">
-          <span className="text-xs text-slate-600">Total Payable Amount (No GST):</span>
-          <span className="font-mono text-indigo-600 font-extrabold">{formatINR(totalAmount)}</span>
+          {hasGst && (
+            <div className="flex justify-between items-center text-indigo-700 font-medium">
+              <span>GST Amount:</span>
+              <span className="font-mono font-bold">+{formatINR(gstAmount)}</span>
+            </div>
+          )}
+
+          {roundOff !== undefined && roundOff !== 0 && (
+            <div className="flex justify-between items-center text-slate-500 text-[11px]">
+              <span>Round-off (nearest ₹1):</span>
+              <span className="font-mono font-semibold">
+                {roundOff > 0 ? `+${formatINR(roundOff)}` : `-${formatINR(Math.abs(roundOff))}`}
+              </span>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center pt-1 border-t border-dashed border-slate-200 text-sm font-bold text-slate-900">
+            <div>
+              <span>{totalLabel}:</span>
+              <span className="block text-[10px] font-normal text-slate-500">
+                (Rounded to nearest ₹1)
+              </span>
+            </div>
+            <span className="font-mono text-indigo-600 font-extrabold text-base">
+              {formatINR(totalAmount)}
+            </span>
+          </div>
         </div>
       )}
     </div>

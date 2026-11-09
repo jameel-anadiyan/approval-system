@@ -337,8 +337,11 @@ export async function generateExhibitionFormPdf(
   // Section 3: Sponsorship Financials
   drawSectionHeader('3. SPONSORSHIP & FINANCIALS');
   drawRow('Amount (excl. GST)', `Rs. ${Number(d.amount_excl_gst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, false);
-  drawRow(`GST (${Number(d.gst_pct || 0)}%)`, `Rs. ${Number(d.gst_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, true);
-  drawRow('Total (incl. GST)', `Rs. ${Number(d.total_incl_gst || req.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, false);
+  drawRow(`GST Amount${d.gst_pct ? ` (~${Number(d.gst_pct)}%)` : ''}`, `Rs. ${Number(d.gst_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, true);
+  if (d.round_off) {
+    drawRow('Round-off (nearest Rs. 1)', `Rs. ${Number(d.round_off) > 0 ? '+' : ''}${Number(d.round_off).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, false);
+  }
+  drawRow('Total (incl. GST)', `Rs. ${Number(d.total_incl_gst || req.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, true);
   drawRow('Payment Mode & Due Date', String(d.payment_mode_due || 'As per agreement'), true);
   drawRow('Organiser GSTIN', String(d.organiser_gstin || 'Unregistered / Not Provided'), false);
   drawRow('GST Invoice Provided', d.gst_invoice ? 'Yes — Tax invoice provided' : 'No', true);

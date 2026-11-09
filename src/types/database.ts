@@ -116,8 +116,9 @@ export interface ExhibitionDetails {
   expected_footfall?: string | null;
   stall_size_location?: string | null;
   amount_excl_gst: number;
-  gst_pct: number;
+  gst_pct?: number;
   gst_amount?: number;
+  round_off?: number;
   total_incl_gst?: number;
   payment_mode_due?: string | null;
   organiser_gstin?: string | null;
@@ -142,6 +143,7 @@ export interface GeneralDetails {
   has_gst?: boolean | null;
   gst_rate?: number | null;
   gst_amount?: number | null;
+  round_off?: number | null;
   total_amount?: number | null;
 }
 

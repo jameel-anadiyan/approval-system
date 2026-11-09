@@ -103,6 +103,17 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   const [hasGst, setHasGst] = useState<boolean>(() =>
     request.details?.has_gst !== undefined ? Boolean(request.details.has_gst) : true
   );
+  const [isGstCustomized, setIsGstCustomized] = useState<boolean>(() =>
+    request.details?.gst_amount !== undefined && request.details?.gst_amount !== null
+  );
+  const [gstAmountStr, setGstAmountStr] = useState<string>(() => {
+    if (request.details?.gst_amount !== undefined && request.details?.gst_amount !== null) {
+      return String(request.details.gst_amount);
+    }
+    const b = Number(request.details?.base_amount ?? 0);
+    const r = Number(request.details?.gst_rate ?? 18);
+    return b > 0 ? String(Math.round(b * (r / 100) * 100) / 100) : '';
+  });
   const [gstRate, setGstRate] = useState<number>(() =>
     Number(request.details?.gst_rate ?? 18)
   );
@@ -264,8 +275,17 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
   }) : null;
 
   const baseAmount = parseFloat(amountStr) || 0;
-  const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
-  const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
+  const gstAmount = hasGst
+    ? isGstCustomized
+      ? (parseFloat(gstAmountStr) || 0)
+      : (gstAmountStr ? (parseFloat(gstAmountStr) || 0) : Math.round(baseAmount * 0.18 * 100) / 100)
+    : 0;
+  const unroundedGeneralTotal = baseAmount + gstAmount;
+  const generalTotal = hasGst ? Math.round(unroundedGeneralTotal) : Math.round(baseAmount);
+  const roundOff = hasGst ? Math.round((generalTotal - unroundedGeneralTotal) * 100) / 100 : 0;
+  const effectiveGstRate = (baseAmount > 0 && gstAmount > 0)
+    ? Math.round((gstAmount / baseAmount) * 10000) / 100
+    : (hasGst ? gstRate : 0);
 
   const bottleQty = parseInt(bottleQtyStr, 10) || 0;
   const perBottlePrice = bottleQty > 0 ? Math.round((baseAmount / bottleQty) * 100) / 100 : 0;
@@ -368,8 +388,9 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
       d = {
         base_amount: baseAmount,
         has_gst: hasGst,
-        gst_rate: hasGst ? gstRate : 0,
+        gst_rate: hasGst ? effectiveGstRate : 0,
         gst_amount: gstAmount,
+        round_off: roundOff,
         total_amount: generalTotal,
         ...(shopState.loading ? {} : shopChoice()),
       };
@@ -930,12 +951,32 @@ export const EditDraftModal: React.FC<EditDraftModalProps> = ({ isOpen, onClose,
 
             <GstSelector
               hasGst={hasGst}
-              onHasGstChange={setHasGst}
-              gstRate={gstRate}
-              onGstRateChange={setGstRate}
-              baseAmount={baseAmount}
+              onHasGstChange={(has) => {
+                setHasGst(has);
+                if (!has) {
+                  setIsGstCustomized(true);
+                  setGstAmountStr('0');
+                } else if (!isGstCustomized || gstAmountStr === '' || gstAmountStr === '0') {
+                  const autoVal = Math.round(baseAmount * 0.18 * 100) / 100;
+                  setGstAmountStr(String(autoVal));
+                  setIsGstCustomized(false);
+                }
+              }}
               gstAmount={gstAmount}
+              onGstAmountChange={(amt) => {
+                setIsGstCustomized(true);
+                setGstAmountStr(String(amt));
+              }}
+              baseAmount={baseAmount}
               totalAmount={generalTotal}
+              roundOff={roundOff}
+              gstRate={effectiveGstRate}
+              onGstRateChange={(r) => {
+                const autoVal = Math.round(baseAmount * (r / 100) * 100) / 100;
+                setGstAmountStr(String(autoVal));
+                setIsGstCustomized(true);
+                setGstRate(r);
+              }}
             />
 
             {generalTotal > threshold && (

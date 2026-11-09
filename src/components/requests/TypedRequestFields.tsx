@@ -171,6 +171,7 @@ export interface ExhibitionForm {
   /** null until the requester answers Yes / No */
   gst_invoice: boolean | null;
   gst_rate: string;
+  gst_amount?: string;
   provides: ExhibitionProvide[];
   provides_other: string;
   voucher_1000_qty: string;
@@ -260,6 +261,7 @@ export const emptyExhibition: ExhibitionForm = {
   amount_excl_gst: '', payment_mode_due: '', organiser_gstin: '',
   gst_invoice: true,
   gst_rate: '18',
+  gst_amount: '',
   provides: [], provides_other: '', voucher_1000_qty: '', voucher_500_qty: '', voucher_1000_min: '', voucher_500_min: '',
   voucher_validity: '', lucky_draw: '', winners_draw: '', other_costs: '', total_budget: '', purpose: '',
   is_waitlist: false,
@@ -291,6 +293,9 @@ export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm
     payment_mode_due: str(d?.payment_mode_due), organiser_gstin: str(d?.organiser_gstin),
     gst_invoice: d?.gst_invoice === undefined || d?.gst_invoice === null ? true : !!d.gst_invoice,
     gst_rate: d?.gst_pct !== undefined && d?.gst_pct !== null ? String(d.gst_pct) : '18',
+    gst_amount: d?.gst_amount !== undefined && d?.gst_amount !== null
+      ? String(d.gst_amount)
+      : (d?.amount_excl_gst && d?.gst_pct ? String(Math.round(Number(d.amount_excl_gst) * (Number(d.gst_pct) / 100) * 100) / 100) : ''),
     provides: (d?.provides ?? []) as ExhibitionProvide[],
     provides_other: str(d?.provides_other), voucher_1000_qty: str(d?.voucher_1000_qty || ''),
     voucher_500_qty: str(d?.voucher_500_qty || ''), voucher_1000_min: str(d?.voucher_1000_min),
@@ -303,13 +308,24 @@ export const exhibitionFromDetails = (d?: RequestDetails | null): ExhibitionForm
 
 export function exhibitionCalc(f: ExhibitionForm) {
   const excl = num(f.amount_excl_gst);
-  const rate = num(f.gst_rate) || 18;
-  const pct = f.gst_invoice ? rate : 0;
-  const gst = Math.round(excl * (pct / 100) * 100) / 100;
-  const total = Math.round((excl + gst) * 100) / 100;
+  let gst = 0;
+  if (f.gst_invoice) {
+    if (f.gst_amount !== undefined && f.gst_amount !== '') {
+      gst = num(f.gst_amount);
+    } else {
+      const rate = num(f.gst_rate) || 18;
+      gst = Math.round(excl * (rate / 100) * 100) / 100;
+    }
+  }
+  const unroundedTotal = excl + gst;
+  const total = Math.round(unroundedTotal);
+  const roundOff = Math.round((total - unroundedTotal) * 100) / 100;
+  const pct = (excl > 0 && gst > 0)
+    ? Math.round((gst / excl) * 10000) / 100
+    : (f.gst_invoice ? (num(f.gst_rate) || 18) : 0);
   const suggestedBudget = total + num(f.voucher_1000_qty) * 1000 + num(f.voucher_500_qty) * 500 + num(f.other_costs);
   const budget = f.total_budget.trim() ? num(f.total_budget) : suggestedBudget;
-  return { excl, pct, gst, total, suggestedBudget, budget };
+  return { excl, pct, gst, total, roundOff, suggestedBudget, budget };
 }
 
 export function validateExhibition(
@@ -365,6 +381,7 @@ export const toExhibitionDetails = (f: ExhibitionForm): RequestDetails => {
     amount_excl_gst: c.excl,
     gst_pct: c.pct,
     gst_amount: c.gst,
+    round_off: c.roundOff,
     total_incl_gst: c.total,
     payment_mode_due: f.payment_mode_due.trim() || null,
     organiser_gstin: f.organiser_gstin.trim() || null,
@@ -714,14 +731,24 @@ export const ExhibitionFields: React.FC<{
         <div className="sm:col-span-2">
           <GstSelector
             hasGst={Boolean(value.gst_invoice)}
-            onHasGstChange={(has) => onChange({ ...value, gst_invoice: has })}
-            gstRate={num(value.gst_rate) || 18}
-            onGstRateChange={(r) => onChange({ ...value, gst_rate: String(r) })}
-            baseAmount={c.excl}
+            onHasGstChange={(has) => {
+              const defaultAmt = has
+                ? (value.gst_amount || (c.excl > 0 ? String(Math.round(c.excl * 0.18 * 100) / 100) : ''))
+                : '0';
+              onChange({ ...value, gst_invoice: has, gst_amount: defaultAmt });
+            }}
             gstAmount={c.gst}
+            onGstAmountChange={(amt) => onChange({ ...value, gst_amount: String(amt) })}
+            baseAmount={c.excl}
             totalAmount={c.total}
+            roundOff={c.roundOff}
             baseLabel="Sponsorship (Excl. GST)"
             totalLabel="Total Sponsorship (Incl. GST)"
+            gstRate={c.pct}
+            onGstRateChange={(r) => {
+              const calcAmt = Math.round(c.excl * (r / 100) * 100) / 100;
+              onChange({ ...value, gst_rate: String(r), gst_amount: String(calcAmt) });
+            }}
           />
         </div>
 

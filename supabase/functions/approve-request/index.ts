@@ -118,7 +118,9 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
           ["Expected Footfall", txt(d.expected_footfall)], ["Stall Size & Location", txt(d.stall_size_location)],
         ] },
         { title: "2  Sponsorship amount", rows: [
-          ["Amount (excl. GST)", money(d.amount_excl_gst)], [`GST ${Number(d.gst_pct ?? 0)} %`, money(d.gst_amount)],
+          ["Amount (excl. GST)", money(d.amount_excl_gst)],
+          [d.gst_pct ? `GST Amount (~${Number(d.gst_pct)}%)` : "GST Amount", money(d.gst_amount)],
+          ...(d.round_off ? [["Round-off (nearest Rs. 1)", money(d.round_off)]] : []),
           ["Total incl. GST", money(d.total_incl_gst)], ["Payment Mode & Due Date", txt(d.payment_mode_due)],
           ["Organiser GSTIN", txt(d.organiser_gstin)], ["GST Invoice Provided", d.gst_invoice ? "Yes" : "No"],
         ] },

@@ -151,6 +151,8 @@ export const NewRequestPage: React.FC = () => {
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [hasGst, setHasGst] = useState<boolean>(true);
+  const [gstAmountStr, setGstAmountStr] = useState<string>('');
+  const [isGstCustomized, setIsGstCustomized] = useState<boolean>(false);
   const [gstRate, setGstRate] = useState<number>(18);
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState<DiscountForm>(emptyDiscount);
@@ -328,8 +330,17 @@ export const NewRequestPage: React.FC = () => {
   }, [type, exhibition.event_start, exhibition.event_dates, effectiveRegionId, effectiveRegionName, user, requests]);
 
   const baseAmount = parseFloat(amountStr) || 0;
-  const gstAmount = hasGst ? Math.round(baseAmount * (gstRate / 100) * 100) / 100 : 0;
-  const generalTotal = hasGst ? Math.round((baseAmount + gstAmount) * 100) / 100 : baseAmount;
+  const gstAmount = hasGst
+    ? isGstCustomized
+      ? (parseFloat(gstAmountStr) || 0)
+      : Math.round(baseAmount * 0.18 * 100) / 100
+    : 0;
+  const unroundedGeneralTotal = baseAmount + gstAmount;
+  const generalTotal = hasGst ? Math.round(unroundedGeneralTotal) : Math.round(baseAmount);
+  const roundOff = hasGst ? Math.round((generalTotal - unroundedGeneralTotal) * 100) / 100 : 0;
+  const effectiveGstRate = (baseAmount > 0 && gstAmount > 0)
+    ? Math.round((gstAmount / baseAmount) * 10000) / 100
+    : (hasGst ? gstRate : 0);
 
   const bottleQty = parseInt(bottleQtyStr, 10) || 0;
   const perBottlePrice = bottleQty > 0 ? Math.round((baseAmount / bottleQty) * 100) / 100 : 0;
@@ -423,8 +434,9 @@ export const NewRequestPage: React.FC = () => {
       d = {
         base_amount: baseAmount,
         has_gst: hasGst,
-        gst_rate: hasGst ? gstRate : 0,
+        gst_rate: hasGst ? effectiveGstRate : 0,
         gst_amount: gstAmount,
+        round_off: roundOff,
         total_amount: generalTotal,
         ...shopChoice(),
       };
@@ -1349,12 +1361,32 @@ export const NewRequestPage: React.FC = () => {
 
               <GstSelector
                 hasGst={hasGst}
-                onHasGstChange={setHasGst}
-                gstRate={gstRate}
-                onGstRateChange={setGstRate}
-                baseAmount={baseAmount}
+                onHasGstChange={(has) => {
+                  setHasGst(has);
+                  if (!has) {
+                    setIsGstCustomized(true);
+                    setGstAmountStr('0');
+                  } else if (!isGstCustomized || gstAmountStr === '' || gstAmountStr === '0') {
+                    const autoVal = Math.round(baseAmount * 0.18 * 100) / 100;
+                    setGstAmountStr(String(autoVal));
+                    setIsGstCustomized(false);
+                  }
+                }}
                 gstAmount={gstAmount}
+                onGstAmountChange={(amt) => {
+                  setIsGstCustomized(true);
+                  setGstAmountStr(String(amt));
+                }}
+                baseAmount={baseAmount}
                 totalAmount={generalTotal}
+                roundOff={roundOff}
+                gstRate={effectiveGstRate}
+                onGstRateChange={(r) => {
+                  const autoVal = Math.round(baseAmount * (r / 100) * 100) / 100;
+                  setGstAmountStr(String(autoVal));
+                  setIsGstCustomized(true);
+                  setGstRate(r);
+                }}
               />
             </div>
           )}

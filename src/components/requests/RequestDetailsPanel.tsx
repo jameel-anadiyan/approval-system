@@ -283,7 +283,7 @@ export const RequestDetailsPanel: React.FC<{
             <span className="text-xs sm:text-sm font-bold text-slate-800 break-words">{money(d.base_amount) ?? money(request.amount)}</span>
           </div>
           <div className="rounded-xl bg-indigo-50/50 border border-indigo-200/60 p-2 sm:p-3 min-w-0">
-            <span className="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold block">GST ({d.has_gst ? `${d.gst_rate || 18}%` : '0%'})</span>
+            <span className="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold block">GST Amount{d.has_gst && d.gst_rate ? ` (~${d.gst_rate}%)` : ''}</span>
             <span className="text-xs sm:text-sm font-bold text-indigo-800 break-words">{d.has_gst ? (money(d.gst_amount) ?? '—') : '₹0.00'}</span>
           </div>
           <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-2 sm:p-3 min-w-0">
@@ -291,6 +291,11 @@ export const RequestDetailsPanel: React.FC<{
             <span className="text-xs sm:text-sm font-bold text-indigo-900 break-words">{money(request.amount)}</span>
           </div>
         </div>
+        {d.round_off ? (
+          <p className="text-[11px] text-slate-500 text-center mt-2.5">
+            Includes round-off adjustment of {d.round_off > 0 ? `+${money(d.round_off)}` : money(d.round_off)} (rounded to nearest ₹1)
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -620,7 +625,8 @@ export const RequestDetailsPanel: React.FC<{
         </Section>
         <Section title="Sponsorship amount">
           <Row label="Amount (excl. GST)" value={money(d.amount_excl_gst)} />
-          <Row label={`GST${d.gst_pct !== undefined ? ` @ ${d.gst_pct}%` : ''}`} value={money(d.gst_amount)} />
+          <Row label={`GST Amount${d.gst_pct ? ` (~${d.gst_pct}%)` : ''}`} value={money(d.gst_amount)} />
+          {d.round_off ? <Row label="Round-off" value={d.round_off > 0 ? `+${money(d.round_off)}` : money(d.round_off)} /> : null}
           <Row label="Total (incl. GST)" value={money(d.total_incl_gst ?? request.amount)} />
           <Row label="Payment mode & due date" value={d.payment_mode_due} />
           <Row label="Organiser GSTIN" value={d.organiser_gstin} />
