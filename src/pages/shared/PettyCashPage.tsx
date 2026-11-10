@@ -97,7 +97,7 @@ export const PettyCashPage: React.FC = () => {
           <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-800 bg-teal-50 px-2.5 py-1 rounded-full border border-teal-200 mb-1.5">
             <Wallet className="w-3.5 h-3.5 text-teal-600" />
             <span>
-              {role === 'admin' ? 'Administrator · Petty Cash Below 1000' : 'Petty Cash Dealing Head · Below 1000'}
+              {role === 'admin' ? 'Administrator · Petty Cash' : 'Petty Cash Dealing Head'}
             </span>
           </span>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display flex items-center gap-2.5">
@@ -110,8 +110,8 @@ export const PettyCashPage: React.FC = () => {
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
             {role === 'admin'
-              ? 'All Petty Cash requests (up to ₹1,000) across departments and regions.'
-              : 'Expenses up to ₹1,000 routed directly to you as a Petty Cash Dealing Department Head.'}
+              ? 'All Petty Cash requests (category limits up to ₹4,000) across departments and regions.'
+              : 'Petty cash expenses routed directly to you as a Petty Cash Dealing Department Head.'}
           </p>
         </div>
 

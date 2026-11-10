@@ -175,7 +175,7 @@ export const MOCK_USERS: Profile[] = [
     role: 'employee',
     department_id: 'dept-fin-001',
     regional_head_id: 'user-rh-south-006',
-    allowed_types: ['general', 'exhibition', 'discount', 'asset', 'asset_below_20k', 'non_cash', 'stock_transfer'],
+    allowed_types: ['general'],
     is_active: true,
     must_change_password: false,
     created_at: '2026-09-04T04:00:00Z',

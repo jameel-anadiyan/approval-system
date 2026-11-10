@@ -120,9 +120,6 @@ export const NewRequestPage: React.FC = () => {
     if (list.has('asset')) {
       list.add('asset_below_20k');
     }
-    if (user?.role === 'employee' || user?.role === 'regional_head' || user?.role === 'clerk' || user?.role === 'head' || user?.role === 'admin') {
-      list.add('petty_cash');
-    }
     if (user?.role === 'admin') {
       return REQUEST_TYPES;
     }
@@ -130,7 +127,8 @@ export const NewRequestPage: React.FC = () => {
       // Standard types are always available to Heads; special restricted types (Agreement, Statutory Payment, Audit Report) only when enabled for this Head
       return REQUEST_TYPES.filter((t) => !isSpecialRequestType(t) || list.has(t));
     }
-    return REQUEST_TYPES.filter((t) => list.has(t));
+    const filtered = REQUEST_TYPES.filter((t) => list.has(t));
+    return filtered.length > 0 ? filtered : ['general'];
   }, [activeProfile?.allowed_types, user?.allowed_types, user?.role]);
   const requestedDefaultType = (location.state as { defaultType?: RequestType } | null)?.defaultType;
   const initialType: RequestType =
@@ -142,8 +140,10 @@ export const NewRequestPage: React.FC = () => {
   useEffect(() => {
     if (requestedDefaultType && allowed.includes(requestedDefaultType)) {
       setType(requestedDefaultType);
+    } else if (allowed.length > 0 && !allowed.includes(type)) {
+      setType(allowed[0]);
     }
-  }, [requestedDefaultType, allowed]);
+  }, [requestedDefaultType, allowed, type]);
 
   const isAsset = type === 'asset' || type === 'asset_below_20k';
   const isPettyCash = type === 'petty_cash';
@@ -580,7 +580,7 @@ export const NewRequestPage: React.FC = () => {
             : type === 'statutory_payment'
             ? statutoryAmt || 1
             : type === 'petty_cash'
-            ? Math.min(baseAmount || 1, 1000)
+            ? Math.min(baseAmount || 1, pettyCashLimit)
             : type === 'general'
             ? generalTotal || 1
             : isAsset
@@ -697,7 +697,7 @@ export const NewRequestPage: React.FC = () => {
         {isPettyCash && user?.role !== 'head' && !(user?.role === 'employee' && user.regional_head_id) && (
           <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-teal-800 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1">
             <Wallet className="w-3.5 h-3.5 text-teal-600" />
-            Petty Cash (Max ₹1,000): Skips clerk routing and goes directly to the selected Petty Cash Dealing Head.
+            Petty Cash (Limits up to ₹4,000 depending on category): Skips clerk routing and goes directly to the selected Petty Cash Dealing Head.
           </p>
         )}
       </div>
@@ -766,7 +766,7 @@ export const NewRequestPage: React.FC = () => {
           <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
             <h2 className="text-sm font-bold text-slate-800 font-display">
               {type === 'petty_cash'
-                ? 'Petty Cash Form Below 1000'
+                ? `Petty Cash Form (${getPettyCashCategoryLabel(pettyCashCategory)} · Max ${formatINRWhole(pettyCashLimit)})`
                 : type === 'exhibition'
                 ? 'Event Sponsorship & Promotion Form'
                 : type === 'discount'
@@ -790,7 +790,7 @@ export const NewRequestPage: React.FC = () => {
             {type === 'petty_cash' && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 font-bold text-[11px] border border-teal-200">
                 <Wallet className="w-3.5 h-3.5 text-teal-600" />
-                <span>Max ₹1,000 · Cash Default · Skips Clerk</span>
+                <span>Max {formatINRWhole(pettyCashLimit)} · Cash Default · Skips Clerk</span>
               </span>
             )}
             {type === 'exhibition' && (
@@ -1535,7 +1535,7 @@ export const NewRequestPage: React.FC = () => {
           )}
           {isPettyCash && (
             <p className="text-[11px] text-teal-800 font-medium">
-              Supporting document is optional. <strong>Petty Cash Form Below 1000</strong> is generated and stamped automatically upon approval (along with any attached documents).
+              Supporting document is optional. <strong>Petty Cash Form</strong> is generated and stamped automatically upon approval (along with any attached documents).
             </p>
           )}
         </div>

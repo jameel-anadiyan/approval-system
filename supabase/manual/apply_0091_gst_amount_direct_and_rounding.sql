@@ -323,3 +323,4 @@ begin
 end $function$;
 
 grant execute on function public._build_details(public.request_type, numeric, jsonb) to authenticated, anon, service_role;
+

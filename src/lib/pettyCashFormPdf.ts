@@ -1,6 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib';
 import type { RequestRecord } from '../types/database';
-import { formatISTDate } from './formatters';
+import { formatISTDate, getPettyCashCategoryLabel, getPettyCashLimit } from './formatters';
 
 function toSafePdfText(str: unknown): string {
   if (str === null || str === undefined) return '';
@@ -63,6 +63,7 @@ export async function generatePettyCashFormPdf(
     | 'bank_ifsc'
     | 'bank_name'
     | 'enter_bank_details_later'
+    | 'details'
   > & { department_name?: string | null }
 ): Promise<{ bytes: Uint8Array; blob: Blob; pageCount: number }> {
   const pdfDoc = await PDFDocument.create();
@@ -94,10 +95,15 @@ export async function generatePettyCashFormPdf(
     color: rgb(1, 1, 1),
   });
 
-  page.drawText('PETTY CASH FORM BELOW 1000', {
+  const pcCategory = (req.details as any)?.petty_cash_category || 'normal';
+  const pcCatLabel = getPettyCashCategoryLabel(pcCategory);
+  const pcLimit = getPettyCashLimit(pcCategory);
+  const limitFormatted = `Rs. ${pcLimit.toLocaleString('en-IN')}`;
+
+  page.drawText(`PETTY CASH VOUCHER — ${pcCatLabel.toUpperCase()}`, {
     x: margin + 18,
     y: bannerTop - 48,
-    size: 11.5,
+    size: 11,
     font: bold,
     color: rgb(0.84, 0.97, 0.94),
   });
@@ -130,7 +136,7 @@ export async function generatePettyCashFormPdf(
   let y = bannerTop - bannerHeight - 22;
 
   // Section 1: Petty Cash Voucher Details
-  page.drawText('1. PETTY CASH VOUCHER DETAILS (MAXIMUM LIMIT: Rs. 1,000.00)', {
+  page.drawText(`1. PETTY CASH VOUCHER DETAILS (${pcCatLabel.toUpperCase()} · MAX LIMIT: ${limitFormatted})`, {
     x: margin,
     y,
     size: 10,
@@ -142,14 +148,23 @@ export async function generatePettyCashFormPdf(
   const mode = (req.disbursement_mode || 'cash').toLowerCase() === 'bank' ? 'Bank Transfer' : 'Cash (Default)';
   const rows: [string, string][] = [
     ['Request Number', toSafePdfText(req.request_no || 'Pending Assignment')],
+    ['Category', pcCatLabel],
     ['Submitted Date', toSafePdfText(formatISTDate(req.submitted_at || req.created_at, true))],
     ['Requested By', toSafePdfText(req.requester_name || '-')],
     ['Outlet / Shop', toSafePdfText(req.shop_name || 'Not Assigned')],
     ['Petty Cash Dealing Head', toSafePdfText(req.owner_head_name || '-')],
     ['Disbursement Entry Account', toSafePdfText(req.assigned_entry_user_name || '-')],
     ['Payment Mode', mode],
-    ['Requested Amount (<= Rs. 1,000)', formattedAmt],
+    [`Requested Amount (<= ${limitFormatted})`, formattedAmt],
   ];
+
+  if (pcCategory === 'water_bottle') {
+    const bQty = (req.details as any)?.bottle_qty;
+    const bPrice = (req.details as any)?.per_bottle_price;
+    if (bQty) {
+      rows.push(['Water Bottles (Qty / Rate)', `${bQty} bottles · Rs. ${bPrice ? Number(bPrice).toFixed(2) : '-'} / bottle`]);
+    }
+  }
 
   if ((req.disbursement_mode || 'cash').toLowerCase() === 'bank') {
     if (req.enter_bank_details_later) {
@@ -241,7 +256,7 @@ export async function generatePettyCashFormPdf(
 
   y = y - noteBoxHeight - 16;
   page.drawText(
-    'Workflow: Direct Petty Cash Approval (Clerk Forwarding Skipped)  |  Form: Petty Cash Form Below 1000',
+    `Workflow: Direct Petty Cash Approval (Clerk Forwarding Skipped)  |  Category: ${pcCatLabel}`,
     {
       x: margin,
       y,
