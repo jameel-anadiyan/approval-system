@@ -232,6 +232,20 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
   );
 
   const selectedHead = headOptions.find((h) => h.head_id === selectedHeadId) || null;
+  const targetHeadId = selectedHead?.head_id || request.owner_head_id;
+  const targetDeptId = selectedHead?.department_id || request.department_id;
+  const hasClerkUnderHead = useMemo(() => {
+    return dir.users.some(
+      (u) =>
+        u.role === 'clerk' &&
+        u.is_active &&
+        ((targetDeptId && u.department_id === targetDeptId) ||
+          (targetHeadId &&
+            (u.default_head_id === targetHeadId ||
+              u.user_heads?.some((uh) => uh.head_id === targetHeadId))))
+    );
+  }, [dir.users, targetDeptId, targetHeadId]);
+
   const headChanged = Boolean(
     canSelectHead && selectedHeadId && selectedHeadId !== (request.owner_head_id || '')
   );
@@ -271,7 +285,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
         return;
       }
     }
-    if (canSelectHead && !isPettyCash && categoryOptions.required) {
+    if (canSelectHead && !isPettyCash && hasClerkUnderHead && categoryOptions.required) {
       const validCat = Boolean(
         categoryId && categoryOptions.categories.some((c) => c.id === categoryId)
       );
@@ -305,7 +319,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={isPettyCash ? 'Forward Petty Cash to Head' : 'Forward to Clerk'}
+      title={isPettyCash ? 'Forward Petty Cash to Head' : !hasClerkUnderHead ? 'Forward Directly to Head' : 'Forward to Clerk'}
       description={`Request ${request.request_no || ''} · ${request.requester_name}${request.shop_name ? ` · ${request.shop_name}` : ''}${
         request.category_name ? ` · ${request.category_name}` : ''
       }`}
@@ -323,6 +337,16 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
               'the selected Petty Cash Dealing Head'
             )}{' '}
             for approval. You can keep or change the Petty Cash Dealing Head and Disbursement Entry Account below.
+          </div>
+        ) : !hasClerkUnderHead ? (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 leading-relaxed">
+            No clerk is configured under{' '}
+            {selectedHead ? (
+              <strong>{selectedHead.head_name} ({selectedHead.department_name})</strong>
+            ) : (
+              'this Department Head'
+            )}
+            . This request will go <strong>directly to the Department Head</strong> for review / approval.
           </div>
         ) : (
           <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-xl text-xs text-cyan-900 leading-relaxed">
@@ -381,6 +405,11 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
                     <>
                       Redirecting this Petty Cash request directly to{' '}
                       <strong>{selectedHead.head_name}</strong> ({selectedHead.department_name}), skipping clerk routing.
+                    </>
+                  ) : !hasClerkUnderHead ? (
+                    <>
+                      Redirecting this request directly to <strong>{selectedHead.head_name}</strong> (
+                      {selectedHead.department_name}) for review / approval (no clerk configured).
                     </>
                   ) : (
                     <>
@@ -462,14 +491,14 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
 
         <div>
           <label htmlFor="regional-remarks" className="text-xs font-bold text-slate-700 block mb-1">
-            {isPettyCash ? 'Remarks for the Petty Cash Dealing Head (optional)' : 'Remarks for the clerk (optional)'}
+            {isPettyCash || !hasClerkUnderHead ? 'Remarks for the Department Head (optional)' : 'Remarks for the clerk (optional)'}
           </label>
           <textarea
             id="regional-remarks"
             rows={3}
             value={remarks}
             onChange={(e) => setRemarks(e.target.value)}
-            placeholder={isPettyCash ? 'e.g. Verified petty cash expense with shop.' : 'e.g. Checked the bills with the shop manager.'}
+            placeholder={isPettyCash ? 'e.g. Verified petty cash expense with shop.' : !hasClerkUnderHead ? 'e.g. Forwarding directly to Head for approval.' : 'e.g. Checked the bills with the shop manager.'}
             className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-hidden"
           />
         </div>
@@ -477,7 +506,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
         <ActionVoiceField
           onChange={setVoice}
           onRecordingStateChange={setIsRecording}
-          label={isPettyCash ? 'Voice message for the Head (optional)' : 'Voice message for the clerk (optional)'}
+          label={isPettyCash || !hasClerkUnderHead ? 'Voice message for the Head (optional)' : 'Voice message for the clerk (optional)'}
         />
 
         {error && (
@@ -506,7 +535,7 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
             <span>
               {isSubmitting
                 ? 'Forwarding…'
-                : isPettyCash
+                : isPettyCash || !hasClerkUnderHead
                 ? 'Forward to Head'
                 : 'Forward to Clerk'}
             </span>

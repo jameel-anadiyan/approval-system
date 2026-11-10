@@ -1723,6 +1723,24 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? MOCK_USERS.find((u) => u.id === user.regional_head_id && u.role === 'regional_head' && u.is_active)
         : null;
 
+    const targetHeadId = current.owner_head_id || user.default_head_id;
+    const targetDeptId = current.department_id || user.department_id;
+    const hasClerkUnderHead = MOCK_USERS.some(
+      (u) =>
+        u.role === 'clerk' &&
+        u.is_active &&
+        ((targetDeptId && u.department_id === targetDeptId) ||
+          (targetHeadId &&
+            (u.default_head_id === targetHeadId ||
+              u.user_heads?.some((uh) => uh.head_id === targetHeadId))))
+    );
+
+    const directHeadStatus: RequestStatus = isHeadOnlySpecial
+      ? 'pending_head_approval'
+      : isAuditReport
+      ? 'pending_head_review'
+      : ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'pending_head_review' : 'pending_head_approval');
+
     const toStatus: RequestStatus = isPettyCash
       ? user.role === 'employee' && mockEmpRh
         ? 'pending_regional_review'
@@ -1734,6 +1752,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? 'pending_head_approval'
         : mockEmpRh
         ? 'pending_regional_review'
+        : !hasClerkUnderHead
+        ? 'pending_head_approval'
         : 'submitted'
       : isAuditReport
       ? isHead
@@ -1742,6 +1762,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? 'pending_head_review'
         : mockEmpRh
         ? 'pending_regional_review'
+        : !hasClerkUnderHead
+        ? 'pending_head_review'
         : 'submitted'
       : isHead
       ? 'pending_admin_approval'
@@ -1749,6 +1771,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'pending_head_review' : 'pending_head_approval')
       : mockEmpRh
       ? 'pending_regional_review'
+      : !hasClerkUnderHead
+      ? directHeadStatus
       : 'submitted';
 
     const clkRoute: ApprovalRoute | undefined = isPettyCash
@@ -1757,12 +1781,14 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         : toStatus === 'pending_head_approval'
         ? 'B'
         : undefined
-      : isHeadOnlySpecial && (isHead || isClerk)
+      : isHeadOnlySpecial && (isHead || isClerk || !hasClerkUnderHead)
       ? 'B'
-      : isAuditReport && (isHead || isClerk)
+      : isAuditReport && (isHead || isClerk || !hasClerkUnderHead)
       ? 'A'
       : isClerk
       ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'A' : 'B')
+      : !hasClerkUnderHead && (toStatus === 'pending_head_review' || toStatus === 'pending_head_approval')
+      ? (toStatus === 'pending_head_review' ? 'A' : 'B')
       : undefined;
     const genNo = current.request_no || `REQ-2026-${Math.floor(100000 + Math.random() * 900000)}`;
     const action: RequestAction = {
@@ -1778,6 +1804,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? toStatus === 'pending_regional_review'
           ? `Petty Cash submitted to Regional Head (Target Head: ${current.owner_head_name || 'Petty Cash Head'}).`
           : `Petty Cash routed directly to ${current.owner_head_name || 'Petty Cash Head'} (clerk skipped).`
+        : !hasClerkUnderHead && (toStatus === 'pending_head_approval' || toStatus === 'pending_head_review')
+        ? `${user.role === 'regional_head' ? 'Regional Head' : 'Employee'} submitted request directly to ${current.owner_head_name || 'Department Head'} (no clerk configured).`
         : isHeadOnlySpecial && (isHead || isClerk)
         ? 'Routed directly for Department Head approval (Route B — Admin approval not required).'
         : isAuditReport && isHead
@@ -1802,8 +1830,8 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               ...r,
               status: toStatus,
               route: clkRoute ?? (isHead ? 'A' : r.route),
-              routed_by: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') ? user.id : r.routed_by,
-              routed_at: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') ? new Date().toISOString() : r.routed_at,
+              routed_by: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') || (!hasClerkUnderHead && (toStatus === 'pending_head_approval' || toStatus === 'pending_head_review')) ? user.id : r.routed_by,
+              routed_at: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') || (!hasClerkUnderHead && (toStatus === 'pending_head_approval' || toStatus === 'pending_head_review')) ? new Date().toISOString() : r.routed_at,
               regional_head_id: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.id : r.regional_head_id,
               regional_head_name: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.full_name : r.regional_head_name,
               disbursement_mode: isPettyCash ? (r.disbursement_mode || 'cash') : r.disbursement_mode,
@@ -2303,16 +2331,48 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const chosenHead = cleanTargetHeadId
         ? MOCK_USERS.find((u) => u.id === cleanTargetHeadId && u.role === 'head')
         : null;
+      const targetHead = chosenHead || MOCK_USERS.find((u) => u.id === currentReq.owner_head_id && u.role === 'head');
+      const targetDeptId = (headChanged && chosenHead?.department_id) || targetHead?.department_id || currentReq.department_id;
+      const targetHeadId = (headChanged && chosenHead?.id) || targetHead?.id || currentReq.owner_head_id;
+      const hasClerk = MOCK_USERS.some(
+        (u) =>
+          u.role === 'clerk' &&
+          u.is_active &&
+          ((targetDeptId && u.department_id === targetDeptId) ||
+            (targetHeadId &&
+              (u.default_head_id === targetHeadId ||
+                u.user_heads?.some((uh) => uh.head_id === targetHeadId))))
+      );
       const chosenEntry = cleanEntryUserId
         ? MOCK_USERS.find((u) => u.id === cleanEntryUserId)
         : null;
       const now = new Date().toISOString();
-      const nextStatus: RequestStatus = isPettyCash ? 'pending_head_approval' : 'submitted';
+      let nextStatus: RequestStatus;
+      let nextRoute: ApprovalRoute | undefined;
+      if (isPettyCash) {
+        nextStatus = 'pending_head_approval';
+        nextRoute = 'B';
+      } else if (!hasClerk) {
+        const isRouteA =
+          currentReq.request_type === 'audit_report' ||
+          currentReq.request_type === 'exhibition' ||
+          (!['discount', 'stock_transfer', 'agreement', 'statutory_payment', 'non_cash'].includes(currentReq.request_type || '') &&
+            (currentReq.amount || 0) > threshold);
+        nextStatus = isRouteA ? 'pending_head_review' : 'pending_head_approval';
+        nextRoute = isRouteA ? 'A' : 'B';
+      } else {
+        nextStatus = 'submitted';
+        nextRoute = currentReq.route ?? undefined;
+      }
       const finalHeadName = (headChanged && chosenHead ? chosenHead.full_name : currentReq.owner_head_name) || 'Department Head';
       const actionNote = isPettyCash
         ? cleanRemarks
           ? `[Forwarded directly to Petty Cash Head ${finalHeadName} · clerk skipped] ${cleanRemarks}`
           : `Forwarded directly to Petty Cash Head ${finalHeadName} (clerk skipped)`
+        : !hasClerk
+        ? cleanRemarks
+          ? `[Forwarded directly to ${finalHeadName} · no clerk configured] ${cleanRemarks}`
+          : `Forwarded directly to ${finalHeadName} (no clerk configured)`
         : headChanged && chosenHead
         ? cleanRemarks
           ? `[Directed to ${chosenHead.full_name}] ${cleanRemarks}`
@@ -2324,9 +2384,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             ? {
                 ...r,
                 status: nextStatus,
-                route: isPettyCash ? 'B' : r.route,
-                routed_by: isPettyCash ? user.id : r.routed_by,
-                routed_at: isPettyCash ? now : r.routed_at,
+                route: nextRoute ?? (isPettyCash ? 'B' : r.route),
+                routed_by: !hasClerk || isPettyCash ? user.id : r.routed_by,
+                routed_at: !hasClerk || isPettyCash ? now : r.routed_at,
                 owner_head_id: headChanged && chosenHead ? chosenHead.id : r.owner_head_id,
                 owner_head_name: headChanged && chosenHead ? chosenHead.full_name : r.owner_head_name,
                 department_id:
