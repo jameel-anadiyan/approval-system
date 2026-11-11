@@ -34,3 +34,4 @@ grant execute on function public.gen_request_no() to authenticated;
 
 comment on function public.gen_request_no() is
   'Generates the next sequential request number using the configured request_prefix (defaults to REQ)';
+

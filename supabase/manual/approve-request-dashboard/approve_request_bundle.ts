@@ -1,0 +1,1271 @@
+// ============================================================================
+// STANDALONE SINGLE-FILE EDGE FUNCTION: approve-request
+// Ready to paste into Supabase Dashboard -> Edge Functions -> approve-request
+// ============================================================================
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.49.4";
+import { degrees, PDFDocument, type PDFFont, type PDFImage, type PDFPage, rgb, StandardFonts } from "npm:pdf-lib@1.17.1";
+import QRCode from "npm:qrcode@1.5.4";
+
+
+// --- common.ts ---
+
+// Shared server-only helpers for Edge Functions.
+// Every function: verify the caller's token with Supabase Auth, load their profile,
+// check role/department, and only then use the service-role client.
+
+
+export const LOGIN_DOMAIN = Deno.env.get("LOGIN_DOMAIN") ?? "users.approvalapp.in";
+
+export const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+export type Role = "admin" | "head" | "clerk" | "employee" | "disbursement";
+
+export interface Profile {
+  id: string;
+  username: string;
+  full_name: string;
+  designation: string | null;
+  role: Role;
+  department_id: string | null;
+  is_active: boolean;
+  must_change_password: boolean;
+}
+
+export class HttpError extends Error {
+  constructor(public status: number, public code: string, message: string) {
+    super(message);
+  }
+}
+
+export function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+export function errorResponse(e: unknown): Response {
+  if (e instanceof HttpError) {
+    return json({ error: { code: e.code, message: e.message } }, e.status);
+  }
+  const message = e instanceof Error ? e.message : "Unexpected error";
+  console.error("Unhandled error:", message);
+  return json({ error: { code: "server_error", message } }, 500);
+}
+
+export function serviceClient(): SupabaseClient {
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+/** Verify the Bearer token with the Auth server (so banned users fail at once) and load the active profile. */
+export async function getCaller(req: Request): Promise<{ admin: SupabaseClient; me: Profile }> {
+  const auth = req.headers.get("Authorization") ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!token) throw new HttpError(401, "unauthorized", "Please sign in again.");
+  const admin = serviceClient();
+  const { data, error } = await admin.auth.getUser(token);
+  if (error || !data.user) throw new HttpError(401, "unauthorized", "Your session has expired. Please sign in again.");
+  const { data: me, error: pErr } = await admin
+    .from("profiles").select("*").eq("id", data.user.id).maybeSingle();
+  if (pErr) throw new HttpError(500, "server_error", pErr.message);
+  if (!me || !me.is_active) throw new HttpError(403, "forbidden", "Your account is inactive.");
+  return { admin, me: me as Profile };
+}
+
+export async function readJson<T>(req: Request): Promise<T> {
+  try {
+    return (await req.json()) as T;
+  } catch {
+    throw new HttpError(400, "bad_request", "Request body must be JSON.");
+  }
+}
+
+export function requireString(v: unknown, name: string, opts: { min?: number; max?: number } = {}): string {
+  if (typeof v !== "string") throw new HttpError(400, "bad_request", `${name} is required.`);
+  const s = v.trim();
+  if (s.length < (opts.min ?? 1)) throw new HttpError(400, "bad_request", `${name} is required.`);
+  if (opts.max && s.length > opts.max) throw new HttpError(400, "bad_request", `${name} is too long.`);
+  return s;
+}
+
+export function validatePassword(p: unknown): string {
+  if (typeof p !== "string" || p.length < 8 || !/[A-Za-z]/.test(p) || !/[0-9]/.test(p)) {
+    throw new HttpError(400, "weak_password", "Password must be at least 8 characters with letters and digits.");
+  }
+  if (p.length > 72) throw new HttpError(400, "weak_password", "Password is too long.");
+  return p;
+}
+
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function requireUuid(v: unknown, name: string): string {
+  if (typeof v !== "string" || !UUID_RE.test(v)) throw new HttpError(400, "bad_request", `${name} is invalid.`);
+  return v;
+}
+
+export async function audit(
+  admin: SupabaseClient, me: Profile, action: string, targetType: string, targetId: string,
+  details: Record<string, unknown> = {},
+) {
+  await admin.from("audit_log").insert({
+    actor_id: me.id, actor_name: me.full_name, action, target_type: targetType, target_id: targetId, details,
+  });
+}
+
+export function handle(fn: (req: Request) => Promise<Response>) {
+  return async (req: Request) => {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+    if (req.method !== "POST") return json({ error: { code: "method_not_allowed", message: "Use POST." } }, 405);
+    try {
+      return await fn(req);
+    } catch (e) {
+      return errorResponse(e);
+    }
+  };
+}
+
+
+// --- stamp.ts ---
+
+// PDF stamping (server only). Fits every document (PDF, JPG or PNG) onto standard A4 pages
+// with the official approval badge positioned below the content, guaranteeing zero content overlap.
+
+
+
+// Lightweight stub for backwards-compatibility; StandardFonts are built-in and require no external download.
+export async function loadFonts() {
+  return null;
+}
+
+export function toSafePdfText(str: unknown): string {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/₹/g, "Rs. ")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/\u00A0/g, " ")
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ");
+}
+
+export interface StampContext {
+  approvalNo: string;
+  approverLine: string; // "Name, Designation, Department"
+  dateTime: string; // "08 Oct 2026, 06:01 PM IST"
+  requestNo: string;
+  amount: string; // "Rs. 9,500.00"
+  reviewedLine: string | null; // "Reviewed by: Head, 08 Oct 2026"
+  verifyUrl: string | null;
+  fonts?: { regular?: Uint8Array; bold?: Uint8Array } | null;
+  seal: Uint8Array;
+  signature: Uint8Array;
+  /** Overrides the first band line, e.g. "ADDENDUM · Approval No: X" */
+  headline?: string;
+  /** Label before approverLine; default "Approved by" */
+  byLabel?: string;
+  /** "rejected" draws the band in red (e.g. quotations that were not selected) */
+  tone?: "approved" | "rejected";
+}
+
+const GREEN = rgb(0.05, 0.42, 0.29);
+const RED = rgb(0.72, 0.11, 0.11);
+const INK = rgb(0.1, 0.12, 0.16);
+const GREY = rgb(0.42, 0.45, 0.5);
+const A4 = { w: 595.28, h: 841.89 };
+
+interface Assets { regular: PDFFont; bold: PDFFont; seal: PDFImage; signature: PDFImage }
+
+async function embedAssets(doc: PDFDocument, ctx: StampContext): Promise<Assets> {
+  return {
+    regular: await doc.embedFont(StandardFonts.Helvetica),
+    bold: await doc.embedFont(StandardFonts.HelveticaBold),
+    seal: await doc.embedPng(ctx.seal),
+    signature: await doc.embedPng(ctx.signature),
+  };
+}
+
+function fit(text: string, font: PDFFont, size: number, maxWidth: number): string {
+  const safeText = toSafePdfText(text);
+  if (font.widthOfTextAtSize(safeText, size) <= maxWidth) return safeText;
+  let t = safeText;
+  while (t.length > 1 && font.widthOfTextAtSize(t + "...", size) > maxWidth) t = t.slice(0, -1);
+  return t + "...";
+}
+
+function drawImageFit(page: PDFPage, img: PDFImage, lx: number, ly: number, bw: number, bh: number) {
+  const scale = Math.min(bw / img.width, bh / img.height);
+  const w = img.width * scale, h = img.height * scale;
+  page.drawImage(img, { x: lx + (bw - w) / 2, y: ly + (bh - h) / 2, width: w, height: h });
+}
+
+function drawQr(page: PDFPage, text: string, lx: number, ly: number, size: number) {
+  const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
+  const n: number = qr.modules.size;
+  const cell = size / (n + 2);
+  page.drawRectangle({ x: lx, y: ly, width: size, height: size, color: rgb(1, 1, 1) });
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (!qr.modules.get(r, c)) continue;
+      page.drawRectangle({
+        x: lx + (c + 1) * cell,
+        y: ly + size - (r + 2) * cell,
+        width: cell + 0.05,
+        height: cell + 0.05,
+        color: INK,
+      });
+    }
+  }
+}
+
+function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string, pw: number, bandH: number, s: number) {
+  page.drawRectangle({ x: 0, y: 0, width: pw, height: bandH, color: rgb(1, 1, 1) });
+  const accent = ctx.tone === "rejected" ? RED : GREEN;
+  page.drawRectangle({ x: 0, y: bandH - 1.6 * s, width: pw, height: 1.6 * s, color: accent });
+
+  drawImageFit(page, a.seal, 12 * s, (bandH - 84 * s) / 2, 84 * s, 84 * s);
+  drawImageFit(page, a.signature, 102 * s, (bandH - 64 * s) / 2, 124 * s, 64 * s);
+
+  const qrSize = ctx.verifyUrl ? 78 * s : 0;
+  const x0 = 236 * s;
+  const maxW = pw - x0 - (qrSize ? qrSize + 18 * s : 12 * s);
+  const line = (text: string, ly: number, size: number, font: PDFFont, color = INK) => {
+    const safe = toSafePdfText(text);
+    page.drawText(fit(safe, font, size * s, maxW), { x: x0, y: ly, size: size * s, font, color });
+  };
+  line(ctx.headline ?? `APPROVED · Approval No: ${ctx.approvalNo}`, bandH - 22 * s, 11, a.bold, accent);
+  line(`${ctx.byLabel ?? "Approved by"}: ${ctx.approverLine}`, bandH - 39 * s, 8.5, a.regular);
+  line(`Date & time: ${ctx.dateTime}`, bandH - 53 * s, 8.5, a.regular);
+  line(`Request ${ctx.requestNo} · Amount ${ctx.amount} · ${pageLabel}`, bandH - 67 * s, 8.5, a.regular);
+  if (ctx.reviewedLine) line(ctx.reviewedLine, bandH - 81 * s, 7.5, a.regular, GREY);
+  if (ctx.verifyUrl) line("Scan the QR code to verify this approval", bandH - 95 * s, 7, a.regular, GREY);
+
+  if (ctx.verifyUrl) drawQr(page, ctx.verifyUrl, pw - qrSize - 10 * s, (bandH - qrSize) / 2, qrSize);
+}
+
+function isJpeg(b: Uint8Array) { return b[0] === 0xff && b[1] === 0xd8; }
+function isPng(b: Uint8Array) { return b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47; }
+
+/** Fits any uploaded document (PDF, JPG or PNG) onto standard A4 pages with zero badge overlap. */
+export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promise<{ bytes: Uint8Array; pageCount: number }> {
+  const targetDoc = await PDFDocument.create();
+  const a = await embedAssets(targetDoc, ctx);
+
+  if (isJpeg(bytes) || isPng(bytes)) {
+    const img = isJpeg(bytes) ? await targetDoc.embedJpg(bytes) : await targetDoc.embedPng(bytes);
+    const landscape = img.width > img.height * 1.15;
+    const pw = landscape ? A4.h : A4.w;
+    const ph = landscape ? A4.w : A4.h;
+    const page = targetDoc.addPage([pw, ph]);
+
+    const s = pw / A4.w;
+    const bandH = 110 * s;
+    const margin = 20 * s;
+    const availW = pw - 2 * margin;
+    const availH = ph - bandH - 2 * margin;
+
+    const fitScale = Math.min(availW / img.width, availH / img.height);
+    const scale = (img.width <= availW && img.height <= availH) ? Math.min(fitScale, 1.0) : fitScale;
+    const w = img.width * scale;
+    const h = img.height * scale;
+    const x = (pw - w) / 2;
+    const y = bandH + margin + (availH - h) / 2;
+
+    page.drawImage(img, { x, y, width: w, height: h });
+    drawBand(page, a, ctx, "Page 1 of 1", pw, bandH, s);
+  } else {
+    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
+    try { srcDoc.getForm().flatten(); } catch { /* no form */ }
+
+    const srcPages = srcDoc.getPages();
+    const pageIndices = srcDoc.getPageIndices();
+    const embeddedPages = await targetDoc.embedPdf(srcDoc, pageIndices);
+
+    for (let i = 0; i < embeddedPages.length; i++) {
+      const embedded = embeddedPages[i];
+      const srcPage = srcPages[i];
+      const rot = (((srcPage.getRotation().angle ?? 0) % 360) + 360) % 360;
+
+      const visW = rot === 90 || rot === 270 ? embedded.height : embedded.width;
+      const visH = rot === 90 || rot === 270 ? embedded.width : embedded.height;
+
+      const landscape = visW > visH * 1.15;
+      const pw = landscape ? A4.h : A4.w;
+      const ph = landscape ? A4.w : A4.h;
+      const targetPage = targetDoc.addPage([pw, ph]);
+
+      const s = pw / A4.w;
+      const bandH = 110 * s;
+      const margin = 16 * s;
+      const topPad = 14 * s;
+      const bottomPad = 10 * s;
+
+      const availW = pw - 2 * margin;
+      const availH = ph - bandH - topPad - bottomPad;
+
+      const scale = Math.min(availW / visW, availH / visH);
+      const scaledW = visW * scale;
+      const scaledH = visH * scale;
+
+      const destX = margin + (availW - scaledW) / 2;
+      const destY = bandH + bottomPad + (availH - scaledH) / 2;
+
+      let drawOptions: { x: number; y: number; width: number; height: number; rotate?: ReturnType<typeof degrees> } = {
+        x: destX,
+        y: destY,
+        width: scaledW,
+        height: scaledH,
+      };
+
+      if (rot === 90) {
+        drawOptions = { x: destX + scaledW, y: destY, width: scaledH, height: scaledW, rotate: degrees(90) };
+      } else if (rot === 180) {
+        drawOptions = { x: destX + scaledW, y: destY + scaledH, width: scaledW, height: scaledH, rotate: degrees(180) };
+      } else if (rot === 270) {
+        drawOptions = { x: destX, y: destY + scaledH, width: scaledH, height: scaledW, rotate: degrees(270) };
+      }
+
+      targetPage.drawPage(embedded, drawOptions);
+      drawBand(targetPage, a, ctx, `Page ${i + 1} of ${embeddedPages.length}`, pw, bandH, s);
+    }
+  }
+
+  targetDoc.setProducer("Approval App");
+  targetDoc.setTitle(`${ctx.approvalNo}`);
+  return { bytes: await targetDoc.save({ useObjectStreams: true }), pageCount: targetDoc.getPageCount() };
+}
+
+function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const safeText = toSafePdfText(text);
+  const out: string[] = [];
+  for (const para of safeText.split(/\r?\n/)) {
+    let cur = "";
+    for (const word of para.split(/\s+/)) {
+      const next = cur ? `${cur} ${word}` : word;
+      if (font.widthOfTextAtSize(next, size) <= maxWidth) cur = next;
+      else { if (cur) out.push(cur); cur = fit(word, font, size, maxWidth); }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+export interface PacketInfo {
+  title: string;
+  rows: [string, string][];
+  notes: string | null;
+  documents: { name: string; pages: number }[];
+  timeline: { when: string; who: string; what: string; remarks: string | null }[];
+}
+
+/** Cover page + every signed document merged into one packet PDF. All pages standard A4. */
+export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: StampContext) {
+  const doc = await PDFDocument.create();
+  const a = await embedAssets(doc, ctx);
+  let page = doc.addPage([A4.w, A4.h]);
+  const s = 1.0;
+  const bandH = 110 * s;
+  const M = 48, maxW = A4.w - 2 * M;
+  let y = A4.h - M;
+  const newPageIfNeeded = (need: number) => {
+    if (y - need < bandH + 20) { page = doc.addPage([A4.w, A4.h]); y = A4.h - M; }
+  };
+  const text = (t: string, size: number, font = a.regular, color = INK, x = M) => {
+    const safe = toSafePdfText(t);
+    newPageIfNeeded(size + 6);
+    page.drawText(safe, { x, y: y - size, size, font, color });
+    y -= size + 6;
+  };
+
+  text("APPROVAL PACKET", 10, a.bold, GREEN);
+  text(fit(info.title, a.bold, 18, maxW), 18, a.bold);
+  y -= 6;
+  page.drawRectangle({ x: M, y, width: maxW, height: 1, color: GREEN });
+  y -= 14;
+  for (const [k, v] of info.rows) {
+    newPageIfNeeded(18);
+    page.drawText(toSafePdfText(k), { x: M, y: y - 10, size: 10, font: a.bold, color: GREY });
+    const lines = wrap(v, a.regular, 10, maxW - 140);
+    lines.forEach((l, i) => page.drawText(l, { x: M + 140, y: y - 10 - i * 14, size: 10, font: a.regular, color: INK }));
+    y -= Math.max(1, lines.length) * 14 + 4;
+  }
+  if (info.notes) {
+    y -= 8; text("Notes", 12, a.bold);
+    for (const l of wrap(info.notes, a.regular, 9.5, maxW).slice(0, 40)) text(l, 9.5);
+  }
+  y -= 8; text("Documents", 12, a.bold);
+  info.documents.forEach((d, i) => text(fit(`${i + 1}. ${d.name} - ${d.pages} page${d.pages === 1 ? "" : "s"}`, a.regular, 9.5, maxW), 9.5));
+  y -= 8; text("Timeline", 12, a.bold);
+  for (const t of info.timeline) {
+    text(fit(`${t.when} · ${t.who} · ${t.what}`, a.regular, 9.5, maxW), 9.5);
+    if (t.remarks) for (const l of wrap(`"${t.remarks}"`, a.regular, 9, maxW - 16).slice(0, 6)) text(l, 9, a.regular, GREY, M + 16);
+  }
+  const coverPages = doc.getPages();
+  coverPages.forEach((p, i) => drawBand(p, a, ctx, coverPages.length > 1 ? `Cover ${i + 1} of ${coverPages.length}` : "Cover page", A4.w, bandH, s));
+
+  for (const bytes of signed) {
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const copied = await doc.copyPages(src, src.getPageIndices());
+    copied.forEach((p) => doc.addPage(p));
+  }
+  doc.setProducer("Approval App");
+  doc.setTitle(`${ctx.approvalNo} packet`);
+  return { bytes: await doc.save({ useObjectStreams: true }), pageCount: doc.getPageCount() };
+}
+
+export interface FormSection {
+  title: string;
+  rows?: [string, string][];
+  text?: string | null;
+}
+
+const NAVY = rgb(0.12, 0.16, 0.27);
+const GOLD = rgb(0.72, 0.56, 0.2);
+const CREAM = rgb(0.96, 0.94, 0.9);
+const LINE = rgb(0.82, 0.83, 0.87);
+
+/** The filled request form (Discount / Exhibition) as a clean A4 PDF, ready to be stamped. */
+export async function buildFormPdf(
+  heading: string, subtitle: string, sections: FormSection[], _fonts?: unknown,
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const regular = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const M = 40, W = A4.w - 2 * M;
+  let page = doc.addPage([A4.w, A4.h]);
+  let y = A4.h - M;
+
+  const header = () => {
+    page.drawRectangle({ x: 0, y: A4.h - 6, width: A4.w, height: 6, color: NAVY });
+    const safeH = toSafePdfText(heading);
+    const hw = bold.widthOfTextAtSize(safeH, 20);
+    page.drawText(safeH, { x: (A4.w - hw) / 2, y: y - 22, size: 20, font: bold, color: NAVY });
+    const safeSub = toSafePdfText(subtitle);
+    const sw = bold.widthOfTextAtSize(safeSub, 9.5);
+    page.drawText(safeSub, { x: (A4.w - sw) / 2, y: y - 40, size: 9.5, font: bold, color: GOLD });
+    page.drawRectangle({ x: M, y: y - 50, width: W, height: 1.2, color: GOLD });
+    y -= 64;
+  };
+  const ensure = (need: number) => {
+    if (y - need < M) { page = doc.addPage([A4.w, A4.h]); y = A4.h - M; header(); }
+  };
+  header();
+
+  for (const s of sections) {
+    ensure(40);
+    page.drawRectangle({ x: M, y: y - 18, width: W, height: 18, color: NAVY });
+    page.drawRectangle({ x: M, y: y - 18, width: 4, height: 18, color: GOLD });
+    page.drawText(toSafePdfText(s.title.toUpperCase()), { x: M + 12, y: y - 13, size: 9, font: bold, color: rgb(1, 1, 1) });
+    y -= 18;
+    const rows = s.rows ?? [];
+    // two label/value pairs per line
+    for (let i = 0; i < rows.length; i += 2) {
+      const pair = rows.slice(i, i + 2);
+      const colW = W / 2, labW = 105, valW = colW - labW - 10;
+      const lines = pair.map(([, v]) => wrap(v || "-", regular, 9, valW));
+      const h = Math.max(24, Math.max(...lines.map((l) => l.length)) * 12 + 10);
+      ensure(h);
+      pair.forEach(([k], j) => {
+        const x = M + j * colW;
+        page.drawRectangle({ x, y: y - h, width: labW, height: h, color: CREAM, borderColor: LINE, borderWidth: 0.6 });
+        page.drawRectangle({ x: x + labW, y: y - h, width: colW - labW, height: h, borderColor: LINE, borderWidth: 0.6 });
+        wrap(k, bold, 8.5, labW - 10).slice(0, 3).forEach((l, n) =>
+          page.drawText(l, { x: x + 6, y: y - 14 - n * 11, size: 8.5, font: bold, color: NAVY }));
+        lines[j].forEach((l, n) =>
+          page.drawText(l, { x: x + labW + 6, y: y - 14 - n * 12, size: 9, font: regular, color: INK }));
+      });
+      y -= h;
+    }
+    if (s.text !== undefined) {
+      const lines = wrap(s.text || "-", regular, 9.5, W - 16).slice(0, 30);
+      const h = Math.max(36, lines.length * 13 + 12);
+      ensure(h);
+      page.drawRectangle({ x: M, y: y - h, width: W, height: h, borderColor: LINE, borderWidth: 0.6 });
+      lines.forEach((l, n) => page.drawText(l, { x: M + 8, y: y - 16 - n * 13, size: 9.5, font: regular, color: INK }));
+      y -= h;
+    }
+    y -= 12;
+  }
+  ensure(20);
+  const foot = "SWA Diamonds · Internal Approval Form";
+  page.drawText(foot, { x: (A4.w - regular.widthOfTextAtSize(foot, 7.5)) / 2, y: M - 10, size: 7.5, font: regular, color: GREY });
+  doc.setProducer("Approval App");
+  return await doc.save({ useObjectStreams: true });
+}
+
+
+// --- index.ts ---
+
+// POST /functions/v1/approve-request   { request_id, app_url? }
+// The signing run: begin_approval (service role) → download seal, signature, documents →
+// stamp each file → build packet → upload (no overwrite) → finalize_approval.
+// On any error: abort_approval (status goes back, approval number stays reserved).
+
+
+
+const ACTION_LABEL: Record<string, string> = {
+  submitted: "Submitted", resubmitted: "Resubmitted after correction", routed_A: "Routed to A (Admin)",
+  routed_B: "Routed to B (Head)", routed_own_A: "Routed own request to A", routed_own_B: "Routed own request to B",
+  route_changed_A: "Head changed route to A (Admin)", route_changed_B: "Head changed route to B (Head)",
+  forwarded: "Reviewed and forwarded to Admin", returned: "Returned for correction", rejected: "Rejected",
+  withdrawn: "Withdrawn", approved: "Approved", paid: "Marked as paid",
+  sent_for_quote_selection: "Sent for quotation selection", quote_selected: "Best quotation selected",
+  regional_forwarded: "Forwarded by Regional Head to clerk",
+};
+
+function ist(d: string | Date, withTime = true): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric",
+      ...(withTime ? { hour: "2-digit", minute: "2-digit", hour12: true } : {}),
+    }).formatToParts(new Date(d)).map((p) => [p.type, p.value]),
+  );
+  const date = `${parts.day} ${parts.month} ${parts.year}`;
+  return withTime ? `${date}, ${parts.hour}:${parts.minute} ${String(parts.dayPeriod).toUpperCase()} IST` : date;
+}
+
+const inr = (n: number) => `Rs. ${new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
+
+function safeName(name: string): string {
+  const base = name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  return (base || "document").slice(0, 40);
+}
+
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const h = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function appOrigin(v: unknown): string | null {
+  if (typeof v !== "string") return Deno.env.get("APP_URL") ?? null;
+  try {
+    const u = new URL(v);
+    if (u.protocol === "https:" || u.hostname === "localhost" || u.hostname === "127.0.0.1") return u.origin;
+  } catch { /* ignore */ }
+  return Deno.env.get("APP_URL") ?? null;
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  general: "General", petty_cash: "Petty Cash (Below 1000)", discount: "Discount approval", exhibition: "Exhibition / event sponsorship",
+  asset: "Asset buying", asset_below_20k: "Asset buying below 20k", non_cash: "Non-cash request",
+  stock_transfer: "Stock transfer",
+  agreement: "Agreement",
+  statutory_payment: "Statutory payment",
+  audit_report: "Audit report",
+};
+const PROVIDES: Record<string, string> = {
+  stall_space: "Stall space", table_chairs: "Table & chairs", electricity_lights: "Electricity & lights",
+  logo_stage_banners: "Logo on stage / banners", stage_announcements: "Stage announcements",
+  social_media: "Social media mentions", other: "Other",
+};
+
+// deno-lint-ignore no-explicit-any
+function formSections(r: any, submitted: string, files: any[] = []): { subtitle: string; sections: FormSection[] } | null {
+  const d = r.details ?? {};
+  const money = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : inr(Number(v)));
+  const txt = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
+  if (r.request_type === "discount") {
+    return {
+      subtitle: "DISCOUNT APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)], ["Subject", txt(r.title)],
+          ["Customer", txt(d.customer_name)], ["Bill / Ref No", txt(d.reference)],
+          ["Invoice No", txt(d.invoice_no)], ["Date of Bill", txt(d.bill_date)],
+        ] },
+        { title: "Discount", rows: [
+          ["Amount before discount", money(d.before_amount)], ["Amount after discount", money(d.after_amount)],
+          ["Discount amount", money(d.discount_amount)], ["Discount %", `${Number(d.discount_pct ?? 0).toFixed(2)} %`],
+        ] },
+        { title: "Remarks", text: r.notes ?? "" },
+      ],
+    };
+  }
+  if (r.request_type === "exhibition") {
+    // Skip duplicate server form if client already synced Exhibition_Event_Approval_Form.pdf into files
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("exhibition_event_approval_form")
+    );
+    if (alreadyUploaded) return null;
+
+    const provides = (Array.isArray(d.provides) ? d.provides : []).map((p: string) => PROVIDES[p] ?? p);
+    if (d.provides_other) provides.push(`Other: ${d.provides_other}`);
+    const exhShop = typeof d.conducting_shop_name === "string" && d.conducting_shop_name.trim()
+      ? d.conducting_shop_name.trim()
+      : "Not Assigned";
+    const schedules = Array.isArray(d.daily_schedules) ? d.daily_schedules : [];
+    const scheduleSummary = schedules.length > 0
+      ? `${schedules.length} Day(s) (${Number(d.total_hours || 0).toFixed(1)} hrs total) · ${schedules.map((s: any) => `Day ${s.day_number || ''} [${s.date}]: ${s.from_time}-${s.to_time} (${s.hours}h)`).join(', ')}`
+      : txt(d.event_dates);
+
+    return {
+      subtitle: "EVENT SPONSORSHIP & PROMOTION APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet", exhShop],
+        ] },
+        { title: "1  Event details", rows: [
+          ["Conducting Shop", exhShop],
+          ["Event Name", txt(d.event_name)], ["Organiser & Contact", txt(d.organiser_contact)],
+          ["Venue", txt(d.venue)], ["Event Date(s) & Time", txt(d.event_dates)],
+          ["Daily Schedule & Hours", scheduleSummary],
+          ["Expected Footfall", txt(d.expected_footfall)], ["Stall Size & Location", txt(d.stall_size_location)],
+        ] },
+        { title: "2  Sponsorship amount", rows: [
+          ["Amount (excl. GST)", money(d.amount_excl_gst)],
+          [d.gst_pct ? `GST Amount (~${Number(d.gst_pct)}%)` : "GST Amount", money(d.gst_amount)],
+          ...(d.round_off ? [["Round-off (nearest Rs. 1)", money(d.round_off)]] : []),
+          ["Total incl. GST", money(d.total_incl_gst)], ["Payment Mode & Due Date", txt(d.payment_mode_due)],
+          ["Organiser GSTIN", txt(d.organiser_gstin)], ["GST Invoice Provided", d.gst_invoice ? "Yes" : "No"],
+        ] },
+        { title: "3  Event team will provide", text: provides.length ? provides.join("  ·  ") : "—" },
+        { title: "4  Our promotion plan", rows: [
+          ["Rs. 1,000 Vouchers (Qty)", txt(d.voucher_1000_qty)], ["Rs. 500 Vouchers (Qty)", txt(d.voucher_500_qty)],
+          ["Rs. 1,000 Voucher Min. Purchase", money(d.voucher_1000_min)], ["Rs. 500 Voucher Min. Purchase", money(d.voucher_500_min)],
+          ["Voucher Validity", txt(d.voucher_validity)], ["Lucky Draw Prize & Value", txt(d.lucky_draw)],
+          ["No. of Winners & Draw Date", txt(d.winners_draw)], ["Other Costs (printing, branding, staff)", money(d.other_costs)],
+          ["Total Budget", money(d.total_budget)],
+        ] },
+        { title: "5  Purpose / expected result", text: d.purpose ?? "" },
+        ...(r.notes ? [{ title: "Remarks", text: r.notes as string }] : []),
+      ],
+    };
+  }
+  if (r.request_type === "asset" || r.request_type === "asset_below_20k") {
+    // deno-lint-ignore no-explicit-any
+    const quotes = (files ?? []).filter((f: any) => f.quote_amount !== null && f.quote_amount !== undefined);
+    const lowest = quotes.length ? Math.min(...quotes.map((q: { quote_amount: number }) => Number(q.quote_amount))) : null;
+    // deno-lint-ignore no-explicit-any
+    const quoteRows: [string, string][] = quotes.map((q: any, i: number) => [
+      `Q${i + 1} · ${q.quote_vendor ?? q.original_name}`,
+      [money(q.quote_amount), q.quote_status === "selected" ? "SELECTED" : "REJECTED",
+        q.quote_preferred ? "Requester's choice" : null,
+        Number(q.quote_amount) === lowest ? "Lowest" : null].filter(Boolean).join("  ·  "),
+    ]);
+    return {
+      subtitle: "ASSET PURCHASE APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)], ["Subject", txt(r.title)],
+        ] },
+        { title: "Asset", rows: [
+          ["Asset", txt(d.asset_name)], ["Quantity", txt(d.quantity)],
+          ["Specification", txt(d.specification)],
+        ] },
+        { title: "Quotation comparison", rows: [
+          ...quoteRows,
+          ["Approved amount", money(r.amount)],
+          ["Quotation selected by", [r.quote_selected_by_name, r.quote_selected_at ? ist(r.quote_selected_at) : null].filter(Boolean).join(", ") || "—"],
+        ] },
+        ...(d.purpose ? [{ title: "Purpose", text: d.purpose as string }] : []),
+        ...(r.notes ? [{ title: "Remarks", text: r.notes as string }] : []),
+      ],
+    };
+  }
+  if (r.request_type === "stock_transfer") {
+    const isBulk = d.transfer_mode === "bulk";
+    // deno-lint-ignore no-explicit-any
+    const items = Array.isArray(d.items) ? d.items : [];
+    // deno-lint-ignore no-explicit-any
+    const itemRows: [string, string][] = items.map((item: any, i: number) => [
+      `Item ${i + 1} · ${item.category_name ?? "Product"}`,
+      `Barcode: ${item.barcode || "—"} | SKU: ${item.sku || "—"} | Wt: ${item.gross_weight_grams ? `${item.gross_weight_grams} g` : "—"} | MRP: ${money(item.mrp)}`,
+    ]);
+
+    return {
+      subtitle: "STOCK TRANSFER APPROVAL FORM",
+      sections: [
+        { title: "Transfer Details", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Origin Shop (From)", txt(d.from_shop_name ?? r.shop_name)],
+          ["Destination Shop (To)", txt(d.to_shop_name)], ["Transfer Mode", isBulk ? "Bulk Transfer (4+ Items)" : "Itemized Transfer"],
+          ["Total Pieces", txt(d.total_pieces ?? items.length)],
+          ["Total Gross Weight", d.total_gross_weight_grams ? `${d.total_gross_weight_grams} g` : "—"],
+          ["Total MRP Value", money(d.total_mrp ?? r.amount)],
+        ] },
+        ...(isBulk ? [
+          { title: "Bulk Transfer Summary", rows: [
+            ["Product Category", txt(d.bulk_category_name)],
+            ["Pieces", txt(d.total_pieces)],
+            ["Gross Weight", d.total_gross_weight_grams ? `${d.total_gross_weight_grams} g` : "—"],
+            ["Total MRP", money(d.total_mrp ?? r.amount)],
+          ] }
+        ] : items.length ? [
+          { title: "Itemized Products", rows: itemRows }
+        ] : []),
+        ...(r.notes ? [{ title: "Remarks / Purpose", text: r.notes as string }] : []),
+      ],
+    };
+  }
+  if (r.request_type === "non_cash") {
+    const val = Number(d.associated_value || 0);
+    return {
+      subtitle: "NON-CASH APPROVAL FORM",
+      sections: [
+        { title: "Request", rows: [
+          ["Request No", txt(r.request_no)], ["Date", submitted],
+          ["Requested by", txt(r.requester_name)], ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)], ["Subject / Title", txt(r.title)],
+          ["Payment Consideration", "Non-Cash (No direct disbursement)"],
+        ] },
+        ...(val > 0 || d.associated_notes ? [
+          { title: "Associated Cash / Value / Adjustment (Not Paid Directly)", rows: [
+            ...(val > 0 ? [["Associated Value", money(val)]] : []),
+            ...(d.associated_notes ? [["Adjustment Details", txt(d.associated_notes)]] : []),
+          ] }
+        ] : []),
+        ...(r.notes ? [{ title: "Remarks / Purpose", text: r.notes as string }] : []),
+      ],
+    };
+  }
+  if (r.request_type === "petty_cash") {
+    // Skip duplicate server form if client already synced Petty_Cash_Form_Below_1000.pdf into files
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("petty_cash_form_below_1000")
+    );
+    if (alreadyUploaded) return null;
+    const payMode = String(r.disbursement_mode ?? d.disbursement_mode ?? "cash").toLowerCase() === "bank"
+      ? "Bank Transfer"
+      : "Cash (Default)";
+    return {
+      subtitle: "PETTY CASH FORM BELOW 1000",
+      sections: [
+        { title: "Petty Cash Voucher Details (Max Rs. 1,000.00)", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Petty Cash Dealing Head", txt(r.owner_head_name ?? r.department)],
+          ["Disbursement Entry Account", txt(r.assigned_entry_user_name)],
+          ["Payment Mode", payMode],
+          ["Requested Amount (<= Rs. 1,000)", money(r.amount)],
+        ] },
+        { title: "Mandatory Note / Purpose", text: r.notes ?? "-" },
+      ],
+    };
+  }
+  if (r.request_type === "agreement") {
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("agreement_approval_form")
+    );
+    if (alreadyUploaded) return null;
+    return {
+      subtitle: "AGREEMENT APPROVAL FORM",
+      sections: [
+        { title: "Agreement Request Details", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)],
+          ["Agreement Title", txt(r.title)],
+          ["Consideration", "Non-Cash Item (No Disbursement Required)"],
+          ["Approval Route", "Route B — Department Head Approval Only"],
+        ] },
+        { title: "Description", text: r.notes ?? d.description ?? "-" },
+      ],
+    };
+  }
+  if (r.request_type === "statutory_payment") {
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("statutory_payment_approval_form")
+    );
+    if (alreadyUploaded) return null;
+    return {
+      subtitle: "STATUTORY PAYMENT APPROVAL FORM",
+      sections: [
+        { title: "Statutory Payment Details", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)],
+          ["Title", txt(r.title)],
+          ["Payment Amount", money(d.payment_amount ?? r.amount)],
+          ["Payment Date", txt(d.payment_date)],
+          ["Due Date", txt(d.due_date)],
+          ["Approval Route", "Route B — Department Head Approval Only"],
+        ] },
+        { title: "Description", text: r.notes ?? d.description ?? "-" },
+      ],
+    };
+  }
+  if (r.request_type === "audit_report") {
+    // deno-lint-ignore no-explicit-any
+    const alreadyUploaded = (files ?? []).some((f: any) =>
+      String(f?.original_name ?? "").toLowerCase().includes("audit_report_approval_form")
+    );
+    if (alreadyUploaded) return null;
+    return {
+      subtitle: "AUDIT REPORT APPROVAL FORM",
+      sections: [
+        { title: "Audit Report Details", rows: [
+          ["Request No", txt(r.request_no)],
+          ["Date", submitted],
+          ["Requested by", txt(r.requester_name)],
+          ["Outlet / Shop", txt(r.shop_name)],
+          ["Department", txt(r.department)],
+          ["Report Title", txt(r.title)],
+          ["Audit Report of Which Firm", txt(d.audit_firm)],
+          ["Audit Period", `${txt(d.audit_from_date)} to ${txt(d.audit_to_date)}`],
+          ["Consideration", "Non-Cash Item (No Disbursement Required)"],
+          ["Approval Authority", "Administrator Approval Only"],
+        ] },
+        { title: "Description", text: r.notes ?? d.description ?? "-" },
+      ],
+    };
+  }
+  return null;
+}
+
+Deno.serve(handle(async (req) => {
+  const { admin, me } = await getCaller(req);
+  if (me.role !== "admin" && me.role !== "head") throw new HttpError(403, "forbidden", "Only a Head or Admin can approve.");
+  // deno-lint-ignore no-explicit-any
+  const body = await readJson<any>(req);
+  const requestId = requireUuid(body.request_id, "Request");
+
+  const { data: begun, error: bErr } = await admin.rpc("begin_approval", { p_request_id: requestId, p_approver_id: me.id });
+  if (bErr) throw new HttpError(409, "cannot_approve", bErr.message);
+  // deno-lint-ignore no-explicit-any
+  const b = begun as any;
+
+  try {
+    const download = async (bucket: string, path: string) => {
+      const { data, error } = await admin.storage.from(bucket).download(path);
+      if (error || !data) throw new Error(`Could not read ${path.split("/").pop()}`);
+      return new Uint8Array(await data.arrayBuffer());
+    };
+    const [seal, signature] = await Promise.all([
+      download("credentials", b.seal_path), download("credentials", b.signature_path),
+    ]);
+    const origin = appOrigin(body.app_url);
+    const r = b.request;
+    const approverObj = b.approver ?? me;
+    const approverLine = [approverObj.full_name, approverObj.designation, approverObj.department ?? (approverObj.role === "admin" || me.role === "admin" ? "Administration" : null)]
+      .filter(Boolean).join(", ");
+    const ctx: StampContext = {
+      approvalNo: b.approval_no,
+      approverLine,
+      dateTime: ist(b.decided_at),
+      requestNo: r.request_no,
+      amount: r.request_type === "stock_transfer"
+        ? `Stock Transfer (MRP: ${inr(Number(r.amount))})`
+        : r.request_type === "non_cash"
+          ? "Non-Cash (No payment)"
+          : r.request_type === "agreement"
+            ? "Agreement (Non-Cash)"
+            : r.request_type === "audit_report"
+              ? "Audit Report (Non-Cash)"
+              : inr(Number(r.amount)),
+      reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at
+        ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
+      verifyUrl: origin ? `${origin}/verify/${r.verify_token}` : null,
+      seal, signature,
+    };
+
+    // Clear leftovers from an earlier failed run for this approval number (never finalized).
+    const { data: existing } = await admin.storage.from("signed-documents").list(requestId, { limit: 100 });
+    const stale = (existing ?? []).filter((o) => o.name.startsWith(b.approval_no)).map((o) => `${requestId}/${o.name}`);
+    if (stale.length) await admin.storage.from("signed-documents").remove(stale);
+
+    // deno-lint-ignore no-explicit-any
+    const files: any[] = b.files;
+    const form = formSections(r, r.submitted_at ? ist(r.submitted_at, false) : "—", b.files);
+    if (!files.length && !form) throw new Error("No documents to sign");
+    const signedBytes: Uint8Array[] = [];
+    const records: Record<string, unknown>[] = [];
+    const docsInfo: { name: string; pages: number }[] = [];
+
+    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number,
+      inPacket = true) => {
+      const fileName = `${b.approval_no}_${String(index).padStart(2, "0")}_${safeName(label)}.pdf`;
+      const path = `${requestId}/${fileName}`;
+      const { error } = await admin.storage.from("signed-documents")
+        .upload(path, bytes, { contentType: "application/pdf", upsert: false });
+      if (error) throw new Error(`Upload failed: ${error.message}`);
+      // Asset buying: the combined packet carries only the form + the selected quotation.
+      if (inPacket) {
+        signedBytes.push(bytes);
+        docsInfo.push({ name: label, pages });
+      }
+      records.push({ source_file_id: sourceId, is_packet: false, file_name: fileName, storage_path: path,
+        sha256: await sha256(bytes), page_count: pages });
+    };
+
+    let n = 0;
+    if (form) {
+      const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections);
+      const out = await stampDocument(formPdf, ctx);
+      await store(
+        out.bytes,
+        ++n,
+        r.request_type === "discount"
+          ? "discount_form"
+          : r.request_type === "petty_cash"
+            ? "petty_cash_form_below_1000"
+            : r.request_type === "agreement"
+              ? "agreement_approval_form"
+              : r.request_type === "statutory_payment"
+                ? "statutory_payment_approval_form"
+                : r.request_type === "audit_report"
+                  ? "audit_report_approval_form"
+                  : (r.request_type === "asset" || r.request_type === "asset_below_20k")
+                    ? "asset_purchase_form"
+                    : r.request_type === "stock_transfer"
+                      ? "stock_transfer_form"
+                      : r.request_type === "non_cash"
+                        ? "non_cash_form"
+                        : "exhibition_form",
+        null,
+        out.pageCount
+      );
+    }
+
+    // One file at a time to keep memory low.
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const src = await download("request-files", f.storage_path);
+      const isQuote = (r.request_type === "asset" || r.request_type === "asset_below_20k") && f.quote_amount !== null && f.quote_amount !== undefined;
+      const rejected = isQuote && f.quote_status !== "selected";
+      const fileCtx: StampContext = !isQuote ? ctx : rejected
+        ? { ...ctx, tone: "rejected",
+            headline: `REJECTED QUOTATION · NOT SELECTED · Approval No: ${b.approval_no}`,
+            byLabel: "Rejected by",
+            amount: `${inr(Number(f.quote_amount))} quoted (not selected)` }
+        : { ...ctx, headline: `APPROVED · SELECTED QUOTATION · Approval No: ${b.approval_no}` };
+      let out;
+      try {
+        out = await stampDocument(src, fileCtx);
+      } catch (e) {
+        throw new Error(`Could not stamp "${f.original_name}": ${e instanceof Error ? e.message : e}`);
+      }
+      const label = !isQuote ? f.original_name
+        : `${rejected ? "REJECTED" : "SELECTED"}_${f.quote_vendor ?? "quote"}_${f.original_name}`;
+      await store(out.bytes, ++n, label, f.id, out.pageCount, !rejected);
+    }
+
+    const packet = await buildPacket({
+      title: r.title,
+      rows: [
+        ["Approval No", b.approval_no],
+        ["Request No", r.request_no],
+        ["Type", TYPE_LABEL[r.request_type] ?? "General"],
+        ["Amount", r.request_type === "stock_transfer" ? `Total MRP: ${inr(Number(r.amount))} (Stock Transfer)` : r.request_type === "non_cash" ? "Non-Cash (No payment)" : r.request_type === "agreement" ? "Agreement (Non-Cash · No Disbursement)" : r.request_type === "audit_report" ? "Audit Report (Non-Cash · No Disbursement)" : inr(Number(r.amount))],
+        ["Department", r.department ?? "—"],
+        ["Shop", r.request_type === "exhibition"
+          ? ((typeof r.details?.conducting_shop_name === "string" && r.details.conducting_shop_name.trim()) ? r.details.conducting_shop_name.trim() : "Not Assigned")
+          : (r.shop_name ?? "—")],
+        ["Requested by", r.requester_name],
+        ["Submitted", r.submitted_at ? ist(r.submitted_at) : "—"],
+        ["Route", r.route === "A" ? "A — Admin approval" : "B — Head approval"],
+        ["Approved by", approverLine],
+        ["Approved on", ctx.dateTime],
+      ],
+      notes: r.notes,
+      documents: docsInfo,
+      // deno-lint-ignore no-explicit-any
+      timeline: [...(b.timeline as any[]).map((t) => ({
+        when: ist(t.created_at), who: t.actor_name, what: ACTION_LABEL[t.action] ?? t.action, remarks: t.remarks,
+      })), { when: ctx.dateTime, who: approverObj.full_name, what: `Approved · ${b.approval_no}`, remarks: null }],
+    }, signedBytes, ctx);
+    const packetName = `${b.approval_no}_packet.pdf`;
+    const packetPath = `${requestId}/${packetName}`;
+    const { error: pErr } = await admin.storage.from("signed-documents")
+      .upload(packetPath, packet.bytes, { contentType: "application/pdf", upsert: false });
+    if (pErr) throw new Error(`Upload failed: ${pErr.message}`);
+    records.unshift({ source_file_id: null, is_packet: true, file_name: packetName, storage_path: packetPath,
+      sha256: await sha256(packet.bytes), page_count: packet.pageCount });
+
+    const { error: fErr } = await admin.rpc("finalize_approval", {
+      p_request_id: requestId, p_approver_id: me.id, p_files: records,
+    });
+    if (fErr) throw new Error(fErr.message);
+
+    // ------------------------------------------------------------------------
+    // Automatic WhatsApp Cloud API Dispatch (when not delegated to client)
+    // ------------------------------------------------------------------------
+    const whatsappResults: { recipient: string; ok: boolean; error?: string }[] = [];
+    if (!body.skip_whatsapp) {
+      try {
+        // 1. Get 7-day signed download URL for the packet PDF as fallback
+        const { data: signUrlData } = await admin.storage
+          .from("signed-documents")
+          .createSignedUrl(packetPath, 60 * 60 * 24 * 7);
+
+        const packetDownloadUrl = signUrlData?.signedUrl;
+
+        // 2. Fetch WhatsApp settings
+        const { data: settingRow } = await admin
+          .from("app_settings")
+          .select("value")
+          .eq("key", "whatsapp_config")
+          .maybeSingle();
+
+        const defaultCfg = {
+          enabled: true,
+          access_token: "EAAzRU40ZBcyoBS1Uyk7UgqBlRIvb407NufgvmPdZBmZCjGsZAiDBervAm9MGZAhkVyou64W2lDt64ZByltVjcRVwvdkndcEPsUZAi0DvoISgKKbRUEZCQZABpLslfpvcrM1fE19UXaVyZCEhaz2ebIZAvuWGpvQG2KZBJNfrksm5vRN44PCuRpco8riA6NnSan6uUgZDZD",
+          phone_number_id: "1391767714024374",
+          notify_requester: true,
+          notify_head: true,
+          admin_phone_number: "+91 9846880713",
+          template_language: "en",
+          use_template: true,
+        };
+
+        // deno-lint-ignore no-explicit-any
+        const cfg = { ...defaultCfg, ...((settingRow?.value as any) ?? {}) };
+
+        if (cfg.enabled && cfg.access_token && cfg.phone_number_id) {
+          // Upload stamped PDF bytes once to Meta Media API for DOCUMENT header template
+          const docFilename = `${b.approval_no}_Approved_Document.pdf`;
+          let mediaId: string | null = null;
+          try {
+            const mediaForm = new FormData();
+            mediaForm.append("messaging_product", "whatsapp");
+            mediaForm.append("type", "application/pdf");
+            mediaForm.append(
+              "file",
+              new Blob([packet.bytes], { type: "application/pdf" }),
+              docFilename
+            );
+            const mRes = await fetch(
+              `https://graph.facebook.com/v21.0/${cfg.phone_number_id}/media`,
+              {
+                method: "POST",
+                headers: { Authorization: `Bearer ${cfg.access_token}` },
+                body: mediaForm,
+              }
+            );
+            const mJson = await mRes.json();
+            if (mRes.ok && mJson?.id) {
+              mediaId = String(mJson.id);
+            }
+          } catch (mErr) {
+            console.warn("Edge media upload warning:", mErr);
+          }
+
+          // Collect recipients
+          const recipients: { phone: string; name?: string }[] = [];
+
+          // Requester WhatsApp
+          if (cfg.notify_requester && r.requester_id) {
+            const { data: reqProf } = await admin
+              .from("profiles")
+              .select("full_name, whatsapp_number, default_head_id")
+              .eq("id", r.requester_id)
+              .maybeSingle();
+
+            if (reqProf?.whatsapp_number) {
+              recipients.push({ phone: reqProf.whatsapp_number, name: reqProf.full_name || r.requester_name });
+            }
+
+            // Head WhatsApp
+            if (cfg.notify_head && reqProf?.default_head_id) {
+              const { data: headProf } = await admin
+                .from("profiles")
+                .select("full_name, whatsapp_number")
+                .eq("id", reqProf.default_head_id)
+                .maybeSingle();
+              if (headProf?.whatsapp_number) {
+                recipients.push({ phone: headProf.whatsapp_number, name: headProf.full_name || "Department Head" });
+              }
+            }
+          }
+
+          // Owner Head (if different)
+          if (cfg.notify_head && r.owner_head_id && !recipients.some((x) => x.name?.includes("Head"))) {
+            const { data: ownerProf } = await admin
+              .from("profiles")
+              .select("full_name, whatsapp_number")
+              .eq("id", r.owner_head_id)
+              .maybeSingle();
+            if (ownerProf?.whatsapp_number) {
+              recipients.push({ phone: ownerProf.whatsapp_number, name: ownerProf.full_name || "Head" });
+            }
+          }
+
+          // Admin notification copy
+          if (cfg.admin_phone_number && cfg.admin_phone_number.trim()) {
+            recipients.push({ phone: cfg.admin_phone_number.trim(), name: "Admin Notification" });
+          }
+
+          const cleanPhone = (p: string) => {
+            const d = p.replace(/\D/g, "");
+            return d.length === 10 ? `91${d}` : d.startsWith("0") && d.length === 11 ? `91${d.slice(1)}` : d;
+          };
+
+          const seenPhones = new Set<string>();
+          const uniqueRecipients = recipients.filter((x) => {
+            const c = cleanPhone(x.phone);
+            if (!c || c.length < 10 || seenPhones.has(c)) return false;
+            seenPhones.add(c);
+            return true;
+          });
+
+          const outletLabel =
+            r.request_type === "exhibition"
+              ? ((typeof r.details?.conducting_shop_name === "string" && r.details.conducting_shop_name.trim()) || r.shop_name || "All Outlets")
+              : (r.shop_name || "All Outlets");
+
+          const bodyParams = [
+            r.requester_name || "Staff Member",
+            r.request_no || "REQ",
+            b.approval_no,
+            r.title || "Official Approval",
+            outletLabel,
+            ctx.amount,
+            approverObj.full_name || "Authorized Head / Admin",
+            ctx.dateTime,
+          ];
+
+          const caption = `✅ *Your approval has been approved!*\nRequest No: ${r.request_no}\nApproval No: ${b.approval_no}\nAmount: ${ctx.amount}`;
+          const waUrl = `https://graph.facebook.com/v21.0/${cfg.phone_number_id}/messages`;
+
+          for (const target of uniqueRecipients) {
+            const targetPhone = cleanPhone(target.phone);
+            try {
+              const docObj = mediaId
+                ? { id: mediaId, filename: docFilename }
+                : packetDownloadUrl
+                  ? { link: packetDownloadUrl, filename: docFilename }
+                  : null;
+
+              let res = await fetch(waUrl, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${cfg.access_token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(
+                  docObj && cfg.use_template !== false
+                    ? {
+                        messaging_product: "whatsapp",
+                        recipient_type: "individual",
+                        to: targetPhone,
+                        type: "template",
+                        template: {
+                          name: "approval_document_packet",
+                          language: { code: cfg.template_language || "en" },
+                          components: [
+                            {
+                              type: "header",
+                              parameters: [{ type: "document", document: docObj }],
+                            },
+                            {
+                              type: "body",
+                              parameters: bodyParams.map((p) => ({ type: "text", text: String(p) })),
+                            },
+                          ],
+                        },
+                      }
+                    : {
+                        messaging_product: "whatsapp",
+                        recipient_type: "individual",
+                        to: targetPhone,
+                        type: "document",
+                        document: mediaId
+                          ? { id: mediaId, caption, filename: docFilename }
+                          : { link: packetDownloadUrl, caption, filename: docFilename },
+                      }
+                ),
+              });
+
+              let resJson = await res.json();
+
+              // Fallback to body-only template if approval_document_packet is still under Meta review
+              if (!res.ok && docObj && cfg.use_template !== false) {
+                if (mediaId || packetDownloadUrl) {
+                  await fetch(waUrl, {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${cfg.access_token}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      messaging_product: "whatsapp",
+                      recipient_type: "individual",
+                      to: targetPhone,
+                      type: "document",
+                      document: mediaId
+                        ? { id: mediaId, caption, filename: docFilename }
+                        : { link: packetDownloadUrl, caption, filename: docFilename },
+                    }),
+                  }).catch(() => {});
+                }
+                res = await fetch(waUrl, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${cfg.access_token}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    recipient_type: "individual",
+                    to: targetPhone,
+                    type: "template",
+                    template: {
+                      name: "approval_notification",
+                      language: { code: cfg.template_language || "en" },
+                      components: [
+                        {
+                          type: "body",
+                          parameters: bodyParams.map((p) => ({ type: "text", text: String(p) })),
+                        },
+                      ],
+                    },
+                  }),
+                });
+                resJson = await res.json();
+              }
+
+              const isOk = res.ok;
+              const metaId = resJson?.messages?.[0]?.id;
+              const errStr = !isOk ? (resJson?.error?.message || `HTTP ${res.status}`) : undefined;
+
+              whatsappResults.push({ recipient: targetPhone, ok: isOk, error: errStr });
+
+              await admin.from("whatsapp_logs").insert({
+                request_id: requestId,
+                recipient_phone: targetPhone,
+                recipient_name: target.name || null,
+                message_type: "document_template",
+                status: isOk ? "sent" : "failed",
+                meta_message_id: metaId || null,
+                error_message: errStr || null,
+                details: { approval_no: b.approval_no, request_no: r.request_no, media_id: mediaId },
+              }).catch(() => {});
+            } catch (waErr) {
+              console.error("WhatsApp dispatch error for " + targetPhone, waErr);
+              whatsappResults.push({ recipient: targetPhone, ok: false, error: String(waErr) });
+            }
+          }
+        }
+      } catch (waOverallErr) {
+        console.error("WhatsApp notification dispatch failed:", waOverallErr);
+      }
+    }
+
+    return json({ approval_no: b.approval_no, files: records.length, pages: packet.pageCount, whatsapp_sent: whatsappResults });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("Signing failed:", msg);
+    await admin.rpc("abort_approval", { p_request_id: requestId, p_approver_id: me.id, p_error: msg });
+    throw new HttpError(500, "signing_failed", `Signing failed — try again. (${msg})`);
+  }
+}));

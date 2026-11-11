@@ -43,3 +43,4 @@ do $$
 begin
   raise notice 'SUCCESS: public.gen_request_no() is now available.';
 end $$;
+

@@ -733,10 +733,19 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
           const cleanBytes = await doc.save({ useObjectStreams: false });
           const cleanBlob = new Blob([cleanBytes as unknown as BlobPart], { type: 'application/pdf' });
-          await supabase.storage.from('request-files').upload(f.storage_path, cleanBlob, {
+          try {
+            await supabase.storage.from('request-files').remove([f.storage_path]);
+          } catch (rmErr) {
+            console.warn('Remove old encrypted file notice:', rmErr);
+          }
+          const { error: upErr } = await supabase.storage.from('request-files').upload(f.storage_path, cleanBlob, {
             contentType: 'application/pdf',
             upsert: true,
           });
+          if (upErr) {
+            console.error('Failed to sanitize PDF in storage:', upErr);
+            throw new Error(`Could not sanitize encrypted attachment "${f.original_name}": ${upErr.message}`);
+          }
           console.log(`Successfully sanitized encrypted PDF ${f.original_name} in storage.`);
         }
       }
