@@ -753,6 +753,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
           bank_verification_message: data.bank_verification_message ?? data.details?.bank_verification_message ?? null,
         };
 
+        const effectiveTargetHeadId =
+          data.target_head_id ||
+          (user.role !== 'head'
+            ? user.default_head_id ||
+              user.user_heads?.find((h) => h.is_default)?.head_id ||
+              user.user_heads?.[0]?.head_id ||
+              null
+            : null);
+
         const { data: newId, error } = await supabase.rpc('create_typed_draft', {
           p_type: type,
           p_title: data.title,
@@ -769,7 +778,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               : null,
           p_notes: data.notes || null,
           p_details: mergedDetails,
-          p_target_head_id: data.target_head_id || null,
+          p_target_head_id: effectiveTargetHeadId,
         });
         if (error) throw error;
         requestId = newId as string;
@@ -1742,7 +1751,9 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       : ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'pending_head_review' : 'pending_head_approval');
 
     const toStatus: RequestStatus = isPettyCash
-      ? user.role === 'employee' && mockEmpRh
+      ? !hasClerkUnderHead && targetHeadId
+        ? 'pending_head_approval'
+        : user.role === 'employee' && mockEmpRh
         ? 'pending_regional_review'
         : isHead && (!current.owner_head_id || current.owner_head_id === user.id)
         ? 'pending_admin_approval'
@@ -1750,29 +1761,29 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       : isHeadOnlySpecial
       ? isHead || isClerk
         ? 'pending_head_approval'
-        : mockEmpRh
-        ? 'pending_regional_review'
         : !hasClerkUnderHead
         ? 'pending_head_approval'
+        : mockEmpRh
+        ? 'pending_regional_review'
         : 'submitted'
       : isAuditReport
       ? isHead
         ? 'pending_admin_approval'
         : isClerk
         ? 'pending_head_review'
-        : mockEmpRh
-        ? 'pending_regional_review'
         : !hasClerkUnderHead
         ? 'pending_head_review'
+        : mockEmpRh
+        ? 'pending_regional_review'
         : 'submitted'
       : isHead
       ? 'pending_admin_approval'
       : isClerk
       ? ((current.amount || 0) > threshold || current.request_type === 'exhibition' ? 'pending_head_review' : 'pending_head_approval')
-      : mockEmpRh
-      ? 'pending_regional_review'
       : !hasClerkUnderHead
       ? directHeadStatus
+      : mockEmpRh
+      ? 'pending_regional_review'
       : 'submitted';
 
     const clkRoute: ApprovalRoute | undefined = isPettyCash
@@ -1832,8 +1843,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
               route: clkRoute ?? (isHead ? 'A' : r.route),
               routed_by: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') || (!hasClerkUnderHead && (toStatus === 'pending_head_approval' || toStatus === 'pending_head_review')) ? user.id : r.routed_by,
               routed_at: isHead || isClerk || (isPettyCash && toStatus === 'pending_head_approval') || (!hasClerkUnderHead && (toStatus === 'pending_head_approval' || toStatus === 'pending_head_review')) ? new Date().toISOString() : r.routed_at,
-              regional_head_id: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.id : r.regional_head_id,
-              regional_head_name: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.full_name : r.regional_head_name,
+              regional_head_id: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.id : !hasClerkUnderHead ? null : r.regional_head_id,
+              regional_head_name: toStatus === 'pending_regional_review' && mockEmpRh ? mockEmpRh.full_name : !hasClerkUnderHead ? null : r.regional_head_name,
+              owner_head_id: r.owner_head_id || targetHeadId || null,
+              owner_head_name: r.owner_head_name || (targetHeadId ? MOCK_USERS.find((u) => u.id === targetHeadId)?.full_name || null : null),
               disbursement_mode: isPettyCash ? (r.disbursement_mode || 'cash') : r.disbursement_mode,
               assigned_entry_user_id: entryUserId || r.assigned_entry_user_id,
               assigned_entry_user_name: targetUser ? targetUser.full_name : r.assigned_entry_user_name,

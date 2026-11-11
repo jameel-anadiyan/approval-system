@@ -123,3 +123,4 @@ end $$;
 
 revoke execute on function public.set_department_special_request_access(uuid, text, boolean, boolean) from public, anon;
 grant execute on function public.set_department_special_request_access(uuid, text, boolean, boolean) to authenticated;
+

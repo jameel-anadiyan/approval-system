@@ -171,9 +171,20 @@ export const NewRequestPage: React.FC = () => {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef<boolean>(false);
-  const [targetHeadId, setTargetHeadId] = useState('');
+  const defaultUserHeadId =
+    user?.default_head_id ||
+    user?.user_heads?.find((h) => h.is_default)?.head_id ||
+    user?.user_heads?.[0]?.head_id ||
+    '';
+  const [targetHeadId, setTargetHeadId] = useState(defaultUserHeadId);
   const [pettyCashDealers, setPettyCashDealers] = useState<PettyCashDealer[]>([]);
   const [loadingPettyDealers, setLoadingPettyDealers] = useState(false);
+
+  useEffect(() => {
+    if (!targetHeadId && defaultUserHeadId) {
+      setTargetHeadId(defaultUserHeadId);
+    }
+  }, [defaultUserHeadId, targetHeadId]);
   // Department Head routing choice: Route to Admin (Default) vs Route to Other Department Head
   const [headRoutingMode, setHeadRoutingMode] = useState<'admin' | 'other_head'>('admin');
   const otherHeads = useMemo(() => {
