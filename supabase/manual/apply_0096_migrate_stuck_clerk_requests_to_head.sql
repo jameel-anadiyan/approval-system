@@ -113,10 +113,10 @@ begin
         where id = r.id;
 
         insert into public.request_actions (
-          id, request_id, actor_id, actor_name, actor_role,
+          request_id, actor_id, actor_name, actor_role,
           action, from_status, to_status, remarks, visible_to_requester, created_at
         ) values (
-          gen_random_uuid(), r.id, coalesce(v_head.id, r.requester_id), coalesce(v_head.full_name, 'System'), 'head',
+          r.id, coalesce(v_head.id, r.requester_id), coalesce(v_head.full_name, 'System'), 'head',
           'system_transition', r.status, v_next,
           'Automatically routed directly to Department Head ' || v_head.full_name || ' (no clerk configured under this head)',
           true, now()
@@ -1155,3 +1155,4 @@ end $$;
 
 revoke execute on function public.regional_forward_request(uuid, text, uuid, uuid, uuid) from public, anon;
 grant execute on function public.regional_forward_request(uuid, text, uuid, uuid, uuid) to authenticated;
+
