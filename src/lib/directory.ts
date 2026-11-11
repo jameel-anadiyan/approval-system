@@ -1669,8 +1669,13 @@ export async function loadAuditLog(live: boolean): Promise<AuditLogEntry[]> {
 
 export async function loadThreshold(live: boolean): Promise<number> {
   if (!live) return MOCK_SETTINGS.high_value_threshold;
-  const { data } = await supabase.from('app_settings').select('value').eq('key', 'high_value_threshold').maybeSingle();
-  const n = Number(data?.value);
+  const { data } = await supabase
+    .from('app_settings')
+    .select('key, value')
+    .in('key', ['high_value_threshold', 'threshold_amount']);
+  const highVal = (data as any[])?.find((r) => r.key === 'high_value_threshold')?.value;
+  const threshVal = (data as any[])?.find((r) => r.key === 'threshold_amount')?.value;
+  const n = Number(highVal ?? threshVal);
   return Number.isFinite(n) && n > 0 ? n : 10000;
 }
 
@@ -1680,7 +1685,13 @@ export async function saveThreshold(live: boolean, value: number): Promise<Resul
     return { success: true };
   }
   const { error } = await supabase.rpc('update_setting', { p_key: 'high_value_threshold', p_value: value });
-  return error ? { success: false, error: errMsg(error) } : { success: true };
+  if (error) return { success: false, error: errMsg(error) };
+  try {
+    await supabase.rpc('update_setting', { p_key: 'threshold_amount', p_value: value });
+  } catch (err) {
+    console.warn('Failed to mirror threshold_amount:', err);
+  }
+  return { success: true };
 }
 
 export { isEntryCheckingUser } from './formatters';

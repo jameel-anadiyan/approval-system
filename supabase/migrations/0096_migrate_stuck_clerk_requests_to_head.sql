@@ -1,7 +1,14 @@
 -- 0096: Migrate requests waiting for clerk to Department Head when no clerk exists under that head,
 -- and fix strict clerk-to-head detection in submit_request and regional_forward_request.
 
--- 1. Migrate existing stuck requests in 'submitted' (or 'pending_regional_review') where Head has no clerk
+-- 1. Ensure app_settings has high_value_threshold and threshold_amount
+insert into public.app_settings (key, value)
+values
+  ('high_value_threshold', '10000'::jsonb),
+  ('threshold_amount', '10000'::jsonb)
+on conflict (key) do nothing;
+
+-- 2. Migrate existing stuck requests in 'submitted', 'pending_regional_review', or mistakenly routed 'pending_head_approval'
 do $$
 declare
   r record;
@@ -14,13 +21,23 @@ declare
   v_mahesh public.profiles;
   v_count int := 0;
 begin
-  select coalesce((value #>> '{}')::numeric, 10000) into v_threshold from public.app_settings where key = 'threshold_amount';
+  select coalesce(nullif(regexp_replace(value #>> '{}', '[^0-9.]', '', 'g'), '')::numeric, 10000)
+    into v_threshold
+    from public.app_settings
+   where key in ('high_value_threshold', 'threshold_amount')
+   order by case when key = 'high_value_threshold' then 1 else 2 end
+   limit 1;
+
+  if v_threshold is null or v_threshold <= 0 then
+    v_threshold := 10000;
+  end if;
+
   select * into v_jameel from public.profiles where full_name ilike '%jameel%' and role in ('head', 'admin') order by (case when role = 'head' then 0 else 1 end) limit 1;
   select * into v_mahesh from public.profiles where (full_name ilike '%mahesh%' or username ilike '%mahesh%') limit 1;
 
   for r in
     select * from public.requests
-    where status in ('submitted', 'pending_regional_review')
+    where status in ('submitted', 'pending_regional_review', 'pending_head_approval')
   loop
     -- Identify target Department Head
     v_head := null;
@@ -90,7 +107,7 @@ begin
         elsif r.request_type::text = 'audit_report'
            or r.request_type = 'exhibition'
            or (r.request_type::text not in ('discount', 'stock_transfer', 'agreement', 'statutory_payment', 'non_cash')
-               and r.amount > v_threshold) then
+               and coalesce(r.amount, 0) > v_threshold) then
           v_next := 'pending_head_review';
           v_route := 'A';
         else
@@ -98,35 +115,64 @@ begin
           v_route := 'B';
         end if;
 
-        update public.requests set
-          status = v_next,
-          route = v_route,
-          owner_head_id = v_head.id,
-          owner_head_name = v_head.full_name,
-          department_id = coalesce(v_head.department_id, r.department_id),
-          routed_by = coalesce(r.routed_by, r.requester_id),
-          routed_at = coalesce(r.routed_at, now()),
-          regional_head_id = case when r.status = 'pending_regional_review' then null else regional_head_id end,
-          regional_head_name = case when r.status = 'pending_regional_review' then null else regional_head_name end,
-          updated_at = now()
-        where id = r.id;
+        -- If request was already in pending_head_approval but should be in pending_head_review (Route A)
+        if r.status = 'pending_head_approval' and v_next = 'pending_head_review' then
+          update public.requests set
+            status = 'pending_head_review',
+            route = 'A',
+            owner_head_id = v_head.id,
+            owner_head_name = v_head.full_name,
+            department_id = coalesce(v_head.department_id, r.department_id),
+            updated_at = now()
+          where id = r.id;
 
-        insert into public.request_actions (
-          request_id, actor_id, actor_name, actor_role,
-          action, from_status, to_status, remarks, visible_to_requester, created_at
-        ) values (
-          r.id, coalesce(v_head.id, r.requester_id), coalesce(v_head.full_name, 'System'), 'head',
-          'system_transition', r.status, v_next,
-          'Automatically routed directly to Department Head ' || v_head.full_name || ' (no clerk configured under this head)',
-          true, now()
-        );
+          insert into public.request_actions (
+            request_id, actor_id, actor_name, actor_role,
+            action, from_status, to_status, remarks, visible_to_requester, created_at
+          ) values (
+            r.id, coalesce(v_head.id, r.requester_id), coalesce(v_head.full_name, 'System'), 'head',
+            'system_transition', r.status, 'pending_head_review',
+            'Corrected route to Route A (pending_head_review) as amount (₹' || coalesce(r.amount::text, '0') || ') exceeds threshold (₹' || v_threshold::text || ')',
+            true, now()
+          );
 
-        perform public.notify_next_actor(r.id, v_next);
-        v_count := v_count + 1;
+          perform public.notify_next_actor(r.id, 'pending_head_review');
+          v_count := v_count + 1;
+
+        elsif r.status in ('submitted', 'pending_regional_review') then
+          update public.requests set
+            status = v_next,
+            route = v_route,
+            owner_head_id = v_head.id,
+            owner_head_name = v_head.full_name,
+            department_id = coalesce(v_head.department_id, r.department_id),
+            routed_by = coalesce(r.routed_by, r.requester_id),
+            routed_at = coalesce(r.routed_at, now()),
+            regional_head_id = case when r.status = 'pending_regional_review' then null else regional_head_id end,
+            regional_head_name = case when r.status = 'pending_regional_review' then null else regional_head_name end,
+            updated_at = now()
+          where id = r.id;
+
+          insert into public.request_actions (
+            request_id, actor_id, actor_name, actor_role,
+            action, from_status, to_status, remarks, visible_to_requester, created_at
+          ) values (
+            r.id, coalesce(v_head.id, r.requester_id), coalesce(v_head.full_name, 'System'), 'head',
+            'system_transition', r.status, v_next,
+            case when v_route = 'A'
+              then 'Automatically routed directly to Department Head ' || v_head.full_name || ' for Review (Route A, amount ₹' || coalesce(r.amount::text, '0') || ' > ₹' || v_threshold::text || ', no clerk configured)'
+              else 'Automatically routed directly to Department Head ' || v_head.full_name || ' for Approval (Route B, no clerk configured)'
+            end,
+            true, now()
+          );
+
+          perform public.notify_next_actor(r.id, v_next);
+          v_count := v_count + 1;
+        end if;
       end if;
     end if;
   end loop;
-  raise notice 'Migrated % requests to Department Head queue.', v_count;
+  raise notice 'Migrated / corrected % requests in Department Head queue.', v_count;
 end $$;
 
 -- 2. Update public.submit_request with strict clerk-to-head detection
@@ -146,8 +192,22 @@ declare
   v_pc_limit numeric;
   v_pc_cat text;
   v_bottle_qty int;
+  v_threshold numeric := 10000;
 begin
   me := public._me();
+
+  -- Safe threshold resolution
+  select coalesce(nullif(regexp_replace(value #>> '{}', '[^0-9.]', '', 'g'), '')::numeric, 10000)
+    into v_threshold
+    from public.app_settings
+   where key in ('high_value_threshold', 'threshold_amount')
+   order by case when key = 'high_value_threshold' then 1 else 2 end
+   limit 1;
+
+  if v_threshold is null or v_threshold <= 0 then
+    v_threshold := 10000;
+  end if;
+
   select * into r from public.requests where id = p_request_id for update;
   if r.id is null then raise exception 'Request not found'; end if;
 
@@ -501,7 +561,7 @@ begin
         if r.request_type::text = 'audit_report'
            or r.request_type = 'exhibition'
            or (r.request_type::text not in ('discount', 'stock_transfer', 'agreement', 'statutory_payment', 'non_cash')
-               and r.amount > coalesce((select (value #>> '{}')::numeric from public.app_settings where key = 'threshold_amount'), 10000)) then
+               and coalesce(r.amount, 0) > v_threshold) then
           v_next := 'pending_head_review';
         else
           v_next := 'pending_head_approval';
@@ -610,7 +670,7 @@ begin
       if r.request_type::text = 'audit_report'
          or r.request_type = 'exhibition'
          or (r.request_type::text not in ('discount', 'stock_transfer', 'agreement', 'statutory_payment', 'non_cash')
-             and r.amount > coalesce((select (value #>> '{}')::numeric from public.app_settings where key = 'threshold_amount'), 10000)) then
+             and coalesce(r.amount, 0) > v_threshold) then
         v_next := 'pending_head_review';
       else
         v_next := 'pending_head_approval';
@@ -710,7 +770,7 @@ begin
     if r.request_type::text = 'audit_report'
        or r.request_type = 'exhibition'
        or (r.request_type::text not in ('discount', 'stock_transfer', 'agreement', 'statutory_payment')
-           and r.amount > coalesce((select (value #>> '{}')::numeric from public.app_settings where key = 'threshold_amount'), 10000)) then
+           and coalesce(r.amount, 0) > v_threshold) then
       v_next := 'pending_head_review';
     else
       v_next := 'pending_head_approval';
@@ -803,7 +863,7 @@ begin
       if r.request_type::text = 'audit_report'
          or r.request_type = 'exhibition'
          or (r.request_type::text not in ('discount', 'stock_transfer', 'agreement', 'statutory_payment', 'non_cash')
-             and r.amount > coalesce((select (value #>> '{}')::numeric from public.app_settings where key = 'threshold_amount'), 10000)) then
+             and coalesce(r.amount, 0) > v_threshold) then
         v_next := 'pending_head_review';
       else
         v_next := 'pending_head_approval';
@@ -868,8 +928,22 @@ declare
   v_final_remarks text;
   v_next public.request_status;
   v_route public.approval_route;
+  v_threshold numeric := 10000;
 begin
   me := public._me();
+
+  -- Safe threshold resolution
+  select coalesce(nullif(regexp_replace(value #>> '{}', '[^0-9.]', '', 'g'), '')::numeric, 10000)
+    into v_threshold
+    from public.app_settings
+   where key in ('high_value_threshold', 'threshold_amount')
+   order by case when key = 'high_value_threshold' then 1 else 2 end
+   limit 1;
+
+  if v_threshold is null or v_threshold <= 0 then
+    v_threshold := 10000;
+  end if;
+
   select * into r from public.requests where id = p_request_id for update;
   if r.id is null or not public.can_view_request(r.id) then
     raise exception 'Not found';
@@ -1106,7 +1180,7 @@ begin
     if r.request_type::text = 'audit_report'
        or r.request_type = 'exhibition'
        or (r.request_type::text not in ('discount', 'stock_transfer', 'agreement', 'statutory_payment', 'non_cash')
-           and r.amount > coalesce((select (value #>> '{}')::numeric from public.app_settings where key = 'threshold_amount'), 10000)) then
+           and coalesce(r.amount, 0) > v_threshold) then
       v_next := 'pending_head_review'::public.request_status;
       v_route := 'A'::public.approval_route;
     else
