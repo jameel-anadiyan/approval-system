@@ -1732,16 +1732,21 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? MOCK_USERS.find((u) => u.id === user.regional_head_id && u.role === 'regional_head' && u.is_active)
         : null;
 
-    const targetHeadId = current.owner_head_id || user.default_head_id;
-    const targetDeptId = current.department_id || user.department_id;
-    const hasClerkUnderHead = MOCK_USERS.some(
-      (u) =>
-        u.role === 'clerk' &&
-        u.is_active &&
-        ((targetDeptId && u.department_id === targetDeptId) ||
-          (targetHeadId &&
-            (u.default_head_id === targetHeadId ||
-              u.user_heads?.some((uh) => uh.head_id === targetHeadId))))
+    const targetHeadId = current.owner_head_id || user.default_head_id || user.user_heads?.[0]?.head_id;
+    const targetHeadObj = MOCK_USERS.find((u) => u.id === targetHeadId && u.role === 'head');
+    const hasClerkUnderHead = Boolean(
+      targetHeadObj &&
+        MOCK_USERS.some(
+          (u) =>
+            u.role === 'clerk' &&
+            u.is_active &&
+            (u.default_head_id === targetHeadObj.id ||
+              u.user_heads?.some((uh) => uh.head_id === targetHeadObj.id) ||
+              (targetHeadObj.department_id &&
+                u.department_id === targetHeadObj.department_id &&
+                !u.default_head_id &&
+                (!u.user_heads || u.user_heads.length === 0)))
+        )
     );
 
     const directHeadStatus: RequestStatus = isHeadOnlySpecial
@@ -2345,16 +2350,19 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? MOCK_USERS.find((u) => u.id === cleanTargetHeadId && u.role === 'head')
         : null;
       const targetHead = chosenHead || MOCK_USERS.find((u) => u.id === currentReq.owner_head_id && u.role === 'head');
-      const targetDeptId = (headChanged && chosenHead?.department_id) || targetHead?.department_id || currentReq.department_id;
-      const targetHeadId = (headChanged && chosenHead?.id) || targetHead?.id || currentReq.owner_head_id;
-      const hasClerk = MOCK_USERS.some(
-        (u) =>
-          u.role === 'clerk' &&
-          u.is_active &&
-          ((targetDeptId && u.department_id === targetDeptId) ||
-            (targetHeadId &&
-              (u.default_head_id === targetHeadId ||
-                u.user_heads?.some((uh) => uh.head_id === targetHeadId))))
+      const hasClerk = Boolean(
+        targetHead &&
+          MOCK_USERS.some(
+            (u) =>
+              u.role === 'clerk' &&
+              u.is_active &&
+              (u.default_head_id === targetHead.id ||
+                u.user_heads?.some((uh) => uh.head_id === targetHead.id) ||
+                (targetHead.department_id &&
+                  u.department_id === targetHead.department_id &&
+                  !u.default_head_id &&
+                  (!u.user_heads || u.user_heads.length === 0)))
+          )
       );
       const chosenEntry = cleanEntryUserId
         ? MOCK_USERS.find((u) => u.id === cleanEntryUserId)

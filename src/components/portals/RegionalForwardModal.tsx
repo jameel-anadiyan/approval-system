@@ -233,18 +233,26 @@ export const RegionalForwardModal: React.FC<RegionalForwardModalProps> = ({
 
   const selectedHead = headOptions.find((h) => h.head_id === selectedHeadId) || null;
   const targetHeadId = selectedHead?.head_id || request.owner_head_id;
-  const targetDeptId = selectedHead?.department_id || request.department_id;
+  const targetHeadObj = useMemo(() => {
+    const headId = selectedHead?.head_id || request.owner_head_id;
+    if (!headId) return null;
+    return dir.users.find((u) => u.id === headId && u.role === 'head') || null;
+  }, [dir.users, selectedHead?.head_id, request.owner_head_id]);
+
   const hasClerkUnderHead = useMemo(() => {
+    if (!targetHeadObj) return false;
     return dir.users.some(
       (u) =>
         u.role === 'clerk' &&
         u.is_active &&
-        ((targetDeptId && u.department_id === targetDeptId) ||
-          (targetHeadId &&
-            (u.default_head_id === targetHeadId ||
-              u.user_heads?.some((uh) => uh.head_id === targetHeadId))))
+        (u.default_head_id === targetHeadObj.id ||
+          u.user_heads?.some((uh) => uh.head_id === targetHeadObj.id) ||
+          (targetHeadObj.department_id &&
+            u.department_id === targetHeadObj.department_id &&
+            !u.default_head_id &&
+            (!u.user_heads || u.user_heads.length === 0)))
     );
-  }, [dir.users, targetDeptId, targetHeadId]);
+  }, [dir.users, targetHeadObj]);
 
   const headChanged = Boolean(
     canSelectHead && selectedHeadId && selectedHeadId !== (request.owner_head_id || '')
