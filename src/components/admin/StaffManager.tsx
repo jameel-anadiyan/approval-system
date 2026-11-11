@@ -233,7 +233,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
 
   const toggleDeptSpecialRequest = async (
     u: Profile,
-    reqType: 'agreement' | 'statutory_payment' | 'audit_report'
+    reqType: 'agreement' | 'statutory_payment' | 'audit_report' | 'petty_cash'
   ) => {
     setBusyId(u.id);
     const currentlyOn = (u.allowed_types || []).includes(reqType);
@@ -861,6 +861,13 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     </div>
                     {(
                       [
+                        {
+                          key: 'petty_cash' as const,
+                          label: 'Petty Cash Request',
+                          sub: 'Payable · Up to ₹4,000 limit',
+                          icon: Wallet,
+                          activeBg: 'bg-teal-600',
+                        },
                         {
                           key: 'agreement' as const,
                           label: 'Agreement Request',

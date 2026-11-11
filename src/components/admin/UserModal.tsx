@@ -88,6 +88,7 @@ export const UserModal: React.FC<UserModalProps> = ({
       setIsDefaultPettyCashDealer(false);
       setAccountPersons([{ name: '', passkey: '' }]);
       setWhatsappNumber('');
+      setTypes(['general', 'petty_cash']);
     }
   }, [isOpen, allowedRoles]);
 
@@ -95,7 +96,7 @@ export const UserModal: React.FC<UserModalProps> = ({
     user?.department_id || departments[0]?.id || ''
   );
   const [shopId, setShopId] = useState('');
-  const [types, setTypes] = useState<RequestType[]>(['general']);
+  const [types, setTypes] = useState<RequestType[]>(['general', 'petty_cash']);
 
   const initialHeadId =
     user?.role === 'head'

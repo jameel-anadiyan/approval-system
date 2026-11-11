@@ -580,7 +580,7 @@ export function useDirectory() {
         updated_at: new Date().toISOString(), department: dept,
         shop_id: input.shop_id ?? null, shop,
         region_id: input.region_id ?? null, region,
-        allowed_types: input.allowed_types ?? ['general'],
+        allowed_types: input.allowed_types ?? ['general', 'petty_cash'],
         photo_path: input.photo || null,
         whatsapp_number: input.whatsapp_number || null,
         disbursement_type: input.role === 'disbursement' ? (input.disbursement_type || 'entry_only') : null,
@@ -1129,7 +1129,7 @@ export function useDirectory() {
   /** Admin enables / disables Agreement, Statutory Payment, or Audit Report for a Department Head and optionally their related Clerks, Employees & Regional Heads. */
   const setDepartmentSpecialRequestAccess = async (
     headId: string,
-    requestType: 'agreement' | 'statutory_payment' | 'audit_report',
+    requestType: 'agreement' | 'statutory_payment' | 'audit_report' | 'petty_cash',
     enabled: boolean,
     includeRelatedStaff = true
   ): Promise<Result & { updatedCount?: number }> => {

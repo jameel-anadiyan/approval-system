@@ -485,7 +485,7 @@ export const AccessModal: React.FC<{
   }) => Promise<{ success: boolean; error?: string }>;
 }> = ({ target, shops, regions = [], users = [], categories = [], onClose, onSave }) => {
   const [shopId, setShopId] = useState(target.shop_id ?? '');
-  const [types, setTypes] = useState<RequestType[]>(target.allowed_types?.length ? target.allowed_types : ['general']);
+  const [types, setTypes] = useState<RequestType[]>(target.allowed_types?.length ? target.allowed_types : ['general', 'petty_cash']);
   const [mandatoryHeadConsultation, setMandatoryHeadConsultation] = useState(!!target.mandatory_head_consultation);
   const [mandatoryConsultationHeadId, setMandatoryConsultationHeadId] = useState(target.mandatory_consultation_head_id || '');
 
