@@ -17,3 +17,4 @@ create policy "request-files update" on storage.objects for update to authentica
     bucket_id = 'request-files'
     and public.can_view_request(public.storage_request_id(name))
   );
+

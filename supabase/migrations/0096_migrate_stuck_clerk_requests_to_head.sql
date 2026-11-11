@@ -479,7 +479,7 @@ begin
 
   -- Non-Petty-Cash validation
   if r.request_type::text not in ('exhibition', 'petty_cash') and me.role not in ('head', 'admin') and r.category_id is null then
-    if exists (select 1 from public.request_categories rc where rc.is_active and (rc.department_id is null or rc.department_id = r.department_id)) then
+    if exists (select 1 from public.work_categories rc where rc.is_active and (rc.department_id is null or rc.department_id = r.department_id)) then
       raise exception 'Please select a work category before submitting';
     end if;
   end if;
@@ -506,7 +506,7 @@ begin
       end if;
 
       if r.category_id is null then
-        if exists (select 1 from public.request_categories rc where rc.is_active and (rc.department_id is null or rc.department_id = pc_head.department_id)) then
+        if exists (select 1 from public.work_categories rc where rc.is_active and (rc.department_id is null or rc.department_id = pc_head.department_id)) then
           raise exception 'Please select a work category under % before routing', pc_head.full_name;
         end if;
       end if;

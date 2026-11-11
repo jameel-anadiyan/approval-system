@@ -22,3 +22,4 @@ do $$
 begin
   raise notice 'SUCCESS: storage.objects update policy on request-files created.';
 end $$;
+
