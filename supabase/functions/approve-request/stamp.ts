@@ -145,7 +145,7 @@ export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promi
     page.drawImage(img, { x, y, width: w, height: h });
     drawBand(page, a, ctx, "Page 1 of 1", pw, bandH, s);
   } else {
-    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false });
+    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
     try { srcDoc.getForm().flatten(); } catch { /* no form */ }
 
     const srcPages = srcDoc.getPages();
@@ -275,7 +275,7 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
   coverPages.forEach((p, i) => drawBand(p, a, ctx, coverPages.length > 1 ? `Cover ${i + 1} of ${coverPages.length}` : "Cover page", A4.w, bandH, s));
 
   for (const bytes of signed) {
-    const src = await PDFDocument.load(bytes);
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const copied = await doc.copyPages(src, src.getPageIndices());
     copied.forEach((p) => doc.addPage(p));
   }

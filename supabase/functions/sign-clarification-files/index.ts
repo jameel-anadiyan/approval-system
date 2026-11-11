@@ -136,9 +136,9 @@ Deno.serve(handle(async (req) => {
     const packetRow = (signedRows ?? []).find((s) => s.is_packet);
     let packetUpdate: Record<string, unknown> | null = null;
     if (packetRow) {
-      const packet = await PDFDocument.load(await download("signed-documents", packetRow.storage_path));
+      const packet = await PDFDocument.load(await download("signed-documents", packetRow.storage_path), { ignoreEncryption: true });
       for (const bytes of newBytes) {
-        const src = await PDFDocument.load(bytes);
+        const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
         const copied = await packet.copyPages(src, src.getPageIndices());
         copied.forEach((p) => packet.addPage(p));
       }

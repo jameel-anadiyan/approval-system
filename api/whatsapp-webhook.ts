@@ -412,7 +412,7 @@ async function stampDocument(
     page.drawImage(img, { x, y, width: w, height: h });
     drawBand(page, a, ctx, 'Page 1 of 1', pw, bandH, s);
   } else {
-    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false });
+    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
     try {
       srcDoc.getForm().flatten();
     } catch {
@@ -665,7 +665,7 @@ async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: StampCon
   );
 
   for (const bytes of signed) {
-    const src = await PDFDocument.load(bytes);
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const copied = await doc.copyPages(src, src.getPageIndices());
     copied.forEach((p) => doc.addPage(p));
   }

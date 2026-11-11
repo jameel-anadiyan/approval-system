@@ -196,3 +196,4 @@ end $$;
 
 revoke execute on function public.reject_request(uuid, text) from public, anon;
 grant execute on function public.reject_request(uuid, text) to authenticated;
+

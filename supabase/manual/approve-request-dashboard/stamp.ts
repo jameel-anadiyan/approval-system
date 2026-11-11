@@ -31,9 +31,16 @@ export interface StampContext {
   fonts?: { regular?: Uint8Array; bold?: Uint8Array } | null;
   seal: Uint8Array;
   signature: Uint8Array;
+  /** Overrides the first band line, e.g. "ADDENDUM · Approval No: X" */
+  headline?: string;
+  /** Label before approverLine; default "Approved by" */
+  byLabel?: string;
+  /** "rejected" draws the band in red (e.g. quotations that were not selected) */
+  tone?: "approved" | "rejected";
 }
 
 const GREEN = rgb(0.05, 0.42, 0.29);
+const RED = rgb(0.72, 0.11, 0.11);
 const INK = rgb(0.1, 0.12, 0.16);
 const GREY = rgb(0.42, 0.45, 0.5);
 const A4 = { w: 595.28, h: 841.89 };
@@ -84,7 +91,8 @@ function drawQr(page: PDFPage, text: string, lx: number, ly: number, size: numbe
 
 function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string, pw: number, bandH: number, s: number) {
   page.drawRectangle({ x: 0, y: 0, width: pw, height: bandH, color: rgb(1, 1, 1) });
-  page.drawRectangle({ x: 0, y: bandH - 1.6 * s, width: pw, height: 1.6 * s, color: GREEN });
+  const accent = ctx.tone === "rejected" ? RED : GREEN;
+  page.drawRectangle({ x: 0, y: bandH - 1.6 * s, width: pw, height: 1.6 * s, color: accent });
 
   drawImageFit(page, a.seal, 12 * s, (bandH - 84 * s) / 2, 84 * s, 84 * s);
   drawImageFit(page, a.signature, 102 * s, (bandH - 64 * s) / 2, 124 * s, 64 * s);
@@ -96,8 +104,8 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
     const safe = toSafePdfText(text);
     page.drawText(fit(safe, font, size * s, maxW), { x: x0, y: ly, size: size * s, font, color });
   };
-  line(`APPROVED · Approval No: ${ctx.approvalNo}`, bandH - 22 * s, 11, a.bold, GREEN);
-  line(`Approved by: ${ctx.approverLine}`, bandH - 39 * s, 8.5, a.regular);
+  line(ctx.headline ?? `APPROVED · Approval No: ${ctx.approvalNo}`, bandH - 22 * s, 11, a.bold, accent);
+  line(`${ctx.byLabel ?? "Approved by"}: ${ctx.approverLine}`, bandH - 39 * s, 8.5, a.regular);
   line(`Date & time: ${ctx.dateTime}`, bandH - 53 * s, 8.5, a.regular);
   line(`Request ${ctx.requestNo} · Amount ${ctx.amount} · ${pageLabel}`, bandH - 67 * s, 8.5, a.regular);
   if (ctx.reviewedLine) line(ctx.reviewedLine, bandH - 81 * s, 7.5, a.regular, GREY);
@@ -137,7 +145,7 @@ export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promi
     page.drawImage(img, { x, y, width: w, height: h });
     drawBand(page, a, ctx, "Page 1 of 1", pw, bandH, s);
   } else {
-    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false });
+    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
     try { srcDoc.getForm().flatten(); } catch { /* no form */ }
 
     const srcPages = srcDoc.getPages();
@@ -267,7 +275,7 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
   coverPages.forEach((p, i) => drawBand(p, a, ctx, coverPages.length > 1 ? `Cover ${i + 1} of ${coverPages.length}` : "Cover page", A4.w, bandH, s));
 
   for (const bytes of signed) {
-    const src = await PDFDocument.load(bytes);
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const copied = await doc.copyPages(src, src.getPageIndices());
     copied.forEach((p) => doc.addPage(p));
   }
