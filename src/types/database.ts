@@ -613,6 +613,7 @@ export interface DisbursementClarification {
   response_voice_path?: string | null;
   response_voice_duration?: number | null;
   responded_at?: string | null;
+  resolved_at?: string | null;
   status: DisbursementClarificationStatus;
   created_at: string;
   updated_at: string;
