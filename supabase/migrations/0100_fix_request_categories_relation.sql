@@ -15,3 +15,4 @@ grant select on public.request_categories to anon;
 
 comment on view public.request_categories is
   'View over public.work_categories for backwards-compatibility with request submission functions';
+

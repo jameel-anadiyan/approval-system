@@ -24,3 +24,4 @@ do $$
 begin
   raise notice 'SUCCESS: public.request_categories view created successfully.';
 end $$;
+
