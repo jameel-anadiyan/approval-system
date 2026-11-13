@@ -2907,14 +2907,28 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // are unlocked & re-saved unencrypted so the stamping edge function succeeds smoothly.
         await sanitizeStoredPdfFiles(id, cachedReq?.files);
 
-        const { data, error } = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
-          request_id: id,
-          // Used for the QR / verify link stamped on every page.
-          app_url: window.location.origin,
-          // Client dispatches the unified approval_document_packet template with media_id
-          skip_whatsapp: true,
-        });
-        if (error) throw error;
+        let data: { approval_no: string } | null = null;
+        try {
+          const res = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
+            request_id: id,
+            // Used for the QR / verify link stamped on every page.
+            app_url: window.location.origin,
+            // Client dispatches the unified approval_document_packet template with media_id
+            skip_whatsapp: true,
+          });
+          if (res.error) throw res.error;
+          data = res.data;
+        } catch (edgeErr: unknown) {
+          // Immediately recover in DB so request doesn't stay frozen in 'approving' status
+          try {
+            await supabase.rpc('recover_stuck_approval', { p_request_id: id });
+          } catch {}
+          try {
+            await loadRequests();
+          } catch {}
+          throw edgeErr;
+        }
+
         if (opts.reload !== false) await loadRequests();
 
         // 🔔 Dispatch WhatsApp template notification with stamped document packet to requester, head, and admin (9846880713)

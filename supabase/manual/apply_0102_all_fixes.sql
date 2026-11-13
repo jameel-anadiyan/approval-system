@@ -3,6 +3,7 @@
 -- Copy and paste into Supabase SQL Editor and click RUN.
 --
 -- This script fixes:
+-- 0. Unsticks REQ-2026-000799 and any requests stuck in "Signing Documents..." ('approving')
 -- 1. column "resolved_at" of relation "disbursement_clarifications" does not exist
 -- 2. status check constraint violation for 'declined' in disbursement_clarifications
 -- 3. relation "public.disbursement_entry_locks" does not exist
@@ -10,6 +11,38 @@
 -- 5. function public.gen_request_no() does not exist
 -- 6. Safe rejection, cancellation, return, and withdrawal RPCs
 -- ============================================================================
+
+-- 0. Immediately unstick any request currently trapped in 'approving' (Signing Documents...)
+update public.requests
+set status = coalesce(status_before_approving, case when route = 'A' then 'pending_admin_approval'::public.request_status else 'pending_head_approval'::public.request_status end),
+    approving_by = null,
+    approving_started_at = null,
+    status_before_approving = null
+where status = 'approving';
+
+-- Helper RPC so the client can automatically unstick a request if edge function encounters an error
+create or replace function public.recover_stuck_approval(p_request_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  r public.requests;
+begin
+  select * into r from public.requests where id = p_request_id for update;
+  if r.id is null or r.status <> 'approving' then return; end if;
+
+  update public.requests
+  set status = coalesce(r.status_before_approving, case when r.route = 'A' then 'pending_admin_approval'::public.request_status else 'pending_head_approval'::public.request_status end),
+      approving_by = null,
+      approving_started_at = null,
+      status_before_approving = null,
+      updated_at = now()
+  where id = r.id;
+end;
+$$;
+grant execute on function public.recover_stuck_approval(uuid) to authenticated, anon;
 
 -- 1. Ensure public.disbursement_clarifications has resolved_at column
 alter table if exists public.disbursement_clarifications
@@ -315,3 +348,4 @@ do $$
 begin
   raise notice 'SUCCESS: All migrations 0097-0102 applied cleanly.';
 end $$;
+

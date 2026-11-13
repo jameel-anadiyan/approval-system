@@ -139,6 +139,7 @@ export const RequestDetailPage: React.FC = () => {
     markTransferComplete,
     requestHeadConsultations,
     addFiles,
+    refreshRequests,
   } = useRequests();
 
   const [modalState, setModalState] = useState<
@@ -704,6 +705,30 @@ export const RequestDetailPage: React.FC = () => {
             </button>
           )}
           <StatusBadge status={request.status} requestType={rType} size="lg" showDescription />
+          {request.status === 'approving' && (role === 'admin' || isOwningHead) && (
+            <button
+              type="button"
+              id="reset-stuck-signing-btn"
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await supabase.rpc('recover_stuck_approval', { p_request_id: request.id });
+                  await refreshRequests();
+                  setBanner({ ok: true, text: 'Signing status reset. You can now approve again.' });
+                } catch (e: any) {
+                  setBanner({ ok: false, text: e?.message || 'Could not reset signing status' });
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 font-bold text-xs shadow-xs transition-all cursor-pointer"
+              title="Reset signing status if an earlier approval run failed or got interrupted"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset & Retry Approval</span>
+            </button>
+          )}
         </div>
       </div>
 
