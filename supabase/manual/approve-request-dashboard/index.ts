@@ -2,8 +2,9 @@
 // The signing run: begin_approval (service role) → download seal, signature, documents →
 // stamp each file → build packet → upload (no overwrite) → finalize_approval.
 // On any error: abort_approval (status goes back, approval number stays reserved).
-import { getCaller, handle, HttpError, json, readJson, requireUuid } from "./common.ts";
-import { buildFormPdf, buildPacket, type FormSection, stampDocument, type StampContext } from "./stamp.ts";
+import { getCaller, handle, HttpError, json, readJson, requireUuid } from "../_shared/common.ts";
+import { PDFDocument } from "npm:pdf-lib@1.17.1";
+import { buildCoverDoc, buildFormPdf, buildPacket, generateQrPng, type FormSection, stampDocument, type StampContext } from "./stamp.ts";
 
 const ACTION_LABEL: Record<string, string> = {
   submitted: "Submitted", resubmitted: "Resubmitted after correction", routed_A: "Routed to A (Admin)",
@@ -352,6 +353,8 @@ Deno.serve(handle(async (req) => {
     ]);
     const origin = appOrigin(body.app_url);
     const r = b.request;
+    const verifyUrl = origin && r.verify_token ? `${origin}/verify/${r.verify_token}` : null;
+    const qrPngBytes = verifyUrl ? await generateQrPng(verifyUrl) : null;
     const approverObj = b.approver ?? me;
     const approverLine = [approverObj.full_name, approverObj.designation, approverObj.department ?? (approverObj.role === "admin" || me.role === "admin" ? "Administration" : null)]
       .filter(Boolean).join(", ");
@@ -371,7 +374,8 @@ Deno.serve(handle(async (req) => {
               : inr(Number(r.amount)),
       reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at
         ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
-      verifyUrl: origin ? `${origin}/verify/${r.verify_token}` : null,
+      verifyUrl,
+      qrPngBytes,
       seal, signature,
     };
 
@@ -384,22 +388,18 @@ Deno.serve(handle(async (req) => {
     const files: any[] = b.files;
     const form = formSections(r, r.submitted_at ? ist(r.submitted_at, false) : "—", b.files);
     if (!files.length && !form) throw new Error("No documents to sign");
-    const signedBytes: Uint8Array[] = [];
+    
+    // Master packet document initialized up-front; pages copied directly without keeping duplicate in-memory PDF arrays.
+    const packetDoc = await PDFDocument.create();
     const records: Record<string, unknown>[] = [];
     const docsInfo: { name: string; pages: number }[] = [];
 
-    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number,
-      inPacket = true) => {
+    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number) => {
       const fileName = `${b.approval_no}_${String(index).padStart(2, "0")}_${safeName(label)}.pdf`;
       const path = `${requestId}/${fileName}`;
       const { error } = await admin.storage.from("signed-documents")
         .upload(path, bytes, { contentType: "application/pdf", upsert: false });
       if (error) throw new Error(`Upload failed: ${error.message}`);
-      // Asset buying: the combined packet carries only the form + the selected quotation.
-      if (inPacket) {
-        signedBytes.push(bytes);
-        docsInfo.push({ name: label, pages });
-      }
       records.push({ source_file_id: sourceId, is_packet: false, file_name: fileName, storage_path: path,
         sha256: await sha256(bytes), page_count: pages });
     };
@@ -408,32 +408,35 @@ Deno.serve(handle(async (req) => {
     if (form) {
       const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections);
       const out = await stampDocument(formPdf, ctx);
-      await store(
-        out.bytes,
-        ++n,
-        r.request_type === "discount"
-          ? "discount_form"
-          : r.request_type === "petty_cash"
-            ? "petty_cash_form_below_1000"
-            : r.request_type === "agreement"
-              ? "agreement_approval_form"
-              : r.request_type === "statutory_payment"
-                ? "statutory_payment_approval_form"
-                : r.request_type === "audit_report"
-                  ? "audit_report_approval_form"
-                  : (r.request_type === "asset" || r.request_type === "asset_below_20k")
-                    ? "asset_purchase_form"
-                    : r.request_type === "stock_transfer"
-                      ? "stock_transfer_form"
-                      : r.request_type === "non_cash"
-                        ? "non_cash_form"
-                        : "exhibition_form",
-        null,
-        out.pageCount
-      );
+      const formLabel = r.request_type === "discount"
+        ? "discount_form"
+        : r.request_type === "petty_cash"
+          ? "petty_cash_form_below_1000"
+          : r.request_type === "agreement"
+            ? "agreement_approval_form"
+            : r.request_type === "statutory_payment"
+              ? "statutory_payment_approval_form"
+              : r.request_type === "audit_report"
+                ? "audit_report_approval_form"
+                : (r.request_type === "asset" || r.request_type === "asset_below_20k")
+                  ? "asset_purchase_form"
+                  : r.request_type === "stock_transfer"
+                    ? "stock_transfer_form"
+                    : r.request_type === "non_cash"
+                      ? "non_cash_form"
+                      : "exhibition_form";
+      await store(out.bytes, ++n, formLabel, null, out.pageCount);
+      docsInfo.push({
+        name: r.request_type === "discount" ? "Discount Form" : "Request Form",
+        pages: out.pageCount,
+      });
+      if (out.doc) {
+        const copied = await packetDoc.copyPages(out.doc, out.doc.getPageIndices());
+        copied.forEach((p) => packetDoc.addPage(p));
+      }
     }
 
-    // One file at a time to keep memory low.
+    // One file at a time to keep memory strictly within Edge Runtime limits.
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       const src = await download("request-files", f.storage_path);
@@ -453,10 +456,17 @@ Deno.serve(handle(async (req) => {
       }
       const label = !isQuote ? f.original_name
         : `${rejected ? "REJECTED" : "SELECTED"}_${f.quote_vendor ?? "quote"}_${f.original_name}`;
-      await store(out.bytes, ++n, label, f.id, out.pageCount, !rejected);
+      await store(out.bytes, ++n, label, f.id, out.pageCount);
+      if (!rejected) {
+        docsInfo.push({ name: label, pages: out.pageCount });
+        if (out.doc) {
+          const copied = await packetDoc.copyPages(out.doc, out.doc.getPageIndices());
+          copied.forEach((p) => packetDoc.addPage(p));
+        }
+      }
     }
 
-    const packet = await buildPacket({
+    const coverDoc = await buildCoverDoc({
       title: r.title,
       rows: [
         ["Approval No", b.approval_no],
@@ -479,7 +489,16 @@ Deno.serve(handle(async (req) => {
       timeline: [...(b.timeline as any[]).map((t) => ({
         when: ist(t.created_at), who: t.actor_name, what: ACTION_LABEL[t.action] ?? t.action, remarks: t.remarks,
       })), { when: ctx.dateTime, who: approverObj.full_name, what: `Approved · ${b.approval_no}`, remarks: null }],
-    }, signedBytes, ctx);
+    }, ctx);
+
+    const coverPages = await packetDoc.copyPages(coverDoc, coverDoc.getPageIndices());
+    coverPages.forEach((cp, idx) => packetDoc.insertPage(idx, cp));
+
+    packetDoc.setProducer("Approval App");
+    packetDoc.setTitle(`${b.approval_no} packet`);
+    const packetBytes = await packetDoc.save({ useObjectStreams: false });
+    const packet = { bytes: packetBytes, pageCount: packetDoc.getPageCount() };
+
     const packetName = `${b.approval_no}_packet.pdf`;
     const packetPath = `${requestId}/${packetName}`;
     const { error: pErr } = await admin.storage.from("signed-documents")

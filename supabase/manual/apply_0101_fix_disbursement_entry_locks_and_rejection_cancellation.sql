@@ -257,3 +257,4 @@ do $$
 begin
   raise notice 'SUCCESS: public.disbursement_entry_locks view and rejection/cancellation RPCs updated.';
 end $$;
+

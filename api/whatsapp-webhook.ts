@@ -227,6 +227,7 @@ interface StampContext {
   headline?: string;
   byLabel?: string;
   tone?: 'approved' | 'rejected';
+  qrPngBytes?: Uint8Array | null;
 }
 
 interface FormSection {
@@ -294,12 +295,39 @@ function wrapText(text: string, font: import('pdf-lib').PDFFont, size: number, m
   return out;
 }
 
+async function generateQrPng(url: string): Promise<Uint8Array | null> {
+  try {
+    const dataUrl = await QRCode.toDataURL(url, {
+      width: 140,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+    });
+    const b64 = dataUrl.split(',')[1];
+    const binStr = Buffer.from(b64, 'base64');
+    return new Uint8Array(binStr);
+  } catch (err) {
+    console.warn('Could not generate QR PNG:', err);
+    return null;
+  }
+}
+
 async function embedAssets(doc: import('pdf-lib').PDFDocument, ctx: StampContext) {
+  let qrImg: import('pdf-lib').PDFImage | null = null;
+  const qrBytes = ctx.qrPngBytes ?? (ctx.verifyUrl ? await generateQrPng(ctx.verifyUrl) : null);
+  if (qrBytes) {
+    try {
+      qrImg = await doc.embedPng(qrBytes);
+    } catch {
+      qrImg = null;
+    }
+  }
+
   return {
     regular: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
     seal: await doc.embedPng(ctx.seal),
     signature: await doc.embedPng(ctx.signature),
+    qr: qrImg,
   };
 }
 
@@ -315,25 +343,6 @@ function drawImageFit(
   const w = img.width * scale;
   const h = img.height * scale;
   page.drawImage(img, { x: lx + (bw - w) / 2, y: ly + (bh - h) / 2, width: w, height: h });
-}
-
-function drawQr(page: import('pdf-lib').PDFPage, text: string, lx: number, ly: number, size: number) {
-  const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
-  const n: number = qr.modules.size;
-  const cell = size / (n + 2);
-  page.drawRectangle({ x: lx, y: ly, width: size, height: size, color: rgb(1, 1, 1) });
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if (!qr.modules.get(r, c)) continue;
-      page.drawRectangle({
-        x: lx + (c + 1) * cell,
-        y: ly + size - (r + 2) * cell,
-        width: cell + 0.05,
-        height: cell + 0.05,
-        color: INK,
-      });
-    }
-  }
 }
 
 function drawBand(
@@ -372,7 +381,14 @@ function drawBand(
   line(`Request ${ctx.requestNo} · Amount ${ctx.amount} · ${pageLabel}`, bandH - 67 * s, 8.5, a.regular);
   if (ctx.reviewedLine) line(ctx.reviewedLine, bandH - 81 * s, 7.5, a.regular, GREY);
   if (ctx.verifyUrl) line('Scan the QR code to verify this approval', bandH - 95 * s, 7, a.regular, GREY);
-  if (ctx.verifyUrl) drawQr(page, ctx.verifyUrl, pw - qrSize - 10 * s, (bandH - qrSize) / 2, qrSize);
+  if (a.qr && ctx.verifyUrl) {
+    page.drawImage(a.qr, {
+      x: pw - qrSize - 10 * s,
+      y: (bandH - qrSize) / 2,
+      width: qrSize,
+      height: qrSize,
+    });
+  }
 }
 
 function isJpeg(b: Uint8Array) {
@@ -486,7 +502,7 @@ async function stampDocument(
 
   targetDoc.setProducer('Approval App');
   targetDoc.setTitle(`${ctx.approvalNo}`);
-  return { bytes: await targetDoc.save({ useObjectStreams: true }), pageCount: targetDoc.getPageCount() };
+  return { bytes: await targetDoc.save({ useObjectStreams: false }), pageCount: targetDoc.getPageCount() };
 }
 
 async function buildFormPdf(heading: string, subtitle: string, sections: FormSection[]): Promise<Uint8Array> {
@@ -591,7 +607,7 @@ async function buildFormPdf(heading: string, subtitle: string, sections: FormSec
     color: GREY,
   });
   doc.setProducer('Approval App');
-  return await doc.save({ useObjectStreams: true });
+  return await doc.save({ useObjectStreams: false });
 }
 
 async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: StampContext) {
@@ -671,7 +687,7 @@ async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: StampCon
   }
   doc.setProducer('Approval App');
   doc.setTitle(`${ctx.approvalNo} packet`);
-  return { bytes: await doc.save({ useObjectStreams: true }), pageCount: doc.getPageCount() };
+  return { bytes: await doc.save({ useObjectStreams: false }), pageCount: doc.getPageCount() };
 }
 
 function formSections(
@@ -1440,6 +1456,9 @@ async function approveSingleRequestViaBot(params: {
       .filter(Boolean)
       .join(', ');
 
+    const verifyUrl = appUrl && r.verify_token ? `${appUrl}/verify/${r.verify_token}` : null;
+    const qrPngBytes = verifyUrl ? await generateQrPng(verifyUrl) : null;
+
     const ctx: StampContext = {
       approvalNo: b.approval_no,
       approverLine,
@@ -1455,7 +1474,8 @@ async function approveSingleRequestViaBot(params: {
         r.route === 'A' && r.reviewed_by_name && r.reviewed_at
           ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}`
           : null,
-      verifyUrl: appUrl && r.verify_token ? `${appUrl}/verify/${r.verify_token}` : null,
+      verifyUrl,
+      qrPngBytes,
       seal: credCache.sealBytes,
       signature: credCache.signatureBytes,
     };

@@ -243,3 +243,4 @@ end $function$;
 
 revoke execute on function public.return_request(uuid, text) from public, anon;
 grant execute on function public.return_request(uuid, text) to authenticated;
+

@@ -37,6 +37,8 @@ export interface StampContext {
   byLabel?: string;
   /** "rejected" draws the band in red (e.g. quotations that were not selected) */
   tone?: "approved" | "rejected";
+  /** Pre-rendered QR code PNG bytes so QR is generated once per approval run */
+  qrPngBytes?: Uint8Array | null;
 }
 
 const GREEN = rgb(0.05, 0.42, 0.29);
@@ -45,14 +47,49 @@ const INK = rgb(0.1, 0.12, 0.16);
 const GREY = rgb(0.42, 0.45, 0.5);
 const A4 = { w: 595.28, h: 841.89 };
 
-interface Assets { regular: PDFFont; bold: PDFFont; seal: PDFImage; signature: PDFImage }
+interface Assets {
+  regular: PDFFont;
+  bold: PDFFont;
+  seal: PDFImage;
+  signature: PDFImage;
+  qr: PDFImage | null;
+}
+
+export async function generateQrPng(url: string): Promise<Uint8Array | null> {
+  try {
+    const dataUrl = await QRCode.toDataURL(url, {
+      width: 140,
+      margin: 1,
+      errorCorrectionLevel: "M",
+    });
+    const b64 = dataUrl.split(",")[1];
+    const binStr = atob(b64);
+    const bytes = new Uint8Array(binStr.length);
+    for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+    return bytes;
+  } catch (err) {
+    console.warn("Could not generate QR PNG:", err);
+    return null;
+  }
+}
 
 async function embedAssets(doc: PDFDocument, ctx: StampContext): Promise<Assets> {
+  let qrImg: PDFImage | null = null;
+  const qrBytes = ctx.qrPngBytes ?? (ctx.verifyUrl ? await generateQrPng(ctx.verifyUrl) : null);
+  if (qrBytes) {
+    try {
+      qrImg = await doc.embedPng(qrBytes);
+    } catch {
+      qrImg = null;
+    }
+  }
+
   return {
     regular: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
     seal: await doc.embedPng(ctx.seal),
     signature: await doc.embedPng(ctx.signature),
+    qr: qrImg,
   };
 }
 
@@ -68,25 +105,6 @@ function drawImageFit(page: PDFPage, img: PDFImage, lx: number, ly: number, bw: 
   const scale = Math.min(bw / img.width, bh / img.height);
   const w = img.width * scale, h = img.height * scale;
   page.drawImage(img, { x: lx + (bw - w) / 2, y: ly + (bh - h) / 2, width: w, height: h });
-}
-
-function drawQr(page: PDFPage, text: string, lx: number, ly: number, size: number) {
-  const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
-  const n: number = qr.modules.size;
-  const cell = size / (n + 2);
-  page.drawRectangle({ x: lx, y: ly, width: size, height: size, color: rgb(1, 1, 1) });
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if (!qr.modules.get(r, c)) continue;
-      page.drawRectangle({
-        x: lx + (c + 1) * cell,
-        y: ly + size - (r + 2) * cell,
-        width: cell + 0.05,
-        height: cell + 0.05,
-        color: INK,
-      });
-    }
-  }
 }
 
 function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string, pw: number, bandH: number, s: number) {
@@ -111,7 +129,14 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
   if (ctx.reviewedLine) line(ctx.reviewedLine, bandH - 81 * s, 7.5, a.regular, GREY);
   if (ctx.verifyUrl) line("Scan the QR code to verify this approval", bandH - 95 * s, 7, a.regular, GREY);
 
-  if (ctx.verifyUrl) drawQr(page, ctx.verifyUrl, pw - qrSize - 10 * s, (bandH - qrSize) / 2, qrSize);
+  if (a.qr && ctx.verifyUrl) {
+    page.drawImage(a.qr, {
+      x: pw - qrSize - 10 * s,
+      y: (bandH - qrSize) / 2,
+      width: qrSize,
+      height: qrSize,
+    });
+  }
 }
 
 function isJpeg(b: Uint8Array) { return b[0] === 0xff && b[1] === 0xd8; }
@@ -203,7 +228,11 @@ export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promi
 
   targetDoc.setProducer("Approval App");
   targetDoc.setTitle(`${ctx.approvalNo}`);
-  return { bytes: await targetDoc.save({ useObjectStreams: true }), pageCount: targetDoc.getPageCount() };
+  return {
+    bytes: await targetDoc.save({ useObjectStreams: false }),
+    pageCount: targetDoc.getPageCount(),
+    doc: targetDoc,
+  };
 }
 
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
@@ -229,8 +258,8 @@ export interface PacketInfo {
   timeline: { when: string; who: string; what: string; remarks: string | null }[];
 }
 
-/** Cover page + every signed document merged into one packet PDF. All pages standard A4. */
-export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: StampContext) {
+/** Builds the official cover document alone without merging child documents. */
+export async function buildCoverDoc(info: PacketInfo, ctx: StampContext): Promise<PDFDocument> {
   const doc = await PDFDocument.create();
   const a = await embedAssets(doc, ctx);
   let page = doc.addPage([A4.w, A4.h]);
@@ -273,15 +302,30 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
   }
   const coverPages = doc.getPages();
   coverPages.forEach((p, i) => drawBand(p, a, ctx, coverPages.length > 1 ? `Cover ${i + 1} of ${coverPages.length}` : "Cover page", A4.w, bandH, s));
+  return doc;
+}
 
-  for (const bytes of signed) {
-    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    const copied = await doc.copyPages(src, src.getPageIndices());
-    copied.forEach((p) => doc.addPage(p));
+/** Cover page + every signed document merged into one packet PDF. All pages standard A4. */
+export async function buildPacket(
+  info: PacketInfo,
+  signed: (Uint8Array | PDFDocument)[],
+  ctx: StampContext
+): Promise<{ bytes: Uint8Array; pageCount: number }> {
+  const doc = await buildCoverDoc(info, ctx);
+
+  for (const item of signed) {
+    if (item instanceof PDFDocument) {
+      const copied = await doc.copyPages(item, item.getPageIndices());
+      copied.forEach((p) => doc.addPage(p));
+    } else if (item instanceof Uint8Array || (item && typeof (item as any).byteLength === "number")) {
+      const src = await PDFDocument.load(item as Uint8Array, { ignoreEncryption: true });
+      const copied = await doc.copyPages(src, src.getPageIndices());
+      copied.forEach((p) => doc.addPage(p));
+    }
   }
   doc.setProducer("Approval App");
   doc.setTitle(`${ctx.approvalNo} packet`);
-  return { bytes: await doc.save({ useObjectStreams: true }), pageCount: doc.getPageCount() };
+  return { bytes: await doc.save({ useObjectStreams: false }), pageCount: doc.getPageCount() };
 }
 
 export interface FormSection {
@@ -361,5 +405,5 @@ export async function buildFormPdf(
   const foot = "SWA Diamonds · Internal Approval Form";
   page.drawText(foot, { x: (A4.w - regular.widthOfTextAtSize(foot, 7.5)) / 2, y: M - 10, size: 7.5, font: regular, color: GREY });
   doc.setProducer("Approval App");
-  return await doc.save({ useObjectStreams: true });
+  return await doc.save({ useObjectStreams: false });
 }

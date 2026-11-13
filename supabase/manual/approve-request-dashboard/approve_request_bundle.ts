@@ -6,13 +6,10 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.4
 import { degrees, PDFDocument, type PDFFont, type PDFImage, type PDFPage, rgb, StandardFonts } from "npm:pdf-lib@1.17.1";
 import QRCode from "npm:qrcode@1.5.4";
 
-
 // --- common.ts ---
-
 // Shared server-only helpers for Edge Functions.
 // Every function: verify the caller's token with Supabase Auth, load their profile,
 // check role/department, and only then use the service-role client.
-
 
 export const LOGIN_DOMAIN = Deno.env.get("LOGIN_DOMAIN") ?? "users.approvalapp.in";
 
@@ -22,7 +19,7 @@ export const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-export type Role = "admin" | "head" | "clerk" | "employee" | "disbursement";
+export type Role = "admin" | "head" | "clerk" | "employee" | "disbursement" | "regional_head";
 
 export interface Profile {
   id: string;
@@ -132,11 +129,8 @@ export function handle(fn: (req: Request) => Promise<Response>) {
 
 
 // --- stamp.ts ---
-
 // PDF stamping (server only). Fits every document (PDF, JPG or PNG) onto standard A4 pages
 // with the official approval badge positioned below the content, guaranteeing zero content overlap.
-
-
 
 // Lightweight stub for backwards-compatibility; StandardFonts are built-in and require no external download.
 export async function loadFonts() {
@@ -172,6 +166,8 @@ export interface StampContext {
   byLabel?: string;
   /** "rejected" draws the band in red (e.g. quotations that were not selected) */
   tone?: "approved" | "rejected";
+  /** Pre-rendered QR code PNG bytes so QR is generated once per approval run */
+  qrPngBytes?: Uint8Array | null;
 }
 
 const GREEN = rgb(0.05, 0.42, 0.29);
@@ -180,14 +176,49 @@ const INK = rgb(0.1, 0.12, 0.16);
 const GREY = rgb(0.42, 0.45, 0.5);
 const A4 = { w: 595.28, h: 841.89 };
 
-interface Assets { regular: PDFFont; bold: PDFFont; seal: PDFImage; signature: PDFImage }
+interface Assets {
+  regular: PDFFont;
+  bold: PDFFont;
+  seal: PDFImage;
+  signature: PDFImage;
+  qr: PDFImage | null;
+}
+
+export async function generateQrPng(url: string): Promise<Uint8Array | null> {
+  try {
+    const dataUrl = await QRCode.toDataURL(url, {
+      width: 140,
+      margin: 1,
+      errorCorrectionLevel: "M",
+    });
+    const b64 = dataUrl.split(",")[1];
+    const binStr = atob(b64);
+    const bytes = new Uint8Array(binStr.length);
+    for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+    return bytes;
+  } catch (err) {
+    console.warn("Could not generate QR PNG:", err);
+    return null;
+  }
+}
 
 async function embedAssets(doc: PDFDocument, ctx: StampContext): Promise<Assets> {
+  let qrImg: PDFImage | null = null;
+  const qrBytes = ctx.qrPngBytes ?? (ctx.verifyUrl ? await generateQrPng(ctx.verifyUrl) : null);
+  if (qrBytes) {
+    try {
+      qrImg = await doc.embedPng(qrBytes);
+    } catch {
+      qrImg = null;
+    }
+  }
+
   return {
     regular: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
     seal: await doc.embedPng(ctx.seal),
     signature: await doc.embedPng(ctx.signature),
+    qr: qrImg,
   };
 }
 
@@ -203,25 +234,6 @@ function drawImageFit(page: PDFPage, img: PDFImage, lx: number, ly: number, bw: 
   const scale = Math.min(bw / img.width, bh / img.height);
   const w = img.width * scale, h = img.height * scale;
   page.drawImage(img, { x: lx + (bw - w) / 2, y: ly + (bh - h) / 2, width: w, height: h });
-}
-
-function drawQr(page: PDFPage, text: string, lx: number, ly: number, size: number) {
-  const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
-  const n: number = qr.modules.size;
-  const cell = size / (n + 2);
-  page.drawRectangle({ x: lx, y: ly, width: size, height: size, color: rgb(1, 1, 1) });
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if (!qr.modules.get(r, c)) continue;
-      page.drawRectangle({
-        x: lx + (c + 1) * cell,
-        y: ly + size - (r + 2) * cell,
-        width: cell + 0.05,
-        height: cell + 0.05,
-        color: INK,
-      });
-    }
-  }
 }
 
 function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string, pw: number, bandH: number, s: number) {
@@ -246,7 +258,14 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
   if (ctx.reviewedLine) line(ctx.reviewedLine, bandH - 81 * s, 7.5, a.regular, GREY);
   if (ctx.verifyUrl) line("Scan the QR code to verify this approval", bandH - 95 * s, 7, a.regular, GREY);
 
-  if (ctx.verifyUrl) drawQr(page, ctx.verifyUrl, pw - qrSize - 10 * s, (bandH - qrSize) / 2, qrSize);
+  if (a.qr && ctx.verifyUrl) {
+    page.drawImage(a.qr, {
+      x: pw - qrSize - 10 * s,
+      y: (bandH - qrSize) / 2,
+      width: qrSize,
+      height: qrSize,
+    });
+  }
 }
 
 function isJpeg(b: Uint8Array) { return b[0] === 0xff && b[1] === 0xd8; }
@@ -338,7 +357,11 @@ export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promi
 
   targetDoc.setProducer("Approval App");
   targetDoc.setTitle(`${ctx.approvalNo}`);
-  return { bytes: await targetDoc.save({ useObjectStreams: true }), pageCount: targetDoc.getPageCount() };
+  return {
+    bytes: await targetDoc.save({ useObjectStreams: false }),
+    pageCount: targetDoc.getPageCount(),
+    doc: targetDoc,
+  };
 }
 
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
@@ -364,8 +387,8 @@ export interface PacketInfo {
   timeline: { when: string; who: string; what: string; remarks: string | null }[];
 }
 
-/** Cover page + every signed document merged into one packet PDF. All pages standard A4. */
-export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: StampContext) {
+/** Builds the official cover document alone without merging child documents. */
+export async function buildCoverDoc(info: PacketInfo, ctx: StampContext): Promise<PDFDocument> {
   const doc = await PDFDocument.create();
   const a = await embedAssets(doc, ctx);
   let page = doc.addPage([A4.w, A4.h]);
@@ -408,15 +431,30 @@ export async function buildPacket(info: PacketInfo, signed: Uint8Array[], ctx: S
   }
   const coverPages = doc.getPages();
   coverPages.forEach((p, i) => drawBand(p, a, ctx, coverPages.length > 1 ? `Cover ${i + 1} of ${coverPages.length}` : "Cover page", A4.w, bandH, s));
+  return doc;
+}
 
-  for (const bytes of signed) {
-    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    const copied = await doc.copyPages(src, src.getPageIndices());
-    copied.forEach((p) => doc.addPage(p));
+/** Cover page + every signed document merged into one packet PDF. All pages standard A4. */
+export async function buildPacket(
+  info: PacketInfo,
+  signed: (Uint8Array | PDFDocument)[],
+  ctx: StampContext
+): Promise<{ bytes: Uint8Array; pageCount: number }> {
+  const doc = await buildCoverDoc(info, ctx);
+
+  for (const item of signed) {
+    if (item instanceof PDFDocument) {
+      const copied = await doc.copyPages(item, item.getPageIndices());
+      copied.forEach((p) => doc.addPage(p));
+    } else if (item instanceof Uint8Array || (item && typeof (item as any).byteLength === "number")) {
+      const src = await PDFDocument.load(item as Uint8Array, { ignoreEncryption: true });
+      const copied = await doc.copyPages(src, src.getPageIndices());
+      copied.forEach((p) => doc.addPage(p));
+    }
   }
   doc.setProducer("Approval App");
   doc.setTitle(`${ctx.approvalNo} packet`);
-  return { bytes: await doc.save({ useObjectStreams: true }), pageCount: doc.getPageCount() };
+  return { bytes: await doc.save({ useObjectStreams: false }), pageCount: doc.getPageCount() };
 }
 
 export interface FormSection {
@@ -496,18 +534,15 @@ export async function buildFormPdf(
   const foot = "SWA Diamonds · Internal Approval Form";
   page.drawText(foot, { x: (A4.w - regular.widthOfTextAtSize(foot, 7.5)) / 2, y: M - 10, size: 7.5, font: regular, color: GREY });
   doc.setProducer("Approval App");
-  return await doc.save({ useObjectStreams: true });
+  return await doc.save({ useObjectStreams: false });
 }
 
 
 // --- index.ts ---
-
 // POST /functions/v1/approve-request   { request_id, app_url? }
 // The signing run: begin_approval (service role) → download seal, signature, documents →
 // stamp each file → build packet → upload (no overwrite) → finalize_approval.
 // On any error: abort_approval (status goes back, approval number stays reserved).
-
-
 
 const ACTION_LABEL: Record<string, string> = {
   submitted: "Submitted", resubmitted: "Resubmitted after correction", routed_A: "Routed to A (Admin)",
@@ -856,6 +891,8 @@ Deno.serve(handle(async (req) => {
     ]);
     const origin = appOrigin(body.app_url);
     const r = b.request;
+    const verifyUrl = origin && r.verify_token ? `${origin}/verify/${r.verify_token}` : null;
+    const qrPngBytes = verifyUrl ? await generateQrPng(verifyUrl) : null;
     const approverObj = b.approver ?? me;
     const approverLine = [approverObj.full_name, approverObj.designation, approverObj.department ?? (approverObj.role === "admin" || me.role === "admin" ? "Administration" : null)]
       .filter(Boolean).join(", ");
@@ -875,7 +912,8 @@ Deno.serve(handle(async (req) => {
               : inr(Number(r.amount)),
       reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at
         ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
-      verifyUrl: origin ? `${origin}/verify/${r.verify_token}` : null,
+      verifyUrl,
+      qrPngBytes,
       seal, signature,
     };
 
@@ -888,22 +926,18 @@ Deno.serve(handle(async (req) => {
     const files: any[] = b.files;
     const form = formSections(r, r.submitted_at ? ist(r.submitted_at, false) : "—", b.files);
     if (!files.length && !form) throw new Error("No documents to sign");
-    const signedBytes: Uint8Array[] = [];
+    
+    // Master packet document initialized up-front; pages copied directly without keeping duplicate in-memory PDF arrays.
+    const packetDoc = await PDFDocument.create();
     const records: Record<string, unknown>[] = [];
     const docsInfo: { name: string; pages: number }[] = [];
 
-    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number,
-      inPacket = true) => {
+    const store = async (bytes: Uint8Array, index: number, label: string, sourceId: string | null, pages: number) => {
       const fileName = `${b.approval_no}_${String(index).padStart(2, "0")}_${safeName(label)}.pdf`;
       const path = `${requestId}/${fileName}`;
       const { error } = await admin.storage.from("signed-documents")
         .upload(path, bytes, { contentType: "application/pdf", upsert: false });
       if (error) throw new Error(`Upload failed: ${error.message}`);
-      // Asset buying: the combined packet carries only the form + the selected quotation.
-      if (inPacket) {
-        signedBytes.push(bytes);
-        docsInfo.push({ name: label, pages });
-      }
       records.push({ source_file_id: sourceId, is_packet: false, file_name: fileName, storage_path: path,
         sha256: await sha256(bytes), page_count: pages });
     };
@@ -912,32 +946,35 @@ Deno.serve(handle(async (req) => {
     if (form) {
       const formPdf = await buildFormPdf("SWA DIAMONDS", form.subtitle, form.sections);
       const out = await stampDocument(formPdf, ctx);
-      await store(
-        out.bytes,
-        ++n,
-        r.request_type === "discount"
-          ? "discount_form"
-          : r.request_type === "petty_cash"
-            ? "petty_cash_form_below_1000"
-            : r.request_type === "agreement"
-              ? "agreement_approval_form"
-              : r.request_type === "statutory_payment"
-                ? "statutory_payment_approval_form"
-                : r.request_type === "audit_report"
-                  ? "audit_report_approval_form"
-                  : (r.request_type === "asset" || r.request_type === "asset_below_20k")
-                    ? "asset_purchase_form"
-                    : r.request_type === "stock_transfer"
-                      ? "stock_transfer_form"
-                      : r.request_type === "non_cash"
-                        ? "non_cash_form"
-                        : "exhibition_form",
-        null,
-        out.pageCount
-      );
+      const formLabel = r.request_type === "discount"
+        ? "discount_form"
+        : r.request_type === "petty_cash"
+          ? "petty_cash_form_below_1000"
+          : r.request_type === "agreement"
+            ? "agreement_approval_form"
+            : r.request_type === "statutory_payment"
+              ? "statutory_payment_approval_form"
+              : r.request_type === "audit_report"
+                ? "audit_report_approval_form"
+                : (r.request_type === "asset" || r.request_type === "asset_below_20k")
+                  ? "asset_purchase_form"
+                  : r.request_type === "stock_transfer"
+                    ? "stock_transfer_form"
+                    : r.request_type === "non_cash"
+                      ? "non_cash_form"
+                      : "exhibition_form";
+      await store(out.bytes, ++n, formLabel, null, out.pageCount);
+      docsInfo.push({
+        name: r.request_type === "discount" ? "Discount Form" : "Request Form",
+        pages: out.pageCount,
+      });
+      if (out.doc) {
+        const copied = await packetDoc.copyPages(out.doc, out.doc.getPageIndices());
+        copied.forEach((p) => packetDoc.addPage(p));
+      }
     }
 
-    // One file at a time to keep memory low.
+    // One file at a time to keep memory strictly within Edge Runtime limits.
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       const src = await download("request-files", f.storage_path);
@@ -957,10 +994,17 @@ Deno.serve(handle(async (req) => {
       }
       const label = !isQuote ? f.original_name
         : `${rejected ? "REJECTED" : "SELECTED"}_${f.quote_vendor ?? "quote"}_${f.original_name}`;
-      await store(out.bytes, ++n, label, f.id, out.pageCount, !rejected);
+      await store(out.bytes, ++n, label, f.id, out.pageCount);
+      if (!rejected) {
+        docsInfo.push({ name: label, pages: out.pageCount });
+        if (out.doc) {
+          const copied = await packetDoc.copyPages(out.doc, out.doc.getPageIndices());
+          copied.forEach((p) => packetDoc.addPage(p));
+        }
+      }
     }
 
-    const packet = await buildPacket({
+    const coverDoc = await buildCoverDoc({
       title: r.title,
       rows: [
         ["Approval No", b.approval_no],
@@ -983,7 +1027,16 @@ Deno.serve(handle(async (req) => {
       timeline: [...(b.timeline as any[]).map((t) => ({
         when: ist(t.created_at), who: t.actor_name, what: ACTION_LABEL[t.action] ?? t.action, remarks: t.remarks,
       })), { when: ctx.dateTime, who: approverObj.full_name, what: `Approved · ${b.approval_no}`, remarks: null }],
-    }, signedBytes, ctx);
+    }, ctx);
+
+    const coverPages = await packetDoc.copyPages(coverDoc, coverDoc.getPageIndices());
+    coverPages.forEach((cp, idx) => packetDoc.insertPage(idx, cp));
+
+    packetDoc.setProducer("Approval App");
+    packetDoc.setTitle(`${b.approval_no} packet`);
+    const packetBytes = await packetDoc.save({ useObjectStreams: false });
+    const packet = { bytes: packetBytes, pageCount: packetDoc.getPageCount() };
+
     const packetName = `${b.approval_no}_packet.pdf`;
     const packetPath = `${requestId}/${packetName}`;
     const { error: pErr } = await admin.storage.from("signed-documents")
