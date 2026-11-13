@@ -49,6 +49,7 @@ import {
 } from '../lib/exhibitionFormPdf';
 import { getPettyCashLimit } from '../lib/formatters';
 import { PDFDocument } from 'pdf-lib';
+import { signPreparedApproval, type PrepareResponse } from '../lib/approvalSigning';
 
 type Result = { success: boolean; error?: string; warning?: string };
 
@@ -2908,17 +2909,47 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await sanitizeStoredPdfFiles(id, cachedReq?.files);
 
         let data: { approval_no: string } | null = null;
+        let reserved = false;
         try {
-          const res = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
+          // Step 1 — edge function only reserves the approval number and hands out signed URLs
+          // (no PDF work on the server → never hits the Edge Function compute limit).
+          const res = await invokeEdgeFunction<PrepareResponse | { approval_no: string }>('approve-request', {
             request_id: id,
+            mode: 'prepare',
             // Used for the QR / verify link stamped on every page.
             app_url: window.location.origin,
             // Client dispatches the unified approval_document_packet template with media_id
             skip_whatsapp: true,
           });
           if (res.error) throw res.error;
-          data = res.data;
+
+          const prep = res.data as PrepareResponse | { approval_no: string } | null;
+          if (prep && 'mode' in prep && prep.mode === 'client_sign') {
+            reserved = true;
+            // Step 2 — stamp every page + build the packet here in the browser (no size limit).
+            const outputs = await signPreparedApproval(prep);
+            // Step 3 — edge function verifies the uploads and finalizes the approval.
+            const fin = await invokeEdgeFunction<{ approval_no: string }>('approve-request', {
+              request_id: id,
+              mode: 'finalize',
+              outputs,
+            });
+            if (fin.error) throw fin.error;
+            data = fin.data;
+          } else {
+            // Older edge function deployment that still signs on the server.
+            data = prep as { approval_no: string } | null;
+          }
         } catch (edgeErr: unknown) {
+          if (reserved) {
+            try {
+              await invokeEdgeFunction('approve-request', {
+                request_id: id,
+                mode: 'abort',
+                error: edgeErr instanceof Error ? edgeErr.message : String(edgeErr),
+              });
+            } catch {}
+          }
           // Immediately recover in DB so request doesn't stay frozen in 'approving' status
           try {
             await supabase.rpc('recover_stuck_approval', { p_request_id: id });

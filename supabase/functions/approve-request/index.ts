@@ -330,6 +330,94 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
   return null;
 }
 
+function formLabelOf(type: string): string {
+  switch (type) {
+    case "discount": return "discount_form";
+    case "petty_cash": return "petty_cash_form_below_1000";
+    case "agreement": return "agreement_approval_form";
+    case "statutory_payment": return "statutory_payment_approval_form";
+    case "audit_report": return "audit_report_approval_form";
+    case "asset": case "asset_below_20k": return "asset_purchase_form";
+    case "stock_transfer": return "stock_transfer_form";
+    case "non_cash": return "non_cash_form";
+    default: return "exhibition_form";
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+function amountLabel(r: any): string {
+  return r.request_type === "stock_transfer" ? `Stock Transfer (MRP: ${inr(Number(r.amount))})`
+    : r.request_type === "non_cash" ? "Non-Cash (No payment)"
+    : r.request_type === "agreement" ? "Agreement (Non-Cash)"
+    : r.request_type === "audit_report" ? "Audit Report (Non-Cash)"
+    : inr(Number(r.amount));
+}
+
+// deno-lint-ignore no-explicit-any
+function coverRows(r: any, approvalNo: string, approverLine: string, dateTime: string): [string, string][] {
+  return [
+    ["Approval No", approvalNo],
+    ["Request No", r.request_no],
+    ["Type", TYPE_LABEL[r.request_type] ?? "General"],
+    ["Amount", r.request_type === "stock_transfer" ? `Total MRP: ${inr(Number(r.amount))} (Stock Transfer)` : r.request_type === "non_cash" ? "Non-Cash (No payment)" : r.request_type === "agreement" ? "Agreement (Non-Cash · No Disbursement)" : r.request_type === "audit_report" ? "Audit Report (Non-Cash · No Disbursement)" : inr(Number(r.amount))],
+    ["Department", r.department ?? "—"],
+    ["Shop", r.request_type === "exhibition"
+      ? ((typeof r.details?.conducting_shop_name === "string" && r.details.conducting_shop_name.trim()) ? r.details.conducting_shop_name.trim() : "Not Assigned")
+      : (r.shop_name ?? "—")],
+    ["Requested by", r.requester_name],
+    ["Submitted", r.submitted_at ? ist(r.submitted_at) : "—"],
+    ["Route", r.route === "A" ? "A — Admin approval" : "B — Head approval"],
+    ["Approved by", approverLine],
+    ["Approved on", dateTime],
+  ];
+}
+
+const SOURCE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Client-signed flow, step 3: the browser has stamped + uploaded every file through the
+ * one-time upload URLs. Verify what was uploaded and finalize. No PDF work happens here,
+ * so this never hits the Edge Function CPU / memory ceiling.
+ */
+// deno-lint-ignore no-explicit-any
+async function finalizeClientSigned(admin: any, me: { id: string }, requestId: string, body: any): Promise<Response> {
+  const { data: row, error: rErr } = await admin.from("requests")
+    .select("id, approval_no, status, approving_by").eq("id", requestId).maybeSingle();
+  if (rErr) throw new HttpError(500, "lookup_failed", rErr.message);
+  if (!row || row.status !== "approving" || row.approving_by !== me.id) {
+    throw new HttpError(409, "not_in_progress", "This approval is no longer in progress. Please refresh and approve again.");
+  }
+  // deno-lint-ignore no-explicit-any
+  const outputs: any[] = Array.isArray(body.outputs) ? body.outputs : [];
+  if (!outputs.length || !outputs.some((o) => o?.is_packet === true)) {
+    throw new HttpError(400, "bad_outputs", "Signed files are missing. Please try again.");
+  }
+  const { data: listed, error: lErr } = await admin.storage.from("signed-documents").list(requestId, { limit: 1000 });
+  if (lErr) throw new HttpError(500, "list_failed", lErr.message);
+  const present = new Set((listed ?? []).map((o: { name: string }) => o.name));
+  const prefix = `${requestId}/${row.approval_no}_`;
+
+  const records = outputs.map((o) => {
+    const path = String(o?.storage_path ?? "");
+    const fileName = path.slice(requestId.length + 1);
+    const sourceId = o?.source_file_id ? String(o.source_file_id) : null;
+    const pages = Number(o?.page_count);
+    if (!path.startsWith(prefix) || !path.endsWith(".pdf") || path.includes("..") || fileName.includes("/")) {
+      throw new HttpError(400, "bad_path", `Unexpected signed file path: ${path}`);
+    }
+    if (!present.has(fileName)) throw new HttpError(400, "missing_upload", `Signed file was not uploaded: ${fileName}`);
+    if (sourceId && !SOURCE_ID_RE.test(sourceId)) throw new HttpError(400, "bad_source", "Invalid source file id");
+    if (!/^[0-9a-f]{64}$/.test(String(o?.sha256 ?? ""))) throw new HttpError(400, "bad_hash", "Invalid file hash");
+    if (!Number.isInteger(pages) || pages < 1) throw new HttpError(400, "bad_pages", "Invalid page count");
+    return { source_file_id: sourceId, is_packet: o.is_packet === true, file_name: fileName, storage_path: path, sha256: String(o.sha256), page_count: pages };
+  });
+
+  const { error: fErr } = await admin.rpc("finalize_approval", { p_request_id: requestId, p_approver_id: me.id, p_files: records });
+  if (fErr) throw new HttpError(500, "finalize_failed", fErr.message);
+  const packet = records.find((x) => x.is_packet);
+  return json({ approval_no: row.approval_no, files: records.length, pages: packet?.page_count ?? 0, mode: "client_signed" });
+}
+
 Deno.serve(handle(async (req) => {
   const { admin, me } = await getCaller(req);
   if (me.role !== "admin" && me.role !== "head") throw new HttpError(403, "forbidden", "Only a Head or Admin can approve.");
@@ -337,12 +425,111 @@ Deno.serve(handle(async (req) => {
   const body = await readJson<any>(req);
   const requestId = requireUuid(body.request_id, "Request");
 
+  if (body.mode === "finalize") return await finalizeClientSigned(admin, me, requestId, body);
+  if (body.mode === "abort") {
+    await admin.rpc("abort_approval", {
+      p_request_id: requestId, p_approver_id: me.id, p_error: String(body.error ?? "Signing cancelled").slice(0, 500),
+    });
+    return json({ ok: true });
+  }
+
   const { data: begun, error: bErr } = await admin.rpc("begin_approval", { p_request_id: requestId, p_approver_id: me.id });
   if (bErr) throw new HttpError(409, "cannot_approve", bErr.message);
   // deno-lint-ignore no-explicit-any
   const b = begun as any;
 
   try {
+    // ── Client-signed flow, step 1: reserve + hand out signed URLs. No PDF work here. ──
+    if (body.mode === "prepare") {
+      const r = b.request;
+      const origin = appOrigin(body.app_url);
+      const verifyUrl = origin && r.verify_token ? `${origin}/verify/${r.verify_token}` : null;
+      const approverObj = b.approver ?? me;
+      const approverLine = [approverObj.full_name, approverObj.designation, approverObj.department ?? (approverObj.role === "admin" || me.role === "admin" ? "Administration" : null)]
+        .filter(Boolean).join(", ");
+      const dateTime = ist(b.decided_at);
+
+      const signedUrl = async (bucket: string, path: string) => {
+        const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, 60 * 60);
+        if (error || !data?.signedUrl) throw new Error(`Could not access ${String(path).split("/").pop()}`);
+        return data.signedUrl as string;
+      };
+      const uploadSlot = async (fileName: string) => {
+        const path = `${requestId}/${fileName}`;
+        const { data, error } = await admin.storage.from("signed-documents").createSignedUploadUrl(path, { upsert: true });
+        if (error || !data?.token) throw new Error(`Could not prepare upload for ${fileName}: ${error?.message ?? "no token"}`);
+        return { path, token: data.token as string, file_name: fileName };
+      };
+
+      // Clear leftovers from an earlier failed run for this approval number (never finalized).
+      const { data: existing } = await admin.storage.from("signed-documents").list(requestId, { limit: 1000 });
+      const stale = (existing ?? []).filter((o) => o.name.startsWith(b.approval_no)).map((o) => `${requestId}/${o.name}`);
+      if (stale.length) await admin.storage.from("signed-documents").remove(stale);
+
+      // deno-lint-ignore no-explicit-any
+      const files: any[] = b.files ?? [];
+      const form = formSections(r, r.submitted_at ? ist(r.submitted_at, false) : "—", files);
+      if (!files.length && !form) throw new Error("No documents to sign");
+
+      let n = 0;
+      const fileNameFor = (label: string) => `${b.approval_no}_${String(++n).padStart(2, "0")}_${safeName(label)}.pdf`;
+
+      const formPlan = form ? {
+        heading: "SWA DIAMONDS",
+        subtitle: form.subtitle,
+        sections: form.sections,
+        name: r.request_type === "discount" ? "Discount Form" : "Request Form",
+        upload: await uploadSlot(fileNameFor(formLabelOf(r.request_type))),
+      } : null;
+
+      const filePlans = [];
+      for (const f of files) {
+        const isQuote = (r.request_type === "asset" || r.request_type === "asset_below_20k") && f.quote_amount !== null && f.quote_amount !== undefined;
+        const rejected = isQuote && f.quote_status !== "selected";
+        const label = !isQuote ? f.original_name : `${rejected ? "REJECTED" : "SELECTED"}_${f.quote_vendor ?? "quote"}_${f.original_name}`;
+        filePlans.push({
+          id: f.id,
+          original_name: f.original_name,
+          download_url: await signedUrl("request-files", f.storage_path),
+          label,
+          in_packet: !rejected,
+          ctx_override: !isQuote ? null : rejected
+            ? { tone: "rejected", headline: `REJECTED QUOTATION · NOT SELECTED · Approval No: ${b.approval_no}`, byLabel: "Rejected by", amount: `${inr(Number(f.quote_amount))} quoted (not selected)` }
+            : { headline: `APPROVED · SELECTED QUOTATION · Approval No: ${b.approval_no}` },
+          upload: await uploadSlot(fileNameFor(label)),
+        });
+      }
+
+      return json({
+        mode: "client_sign",
+        request_id: requestId,
+        approval_no: b.approval_no,
+        ctx: {
+          approvalNo: b.approval_no,
+          approverLine,
+          dateTime,
+          requestNo: r.request_no,
+          amount: amountLabel(r),
+          reviewedLine: r.route === "A" && r.reviewed_by_name && r.reviewed_at ? `Reviewed by: ${r.reviewed_by_name}, ${ist(r.reviewed_at, false)}` : null,
+          verifyUrl,
+        },
+        seal_url: await signedUrl("credentials", b.seal_path),
+        signature_url: await signedUrl("credentials", b.signature_path),
+        form: formPlan,
+        files: filePlans,
+        packet_upload: await uploadSlot(`${b.approval_no}_packet.pdf`),
+        cover: {
+          title: r.title,
+          rows: coverRows(r, b.approval_no, approverLine, dateTime),
+          notes: r.notes ?? null,
+          // deno-lint-ignore no-explicit-any
+          timeline: [...((b.timeline ?? []) as any[]).map((t) => ({
+            when: ist(t.created_at), who: t.actor_name, what: ACTION_LABEL[t.action] ?? t.action, remarks: t.remarks ?? null,
+          })), { when: dateTime, who: approverObj.full_name, what: `Approved · ${b.approval_no}`, remarks: null }],
+        },
+      });
+    }
+
     const download = async (bucket: string, path: string) => {
       const { data, error } = await admin.storage.from(bucket).download(path);
       if (error || !data) throw new Error(`Could not read ${path.split("/").pop()}`);
@@ -764,7 +951,7 @@ Deno.serve(handle(async (req) => {
                 meta_message_id: metaId || null,
                 error_message: errStr || null,
                 details: { approval_no: b.approval_no, request_no: r.request_no, media_id: mediaId },
-              }).catch(() => {});
+              }).then(() => {}, () => {});
             } catch (waErr) {
               console.error("WhatsApp dispatch error for " + targetPhone, waErr);
               whatsappResults.push({ recipient: targetPhone, ok: false, error: String(waErr) });
