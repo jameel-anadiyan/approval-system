@@ -271,17 +271,16 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
 function isJpeg(b: Uint8Array) { return b[0] === 0xff && b[1] === 0xd8; }
 function isPng(b: Uint8Array) { return b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47; }
 
-/** Fits any uploaded document (PDF, JPG or PNG) onto standard A4 pages with zero badge overlap. */
-export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promise<{ bytes: Uint8Array; pageCount: number }> {
-  const targetDoc = await PDFDocument.create();
-  const a = await embedAssets(targetDoc, ctx);
-
+/** Fits any uploaded document (PDF, JPG or PNG) onto standard pages with zero badge overlap. */
+export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promise<{ bytes: Uint8Array; pageCount: number; doc?: PDFDocument }> {
   if (isJpeg(bytes) || isPng(bytes)) {
-    const img = isJpeg(bytes) ? await targetDoc.embedJpg(bytes) : await targetDoc.embedPng(bytes);
+    const doc = await PDFDocument.create();
+    const a = await embedAssets(doc, ctx);
+    const img = isJpeg(bytes) ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
     const landscape = img.width > img.height * 1.15;
     const pw = landscape ? A4.h : A4.w;
     const ph = landscape ? A4.w : A4.h;
-    const page = targetDoc.addPage([pw, ph]);
+    const page = doc.addPage([pw, ph]);
 
     const s = pw / A4.w;
     const bandH = 110 * s;
@@ -298,70 +297,35 @@ export async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promi
 
     page.drawImage(img, { x, y, width: w, height: h });
     drawBand(page, a, ctx, "Page 1 of 1", pw, bandH, s);
+    doc.setProducer("Approval App");
+    doc.setTitle(`${ctx.approvalNo}`);
+    return {
+      bytes: await doc.save({ useObjectStreams: false }),
+      pageCount: 1,
+      doc,
+    };
   } else {
-    const srcDoc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
-    try { srcDoc.getForm().flatten(); } catch { /* no form */ }
+    const doc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
+    try { doc.getForm().flatten(); } catch { /* no form */ }
+    const a = await embedAssets(doc, ctx);
+    const pageCount = doc.getPageCount();
 
-    const srcPages = srcDoc.getPages();
-    const pageIndices = srcDoc.getPageIndices();
-    const embeddedPages = await targetDoc.embedPdf(srcDoc, pageIndices);
-
-    for (let i = 0; i < embeddedPages.length; i++) {
-      const embedded = embeddedPages[i];
-      const srcPage = srcPages[i];
-      const rot = (((srcPage.getRotation().angle ?? 0) % 360) + 360) % 360;
-
-      const visW = rot === 90 || rot === 270 ? embedded.height : embedded.width;
-      const visH = rot === 90 || rot === 270 ? embedded.width : embedded.height;
-
-      const landscape = visW > visH * 1.15;
-      const pw = landscape ? A4.h : A4.w;
-      const ph = landscape ? A4.w : A4.h;
-      const targetPage = targetDoc.addPage([pw, ph]);
-
+    for (let i = 0; i < pageCount; i++) {
+      const page = doc.getPage(i);
+      const pw = page.getWidth();
       const s = pw / A4.w;
-      const bandH = 110 * s;
-      const margin = 16 * s;
-      const topPad = 14 * s;
-      const bottomPad = 10 * s;
-
-      const availW = pw - 2 * margin;
-      const availH = ph - bandH - topPad - bottomPad;
-
-      const scale = Math.min(availW / visW, availH / visH);
-      const scaledW = visW * scale;
-      const scaledH = visH * scale;
-
-      const destX = margin + (availW - scaledW) / 2;
-      const destY = bandH + bottomPad + (availH - scaledH) / 2;
-
-      let drawOptions: { x: number; y: number; width: number; height: number; rotate?: ReturnType<typeof degrees> } = {
-        x: destX,
-        y: destY,
-        width: scaledW,
-        height: scaledH,
-      };
-
-      if (rot === 90) {
-        drawOptions = { x: destX + scaledW, y: destY, width: scaledH, height: scaledW, rotate: degrees(90) };
-      } else if (rot === 180) {
-        drawOptions = { x: destX + scaledW, y: destY + scaledH, width: scaledW, height: scaledH, rotate: degrees(180) };
-      } else if (rot === 270) {
-        drawOptions = { x: destX, y: destY + scaledH, width: scaledH, height: scaledW, rotate: degrees(270) };
-      }
-
-      targetPage.drawPage(embedded, drawOptions);
-      drawBand(targetPage, a, ctx, `Page ${i + 1} of ${embeddedPages.length}`, pw, bandH, s);
+      const bandH = 100 * s;
+      drawBand(page, a, ctx, `Page ${i + 1} of ${pageCount}`, pw, bandH, s);
     }
-  }
 
-  targetDoc.setProducer("Approval App");
-  targetDoc.setTitle(`${ctx.approvalNo}`);
-  return {
-    bytes: await targetDoc.save({ useObjectStreams: false }),
-    pageCount: targetDoc.getPageCount(),
-    doc: targetDoc,
-  };
+    doc.setProducer("Approval App");
+    doc.setTitle(`${ctx.approvalNo}`);
+    return {
+      bytes: await doc.save({ useObjectStreams: false }),
+      pageCount,
+      doc,
+    };
+  }
 }
 
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
