@@ -40,3 +40,4 @@ copyFileSync(join(fn, '_shared/common.ts'), join(out, 'common.ts'));
 copyFileSync(join(fn, 'approve-request/stamp.ts'), join(out, 'stamp.ts'));
 copyFileSync(join(fn, 'approve-request/index.ts'), join(out, 'index.ts'));
 console.log(`approve_request_bundle.ts written (${bundle.length} bytes)`);
+

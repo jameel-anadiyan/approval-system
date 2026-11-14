@@ -421,6 +421,17 @@ export const ExhibitionFields: React.FC<{
     onChange({ ...value, provides: value.provides.includes(p) ? value.provides.filter((x) => x !== p) : [...value.provides, p] });
   const knownShop = shopOptions.some((s) => s.id === value.conducting_shop_id);
 
+  // GstSelector fires several callbacks in one click (e.g. "No GST" → hasGst, amount, rate).
+  // Merge them into the latest form state instead of the stale `value` from this render,
+  // otherwise the last callback silently undoes the earlier ones (gst_invoice never turned off).
+  const gstLatest = React.useRef(value);
+  gstLatest.current = value;
+  const applyGst = (patch: Partial<ExhibitionForm>) => {
+    const next = { ...gstLatest.current, ...patch };
+    gstLatest.current = next;
+    onChange(next);
+  };
+
   const field = (k: keyof ExhibitionForm, label: string, opts: { required?: boolean; type?: string; placeholder?: string; full?: boolean } = {}) => (
     <div className={opts.full ? 'sm:col-span-2' : ''}>
       <label className={labelCls}>
@@ -732,13 +743,17 @@ export const ExhibitionFields: React.FC<{
           <GstSelector
             hasGst={Boolean(value.gst_invoice)}
             onHasGstChange={(has) => {
+              const cur = gstLatest.current;
+              const curExcl = num(cur.amount_excl_gst);
               const defaultAmt = has
-                ? (value.gst_amount || (c.excl > 0 ? String(Math.round(c.excl * 0.18 * 100) / 100) : ''))
+                ? (cur.gst_amount && cur.gst_amount !== '0'
+                    ? cur.gst_amount
+                    : (curExcl > 0 ? String(Math.round(curExcl * 0.18 * 100) / 100) : ''))
                 : '0';
-              onChange({ ...value, gst_invoice: has, gst_amount: defaultAmt });
+              applyGst({ gst_invoice: has, gst_amount: defaultAmt, ...(has ? {} : { gst_rate: '0' }) });
             }}
             gstAmount={c.gst}
-            onGstAmountChange={(amt) => onChange({ ...value, gst_amount: String(amt) })}
+            onGstAmountChange={(amt) => applyGst({ gst_amount: String(amt) })}
             baseAmount={c.excl}
             totalAmount={c.total}
             roundOff={c.roundOff}
@@ -746,8 +761,9 @@ export const ExhibitionFields: React.FC<{
             totalLabel="Total Sponsorship (Incl. GST)"
             gstRate={c.pct}
             onGstRateChange={(r) => {
-              const calcAmt = Math.round(c.excl * (r / 100) * 100) / 100;
-              onChange({ ...value, gst_rate: String(r), gst_amount: String(calcAmt) });
+              const curExcl = num(gstLatest.current.amount_excl_gst);
+              const calcAmt = Math.round(curExcl * (r / 100) * 100) / 100;
+              applyGst({ gst_rate: String(r), gst_amount: String(calcAmt) });
             }}
           />
         </div>
