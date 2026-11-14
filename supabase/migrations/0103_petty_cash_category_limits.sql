@@ -337,8 +337,8 @@ end $function$;
 
 grant execute on function public._build_details(public.request_type, numeric, jsonb) to authenticated, anon, service_role;
 
--- create_typed_draft with category limits (same as 0095 — re-installed because an older
--- version, e.g. from fix_request_bank_details.sql, had overwritten it).
+-- create_typed_draft: the version that was live (migration 0080 / apply_0079) with only the
+-- hard-coded ₹1,000 petty cash check replaced by the category limit.
 create or replace function public.create_typed_draft(
   p_type public.request_type,
   p_title text,
@@ -367,10 +367,6 @@ declare
   v_bank_details jsonb;
   v_disb_mode text;
   v_is_payable boolean;
-  v_pc_limit numeric;
-  v_pc_cat text;
-  v_cat_id uuid;
-  v_cat_name text;
 begin
   me := public._me();
   if me.role not in ('employee','clerk','head','regional_head','admin') then
@@ -382,7 +378,8 @@ begin
       raise exception 'You do not have access to raise % requests yet', p_type;
     end if;
   elsif not (
-    p_type = any(me.allowed_types)
+    p_type::text = 'petty_cash'
+    or p_type = any(me.allowed_types)
     or (p_type = 'asset_below_20k' and 'asset'::public.request_type = any(me.allowed_types))
     or me.role in ('admin', 'head')
   ) then
@@ -401,21 +398,13 @@ begin
   if p_type = 'asset_below_20k' and v_amount > 20000 then
     raise exception 'Amount cannot exceed ₹20,000 for Asset Buying Below 20k';
   end if;
-
-  if p_type::text = 'petty_cash' then
-    v_pc_cat := coalesce(v->'details'->>'petty_cash_category', 'normal');
-    if v_pc_cat = 'showroom_cleaning' then
-      v_pc_limit := 4000;
-    elsif v_pc_cat = 'accommodation_cleaning' then
-      v_pc_limit := 1500;
-    elsif v_pc_cat = 'water_bottle' then
-      v_pc_limit := 2500;
-    else
-      v_pc_limit := 1000;
-    end if;
-    if v_amount > v_pc_limit then
-      raise exception 'Petty Cash amount cannot exceed ₹% for %', v_pc_limit, v_pc_cat;
-    end if;
+  -- Category-aware Petty Cash limit (Normal 1000 · Accommodation 1500 · Water Bottle 2500 · Showroom 4000)
+  if p_type::text = 'petty_cash' and v_amount > coalesce((v->'details'->>'max_limit')::numeric,
+       case coalesce(v->'details'->>'petty_cash_category', 'normal')
+         when 'showroom_cleaning' then 4000 when 'accommodation_cleaning' then 1500
+         when 'water_bottle' then 2500 else 1000 end) then
+    raise exception 'Petty Cash amount cannot exceed ₹% for %',
+      coalesce((v->'details'->>'max_limit')::numeric, 1000), coalesce(v->'details'->>'petty_cash_category', 'normal');
   end if;
 
   v_title := nullif(btrim(coalesce(p_title, '')), '');
@@ -430,30 +419,23 @@ begin
   end if;
   if v_title is null then raise exception 'Title is required'; end if;
 
-  -- Routing / Target Head resolution
+  -- Routing / Target Head rules
   if p_type = 'exhibition' then
     if me.default_head_id is not null then
       select * into v_target_head from public.profiles
       where id = me.default_head_id and role = 'head' and is_active;
-    end if;
-    if v_target_head.id is null then
-      select p.* into v_target_head from public.user_heads uh
-      join public.profiles p on p.id = uh.head_id
-      where uh.user_id = me.id and p.role = 'head' and p.is_active
-      order by uh.is_default desc limit 1;
     end if;
     if v_target_head.id is null and me.department_id is not null then
       select * into v_target_head from public.profiles
       where department_id = me.department_id and role = 'head' and is_active limit 1;
     end if;
     if v_target_head.id is not null then
-      v_dept_id := coalesce(v_target_head.department_id, me.department_id);
+      v_dept_id := v_target_head.department_id;
       v_owner_head_id := v_target_head.id;
       v_owner_head_name := v_target_head.full_name;
     else
       v_dept_id := me.department_id;
     end if;
-
   elsif p_type::text = 'petty_cash' then
     if p_target_head_id is not null then
       select * into v_target_head from public.profiles
@@ -464,78 +446,43 @@ begin
       if not v_target_head.is_petty_cash_dealer and me.id <> v_target_head.id then
         raise exception 'Selected Department Head is not enabled as a Petty Cash Dealer';
       end if;
-    elsif me.role = 'head' then
-      v_target_head := me;
-    else
-      if me.default_head_id is not null then
-        select * into v_target_head from public.profiles
-        where id = me.default_head_id and role = 'head' and is_active and is_petty_cash_dealer;
-      end if;
-      if v_target_head.id is null then
-        select p.* into v_target_head from public.user_heads uh
-        join public.profiles p on p.id = uh.head_id
-        where uh.user_id = me.id and p.role = 'head' and p.is_active and p.is_petty_cash_dealer
-        order by uh.is_default desc limit 1;
-      end if;
-      if v_target_head.id is null then
-        select * into v_target_head from public.profiles
-        where role = 'head' and is_active and is_petty_cash_dealer
-        order by created_at asc limit 1;
-      end if;
-    end if;
-
-    if v_target_head.id is not null then
-      v_dept_id := coalesce(v_target_head.department_id, me.department_id);
+      v_dept_id := v_target_head.department_id;
       v_owner_head_id := v_target_head.id;
       v_owner_head_name := v_target_head.full_name;
     else
       v_dept_id := me.department_id;
     end if;
-
   elsif p_target_head_id is not null then
     select * into v_target_head from public.profiles
     where id = p_target_head_id and role = 'head' and is_active;
     if v_target_head.id is null then raise exception 'The selected Head is not active or not found'; end if;
-    v_dept_id := coalesce(v_target_head.department_id, me.department_id);
+    v_dept_id := v_target_head.department_id;
     v_owner_head_id := v_target_head.id;
     v_owner_head_name := v_target_head.full_name;
-
   elsif me.role = 'head' then
     v_dept_id := me.department_id;
     v_owner_head_id := me.id;
     v_owner_head_name := me.full_name;
-
-  else
-    -- Fallback target head resolution for employee / regional head / clerk
-    if me.default_head_id is not null then
-      select * into v_target_head from public.profiles
-      where id = me.default_head_id and role = 'head' and is_active;
-    end if;
-    if v_target_head.id is null then
-      select p.* into v_target_head from public.user_heads uh
-      join public.profiles p on p.id = uh.head_id
-      where uh.user_id = me.id and p.role = 'head' and p.is_active
-      order by uh.is_default desc limit 1;
-    end if;
-    if v_target_head.id is null and me.department_id is not null then
-      select * into v_target_head from public.profiles
-      where department_id = me.department_id and role = 'head' and is_active limit 1;
-    end if;
-
+  elsif me.default_head_id is not null then
+    select * into v_target_head from public.profiles
+    where id = me.default_head_id and role = 'head' and is_active;
     if v_target_head.id is not null then
-      v_dept_id := coalesce(v_target_head.department_id, me.department_id);
+      v_dept_id := v_target_head.department_id;
       v_owner_head_id := v_target_head.id;
       v_owner_head_name := v_target_head.full_name;
     else
       v_dept_id := me.department_id;
     end if;
-  end if;
-
-  -- Optional category resolution from details
-  if (p_details ? 'category_id') and (p_details->>'category_id') ~ '^[0-9a-fA-F-]{36}$' then
-    select id, name into v_cat_id, v_cat_name
-    from public.work_categories
-    where id = (p_details->>'category_id')::uuid and is_active;
+  elsif me.department_id is not null then
+    select * into v_target_head from public.profiles
+    where department_id = me.department_id and role = 'head' and is_active limit 1;
+    v_dept_id := me.department_id;
+    if v_target_head.id is not null then
+      v_owner_head_id := v_target_head.id;
+      v_owner_head_name := v_target_head.full_name;
+    end if;
+  else
+    v_dept_id := me.department_id;
   end if;
 
   -- Shop assignment
@@ -570,73 +517,77 @@ begin
 
   if p_type = 'stock_transfer' and (v->'details'->>'from_shop_id') ~ '^[0-9a-fA-F-]{36}$' then
     v_shop_id := (v->'details'->>'from_shop_id')::uuid;
-    select name into v_shop from public.shops where id = v_shop_id;
+    v_shop := coalesce(v->'details'->>'from_shop_name', (select name from public.shops where id = v_shop_id));
   end if;
 
-  -- Region resolution
+  v_region_id := null;
+  v_region_name := null;
+  v_is_waitlist := false;
   if p_type = 'exhibition' then
-    if (v->'details' ? 'region_id') and (v->'details'->>'region_id') ~ '^[0-9a-fA-F-]{36}$' then
-      v_region_id := (v->'details'->>'region_id')::uuid;
+    v_region_id := coalesce(
+      me.region_id,
+      (select p.region_id from public.profiles p where p.id = me.regional_head_id),
+      case when p_details ? 'region_id' and p_details->>'region_id' ~ '^[0-9a-fA-F-]{36}$'
+           then (p_details->>'region_id')::uuid else null end
+    );
+    if v_region_id is not null then
       select name into v_region_name from public.regions where id = v_region_id;
-    elsif me.region_id is not null then
-      v_region_id := me.region_id;
-      select name into v_region_name from public.regions where id = me.region_id;
     end if;
-    v_is_waitlist := coalesce((v->'details'->>'is_waitlist')::boolean, false);
+    v_is_waitlist := coalesce((p_details->>'is_waitlist')::boolean, false);
   end if;
 
   v_is_payable := p_type::text not in ('discount', 'non_cash', 'stock_transfer', 'agreement', 'audit_report');
 
   if v_is_payable then
-    v_disb_mode := nullif(p_details->>'disbursement_mode', '');
+    v_disb_mode := nullif(coalesce(p_details, '{}'::jsonb)->>'disbursement_mode', '');
     if p_type::text = 'petty_cash' and v_disb_mode is null then
       v_disb_mode := 'cash';
     end if;
-
     v_bank_details := jsonb_strip_nulls(jsonb_build_object(
       'disbursement_mode', v_disb_mode,
-      'enter_bank_details_later', coalesce((p_details->>'enter_bank_details_later')::boolean, false),
-      'bank_account_no', nullif(p_details->>'bank_account_no', ''),
-      'bank_ifsc', nullif(p_details->>'bank_ifsc', ''),
-      'bank_name', nullif(p_details->>'bank_name', ''),
-      'bank_branch', nullif(p_details->>'bank_branch', ''),
-      'bank_account_holder_name', nullif(p_details->>'bank_account_holder_name', ''),
-      'bank_verified', coalesce((p_details->>'bank_verified')::boolean, false),
-      'bank_verification_message', nullif(p_details->>'bank_verification_message', '')
+      'enter_bank_details_later', coalesce((coalesce(p_details, '{}'::jsonb)->>'enter_bank_details_later')::boolean, false),
+      'bank_account_no', nullif(coalesce(p_details, '{}'::jsonb)->>'bank_account_no', ''),
+      'bank_ifsc', nullif(coalesce(p_details, '{}'::jsonb)->>'bank_ifsc', ''),
+      'bank_name', nullif(coalesce(p_details, '{}'::jsonb)->>'bank_name', ''),
+      'bank_branch', nullif(coalesce(p_details, '{}'::jsonb)->>'bank_branch', ''),
+      'bank_account_holder_name', nullif(coalesce(p_details, '{}'::jsonb)->>'bank_account_holder_name', ''),
+      'bank_verified', coalesce((coalesce(p_details, '{}'::jsonb)->>'bank_verified')::boolean, false),
+      'bank_verification_message', nullif(coalesce(p_details, '{}'::jsonb)->>'bank_verification_message', '')
     ));
-
-    v := jsonb_set(v, '{details}', coalesce(v->'details', '{}'::jsonb) || v_bank_details);
+  else
+    v_disb_mode := null;
+    v_bank_details := '{}'::jsonb;
   end if;
 
   insert into public.requests (
-    request_type, requester_id, department_id, title, notes,
-    amount, details, status, is_draft, owner_head_id, owner_head_name,
-    category_id, category_name,
-    shop_id, shop_name, region_id, region_name, is_waitlist,
+    requester_id, requester_name, requester_role, department_id, title, notes, amount,
+    request_type, shop_id, shop_name, details, owner_head_id, owner_head_name,
+    region_id, region_name, is_waitlist,
     disbursement_mode, enter_bank_details_later, bank_account_no, bank_ifsc,
-    bank_name, bank_branch, bank_account_holder_name, bank_verified, bank_verification_message,
-    assigned_entry_user_id
-  ) values (
-    p_type, me.id, v_dept_id, v_title, nullif(btrim(coalesce(p_notes, '')), ''),
-    v_amount, v->'details', 'draft', true, v_owner_head_id, v_owner_head_name,
-    v_cat_id, v_cat_name,
-    v_shop_id, v_shop, v_region_id, v_region_name, coalesce(v_is_waitlist, false),
-    v_disb_mode::public.disbursement_mode,
-    case when v_disb_mode = 'bank' then coalesce((p_details->>'enter_bank_details_later')::boolean, false) else false end,
-    case when v_disb_mode = 'bank' and not coalesce((p_details->>'enter_bank_details_later')::boolean, false) then nullif(p_details->>'bank_account_no', '') else null end,
-    case when v_disb_mode = 'bank' and not coalesce((p_details->>'enter_bank_details_later')::boolean, false) then nullif(p_details->>'bank_ifsc', '') else null end,
-    case when v_disb_mode = 'bank' and not coalesce((p_details->>'enter_bank_details_later')::boolean, false) then nullif(p_details->>'bank_name', '') else null end,
-    case when v_disb_mode = 'bank' and not coalesce((p_details->>'enter_bank_details_later')::boolean, false) then nullif(p_details->>'bank_branch', '') else null end,
-    case when v_disb_mode = 'bank' and not coalesce((p_details->>'enter_bank_details_later')::boolean, false) then nullif(p_details->>'bank_account_holder_name', '') else null end,
-    case when v_disb_mode = 'bank' and not coalesce((p_details->>'enter_bank_details_later')::boolean, false) then coalesce((p_details->>'bank_verified')::boolean, false) else false end,
-    case when v_disb_mode = 'bank' and not coalesce((p_details->>'enter_bank_details_later')::boolean, false) then nullif(p_details->>'bank_verification_message', '') else null end,
-    case when (p_details ? 'assigned_entry_user_id') and (p_details->>'assigned_entry_user_id') ~ '^[0-9a-fA-F-]{36}$'
-         then (p_details->>'assigned_entry_user_id')::uuid else null end
-  ) returning id into v_id;
+    bank_name, bank_branch, bank_account_holder_name, bank_verified, bank_verification_message
+  )
+  values (
+    me.id, me.full_name, me.role, v_dept_id, left(v_title, 200), nullif(btrim(p_notes), ''),
+    v_amount, p_type, v_shop_id, v_shop,
+    (case when p_type = 'non_cash' then v_clean_details else v->'details' end) || v_bank_details,
+    v_owner_head_id, v_owner_head_name,
+    v_region_id, v_region_name, v_is_waitlist,
+    v_disb_mode,
+    case when v_is_payable then coalesce((coalesce(p_details, '{}'::jsonb)->>'enter_bank_details_later')::boolean, false) else false end,
+    case when v_is_payable then nullif(coalesce(p_details, '{}'::jsonb)->>'bank_account_no', '') else null end,
+    case when v_is_payable then nullif(coalesce(p_details, '{}'::jsonb)->>'bank_ifsc', '') else null end,
+    case when v_is_payable then nullif(coalesce(p_details, '{}'::jsonb)->>'bank_name', '') else null end,
+    case when v_is_payable then nullif(coalesce(p_details, '{}'::jsonb)->>'bank_branch', '') else null end,
+    case when v_is_payable then nullif(coalesce(p_details, '{}'::jsonb)->>'bank_account_holder_name', '') else null end,
+    case when v_is_payable then coalesce((coalesce(p_details, '{}'::jsonb)->>'bank_verified')::boolean, false) else false end,
+    case when v_is_payable then nullif(coalesce(p_details, '{}'::jsonb)->>'bank_verification_message', '') else null end
+  )
+  returning id into v_id;
 
   return v_id;
 end $function$;
 
+revoke execute on function public.create_typed_draft(public.request_type, text, numeric, text, jsonb, uuid) from public, anon;
 grant execute on function public.create_typed_draft(public.request_type, text, numeric, text, jsonb, uuid) to authenticated;
 
 -- Helper used by the app / checks: limit for a petty cash category.
@@ -669,6 +620,24 @@ with checks as (
                  where n.nspname = 'public' and p.proname = 'create_typed_draft'
                    and (pg_get_functiondef(p.oid) ilike '%showroom_cleaning%'
                         or pg_get_functiondef(p.oid) ilike '%max_limit%')),
+         'this file'
+  union all
+  select 'requests table has every column create_typed_draft writes',
+         not exists (
+           select 1 from unnest(array[
+             'requester_id','requester_name','requester_role','department_id','title','notes','amount',
+             'request_type','shop_id','shop_name','details','owner_head_id','owner_head_name',
+             'region_id','region_name','is_waitlist','disbursement_mode','enter_bank_details_later',
+             'bank_account_no','bank_ifsc','bank_name','bank_branch','bank_account_holder_name',
+             'bank_verified','bank_verification_message']) as c(col)
+           where not exists (select 1 from information_schema.columns ic
+                             where ic.table_schema = 'public' and ic.table_name = 'requests' and ic.column_name = c.col)),
+         'send screenshot'
+  union all
+  select 'create_typed_draft has no is_draft column bug',
+         not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                     where n.nspname = 'public' and p.proname = 'create_typed_draft'
+                       and pg_get_functiondef(p.oid) ilike '%is_draft%'),
          'this file'
   union all
   select 'submit_request uses category limit',
