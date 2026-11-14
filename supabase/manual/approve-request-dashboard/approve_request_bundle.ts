@@ -737,13 +737,14 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
       String(f?.original_name ?? "").toLowerCase().includes("petty_cash_form_below_1000")
     );
     if (alreadyUploaded) return null;
+    const pcLimit = Number(d.max_limit) || ({ showroom_cleaning: 4000, accommodation_cleaning: 1500, water_bottle: 2500 } as Record<string, number>)[String(d.petty_cash_category ?? "")] || 1000;
     const payMode = String(r.disbursement_mode ?? d.disbursement_mode ?? "cash").toLowerCase() === "bank"
       ? "Bank Transfer"
       : "Cash (Default)";
     return {
-      subtitle: "PETTY CASH FORM BELOW 1000",
+      subtitle: "PETTY CASH FORM",
       sections: [
-        { title: "Petty Cash Voucher Details (Max Rs. 1,000.00)", rows: [
+        { title: `Petty Cash Voucher Details (Max ${money(pcLimit)})`, rows: [
           ["Request No", txt(r.request_no)],
           ["Date", submitted],
           ["Requested by", txt(r.requester_name)],
@@ -751,7 +752,7 @@ function formSections(r: any, submitted: string, files: any[] = []): { subtitle:
           ["Petty Cash Dealing Head", txt(r.owner_head_name ?? r.department)],
           ["Disbursement Entry Account", txt(r.assigned_entry_user_name)],
           ["Payment Mode", payMode],
-          ["Requested Amount (<= Rs. 1,000)", money(r.amount)],
+          [`Requested Amount (<= ${money(pcLimit)})`, money(r.amount)],
         ] },
         { title: "Mandatory Note / Purpose", text: r.notes ?? "-" },
       ],
