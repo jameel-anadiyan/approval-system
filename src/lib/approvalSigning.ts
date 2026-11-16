@@ -7,7 +7,10 @@
 //   1. prepare  → reserves the approval (begin_approval), hands back signed download/upload URLs
 //   2. finalize → verifies the uploaded files and calls finalize_approval
 //   3. abort    → puts the request back if anything fails
-import { degrees, PDFDocument, type PDFFont, type PDFImage, type PDFPage, rgb, StandardFonts } from 'pdf-lib';
+import {
+  decodePDFRawStream, degrees, PDFArray, PDFDict, PDFDocument, type PDFFont, type PDFImage, PDFName, PDFNumber,
+  type PDFPage, PDFRawStream, rgb, StandardFonts,
+} from 'pdf-lib';
 import QRCode from 'qrcode';
 import { supabase } from './supabase';
 
@@ -190,15 +193,173 @@ function drawBand(page: PDFPage, a: Assets, ctx: StampContext, pageLabel: string
 /** Gives the browser a chance to repaint between heavy steps so the UI never freezes. */
 const breathe = () => new Promise<void>((r) => setTimeout(r, 0));
 
+// ───────────────────────── image down-sampling (keeps files under the Storage size limit) ─────────────────────────
+//
+// Phone / scanner PDFs often carry 3000-5000 px JPEGs per page (3-8 MB each). Several of them in one
+// packet exceed the Supabase Storage per-file limit ("The object exceeded the maximum allowed size").
+// A4 at ~200 dpi is ≈1650 × 2340 px, so re-encoding big images to that size keeps them perfectly
+// readable while cutting the size 5-10×.
+
+interface CompressLevel { maxPx: number; quality: number; minBytes: number }
+const LEVEL_NORMAL: CompressLevel = { maxPx: 2000, quality: 0.78, minBytes: 250_000 };
+const LEVEL_STRONG: CompressLevel = { maxPx: 1500, quality: 0.65, minBytes: 120_000 };
+const LEVEL_MAX: CompressLevel = { maxPx: 1100, quality: 0.55, minBytes: 60_000 };
+
+/** Max size we try to stay under for any single uploaded file (Free-plan Storage cap is 50 MB). */
+const SAFE_UPLOAD_BYTES = 45 * 1024 * 1024;
+
+const canCompress = () =>
+  typeof createImageBitmap === 'function' &&
+  (typeof OffscreenCanvas !== 'undefined' || typeof document !== 'undefined');
+
+function makeCanvas(w: number, h: number): { ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D; toJpeg: (q: number) => Promise<Uint8Array> } | null {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const c = new OffscreenCanvas(w, h);
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    return { ctx, toJpeg: async (q) => new Uint8Array(await (await c.convertToBlob({ type: 'image/jpeg', quality: q })).arrayBuffer()) };
+  }
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  if (!ctx) return null;
+  return {
+    ctx,
+    toJpeg: (q) => new Promise((resolve, reject) => c.toBlob(async (b) => {
+      if (!b) return reject(new Error('canvas toBlob failed'));
+      resolve(new Uint8Array(await b.arrayBuffer()));
+    }, 'image/jpeg', q)),
+  };
+}
+
+/** Re-encodes an image source (bitmap) to a JPEG no larger than maxPx on its longest side. */
+async function bitmapToJpeg(bmp: ImageBitmap, level: CompressLevel): Promise<{ bytes: Uint8Array; w: number; h: number } | null> {
+  const scale = Math.min(1, level.maxPx / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const cv = makeCanvas(w, h);
+  if (!cv) return null;
+  cv.ctx.fillStyle = '#ffffff';
+  cv.ctx.fillRect(0, 0, w, h);
+  cv.ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+  return { bytes: await cv.toJpeg(level.quality), w, h };
+}
+
+function nameOf(v: unknown): string | null {
+  return v instanceof PDFName ? v.asString() : null;
+}
+
+/**
+ * Down-samples large raster images inside a loaded PDF in place. Handles JPEG (DCTDecode) images and
+ * plain 8-bit RGB / Gray Flate images. Anything unusual (CMYK, masks, predictors, Decode arrays) is
+ * left untouched so the document never gets corrupted. Returns bytes saved (approx.).
+ */
+async function compressPdfImages(doc: PDFDocument, level: CompressLevel): Promise<number> {
+  if (!canCompress()) return 0;
+  let saved = 0;
+  let n = 0;
+  // Soft-mask images must stay DeviceGray and untouched, so collect them first.
+  const smaskRefs = new Set<string>();
+  for (const [, o] of doc.context.enumerateIndirectObjects()) {
+    if (o instanceof PDFRawStream || o instanceof PDFDict) {
+      const d = o instanceof PDFRawStream ? o.dict : o;
+      const sm = d.get(PDFName.of('SMask'));
+      if (sm) smaskRefs.add(sm.toString());
+    }
+  }
+  for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFRawStream)) continue;
+    if (smaskRefs.has(ref.toString())) continue;
+    const dict = obj.dict;
+    if (nameOf(dict.get(PDFName.of('Subtype'))) !== '/Image') continue;
+    if (dict.get(PDFName.of('SMask'))) continue;
+    if (obj.contents.length < level.minBytes) continue;
+    if (dict.get(PDFName.of('ImageMask')) || dict.get(PDFName.of('Decode')) || dict.get(PDFName.of('Mask'))) continue;
+    const bpc = dict.get(PDFName.of('BitsPerComponent'));
+    if (bpc instanceof PDFNumber && bpc.asNumber() !== 8) continue;
+    const width = (dict.get(PDFName.of('Width')) as PDFNumber | undefined)?.asNumber?.() ?? 0;
+    const height = (dict.get(PDFName.of('Height')) as PDFNumber | undefined)?.asNumber?.() ?? 0;
+    if (!width || !height) continue;
+
+    let filter = dict.get(PDFName.of('Filter'));
+    if (filter instanceof PDFArray) filter = filter.size() === 1 ? filter.get(0) : undefined;
+    const filterName = nameOf(filter);
+    const cs = dict.get(PDFName.of('ColorSpace'));
+    const csName = nameOf(cs);
+    if (csName === '/DeviceCMYK') continue;
+    if (cs && !csName) {
+      // Array colour space: only ICCBased RGB / Gray is safe to re-encode.
+      const arr = cs instanceof PDFArray ? cs : null;
+      if (!arr || nameOf(arr.get(0)) !== '/ICCBased') continue;
+      const icc = doc.context.lookup(arr.get(1));
+      const nComp = icc instanceof PDFRawStream ? (icc.dict.get(PDFName.of('N')) as PDFNumber | undefined)?.asNumber?.() : undefined;
+      if (nComp !== 1 && nComp !== 3) continue;
+    }
+
+    try {
+      let bmp: ImageBitmap | null = null;
+      if (filterName === '/DCTDecode') {
+        if (Math.max(width, height) <= level.maxPx && obj.contents.length < level.minBytes * 4) continue;
+        bmp = await createImageBitmap(new Blob([obj.contents as unknown as BlobPart], { type: 'image/jpeg' }));
+      } else if (filterName === '/FlateDecode' && !dict.get(PDFName.of('DecodeParms'))
+        && (csName === '/DeviceRGB' || csName === '/DeviceGray')) {
+        const comps = csName === '/DeviceRGB' ? 3 : 1;
+        const raw = decodePDFRawStream(obj).decode();
+        if (raw.length !== width * height * comps) continue;
+        const rgba = new Uint8ClampedArray(width * height * 4);
+        for (let i = 0, j = 0; i < width * height; i++, j += comps) {
+          const k = i * 4;
+          rgba[k] = raw[j]; rgba[k + 1] = raw[j + (comps === 3 ? 1 : 0)]; rgba[k + 2] = raw[j + (comps === 3 ? 2 : 0)]; rgba[k + 3] = 255;
+        }
+        bmp = await createImageBitmap(new ImageData(rgba, width, height));
+      } else {
+        continue;
+      }
+      const out = await bitmapToJpeg(bmp, level);
+      if (!out || out.bytes.length >= obj.contents.length * 0.9) continue;
+
+      const newDict = dict.clone(doc.context);
+      newDict.set(PDFName.of('Width'), PDFNumber.of(out.w));
+      newDict.set(PDFName.of('Height'), PDFNumber.of(out.h));
+      newDict.set(PDFName.of('ColorSpace'), PDFName.of('DeviceRGB'));
+      newDict.set(PDFName.of('BitsPerComponent'), PDFNumber.of(8));
+      newDict.set(PDFName.of('Filter'), PDFName.of('DCTDecode'));
+      newDict.delete(PDFName.of('DecodeParms'));
+      newDict.set(PDFName.of('Length'), PDFNumber.of(out.bytes.length));
+      doc.context.assign(ref, PDFRawStream.of(newDict, out.bytes));
+      saved += obj.contents.length - out.bytes.length;
+    } catch (e) {
+      console.warn('Image down-sampling skipped:', e);
+    }
+    if (++n % 3 === 0) await breathe();
+  }
+  return saved;
+}
+
+/** Down-samples a large uploaded JPG / PNG before it is placed on the page. */
+async function compressRasterUpload(bytes: Uint8Array, level: CompressLevel): Promise<Uint8Array> {
+  if (!canCompress() || bytes.length < level.minBytes * 2) return bytes;
+  try {
+    const bmp = await createImageBitmap(new Blob([bytes as unknown as BlobPart], { type: isPng(bytes) ? 'image/png' : 'image/jpeg' }));
+    if (Math.max(bmp.width, bmp.height) <= level.maxPx && bytes.length < 1_500_000) { bmp.close?.(); return bytes; }
+    const out = await bitmapToJpeg(bmp, level);
+    return out && out.bytes.length < bytes.length ? out.bytes : bytes;
+  } catch {
+    return bytes;
+  }
+}
+
 /**
  * Fits any uploaded document (PDF, JPG or PNG) onto standard A4 pages with the approval
  * band below the content (zero overlap). Runs entirely in the browser.
  */
-async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promise<{ doc: PDFDocument; pageCount: number }> {
+async function stampDocument(bytes: Uint8Array, ctx: StampContext, level: CompressLevel = LEVEL_NORMAL): Promise<{ doc: PDFDocument; pageCount: number }> {
   const target = await PDFDocument.create();
   const a = await embedAssets(target, ctx);
 
   if (isJpeg(bytes) || isPng(bytes)) {
+    bytes = await compressRasterUpload(bytes, level);
     const img = isJpeg(bytes) ? await target.embedJpg(bytes) : await target.embedPng(bytes);
     const landscape = img.width > img.height * 1.15;
     const pw = landscape ? A4.h : A4.w;
@@ -217,6 +378,8 @@ async function stampDocument(bytes: Uint8Array, ctx: StampContext): Promise<{ do
   } else {
     const src = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
     try { src.getForm().flatten(); } catch { /* no form */ }
+    // Shrink oversized scans before they are embedded (only when the file is big).
+    if (bytes.length > 1_500_000) await compressPdfImages(src, level);
     const srcPages = src.getPages();
     const embedded = await target.embedPdf(src, src.getPageIndices());
 
@@ -388,6 +551,10 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+class TooLargeError extends Error {}
+
+const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+
 async function uploadSigned(slot: UploadSlot, bytes: Uint8Array): Promise<void> {
   const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
   let lastMsg = '';
@@ -399,9 +566,47 @@ async function uploadSigned(slot: UploadSlot, bytes: Uint8Array): Promise<void> 
     lastMsg = error.message;
     // Already uploaded by an earlier attempt of this same run → fine.
     if (/exists|duplicate/i.test(lastMsg)) return;
+    if (/maximum allowed size|too large|payload/i.test(lastMsg)) {
+      throw new TooLargeError(`Upload failed for ${slot.file_name} (${mb(bytes.length)}): ${lastMsg}`);
+    }
     await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
   }
   throw new Error(`Upload failed for ${slot.file_name}: ${lastMsg}`);
+}
+
+/**
+ * Saves + uploads a signed PDF. If it is too big for Storage, the images inside are
+ * down-sampled step by step (normal → strong → max) and the upload is retried.
+ */
+async function saveAndUpload(
+  doc: PDFDocument, slot: UploadSlot, progress: (m: string) => void,
+): Promise<Uint8Array> {
+  let bytes = await doc.save({ useObjectStreams: false });
+  // Source scans were already down-sampled at LEVEL_NORMAL while stamping.
+  const levels = [LEVEL_STRONG, LEVEL_MAX];
+  let li = 0;
+  // Proactively shrink anything that is certainly over the limit.
+  while (bytes.length > SAFE_UPLOAD_BYTES && li < levels.length && canCompress()) {
+    progress(`Compressing ${slot.file_name} (${mb(bytes.length)})…`);
+    await compressPdfImages(doc, levels[li++]);
+    bytes = await doc.save({ useObjectStreams: false });
+  }
+  for (;;) {
+    try {
+      await uploadSigned(slot, bytes);
+      return bytes;
+    } catch (e) {
+      if (!(e instanceof TooLargeError) || li >= levels.length || !canCompress()) {
+        if (e instanceof TooLargeError) {
+          throw new Error(`${e.message}. The file is still too large after compression — ask the requester to upload smaller / fewer scans, or raise the Storage upload limit in Supabase Dashboard → Storage → Settings.`);
+        }
+        throw e;
+      }
+      progress(`Compressing ${slot.file_name} (${mb(bytes.length)})…`);
+      await compressPdfImages(doc, levels[li++]);
+      bytes = await doc.save({ useObjectStreams: false });
+    }
+  }
 }
 
 async function makeQrPng(url: string | null): Promise<Uint8Array | null> {
@@ -451,8 +656,7 @@ export async function signPreparedApproval(
     progress('Stamping request form…');
     const formBytes = await buildFormPdf(prep.form.heading, prep.form.subtitle, prep.form.sections);
     const { doc, pageCount } = await stampDocument(formBytes, ctx);
-    const bytes = await doc.save({ useObjectStreams: false });
-    await uploadSigned(prep.form.upload, bytes);
+    const bytes = await saveAndUpload(doc, prep.form.upload, progress);
     outputs.push({
       source_file_id: null, is_packet: false, file_name: prep.form.upload.file_name,
       storage_path: prep.form.upload.path, sha256: await sha256Hex(bytes), page_count: pageCount,
@@ -473,9 +677,8 @@ export async function signPreparedApproval(
     } catch (e) {
       throw new Error(`Could not stamp "${f.original_name}": ${e instanceof Error ? e.message : String(e)}`);
     }
-    const bytes = await stamped.doc.save({ useObjectStreams: false });
     progress(`Uploading signed copy of ${f.original_name}…`);
-    await uploadSigned(f.upload, bytes);
+    const bytes = await saveAndUpload(stamped.doc, f.upload, progress);
     outputs.push({
       source_file_id: f.id, is_packet: false, file_name: f.upload.file_name,
       storage_path: f.upload.path, sha256: await sha256Hex(bytes), page_count: stamped.pageCount,
@@ -493,10 +696,8 @@ export async function signPreparedApproval(
   coverPages.forEach((cp, idx) => packet.insertPage(idx, cp));
   packet.setProducer('Approval App');
   packet.setTitle(`${prep.approval_no} packet`);
-  const packetBytes = await packet.save({ useObjectStreams: false });
-
   progress('Uploading approval packet…');
-  await uploadSigned(prep.packet_upload, packetBytes);
+  const packetBytes = await saveAndUpload(packet, prep.packet_upload, progress);
   outputs.unshift({
     source_file_id: null, is_packet: true, file_name: prep.packet_upload.file_name,
     storage_path: prep.packet_upload.path, sha256: await sha256Hex(packetBytes), page_count: packet.getPageCount(),
