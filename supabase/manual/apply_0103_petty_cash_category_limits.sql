@@ -12,6 +12,10 @@
 -- The final SELECT shows a check-list; every row must say ok = true.
 -- ============================================================================
 
+-- _build_details: the version that was live (migration 0080) with ONLY two additive changes:
+--   * Petty Cash category limits (+ keeps petty_cash_category / max_limit / bottle fields)
+--   * Exhibition keeps daily_schedules / total_days / total_hours, typed GST amount and ₹1 round-off
+-- Discount (before_amount / after_amount), Asset, Stock transfer, General are exactly as before.
 create or replace function public._build_details(p_type public.request_type, p_amount numeric, p jsonb)
 returns jsonb language plpgsql immutable set search_path = '' as $function$
 declare
@@ -150,45 +154,37 @@ begin
     v_base := public._num(d, 'base_amount');
     v_gen_gst := public._num(d, 'gst_amount');
     v_gen_rate := public._num(d, 'gst_rate');
-
-    if v_has_gst then
-      v_unrounded := coalesce(v_base, 0) + coalesce(v_gen_gst, 0);
-      v_total := round(v_unrounded, 0); -- Rounded to nearest ₹1
-      v_round_off := round(v_total - v_unrounded, 2);
-    else
-      v_total := round(coalesce(v_base, p_amount), 0);
-      v_round_off := 0;
-    end if;
-
     return jsonb_build_object(
-      'amount', v_total,
+      'amount', round(p_amount, 2),
       'details', jsonb_strip_nulls(jsonb_build_object(
-        'base_amount', v_base,
+        'base_amount', coalesce(v_base, round(p_amount, 2)),
         'has_gst', v_has_gst,
-        'gst_rate', case when v_has_gst then coalesce(v_gen_rate, case when v_base > 0 and v_gen_gst > 0 then round((v_gen_gst / v_base) * 100, 2) else 18 end) else 0 end,
-        'gst_amount', case when v_has_gst then v_gen_gst else 0 end,
-        'round_off', v_round_off,
-        'total_amount', v_total)));
+        'gst_rate', case when v_has_gst then coalesce(v_gen_rate, 18) else 0 end,
+        'gst_amount', case when v_has_gst then coalesce(v_gen_gst, round(p_amount - coalesce(v_base, p_amount), 2)) else 0 end,
+        'total_amount', round(p_amount, 2)
+      ))
+    );
 
   elsif p_type = 'discount' then
-    v_before := public._num(d, 'bill_amount_before_discount');
-    v_after := public._num(d, 'bill_amount_after_discount');
-    if v_before is null or v_before <= 0 then raise exception 'Bill amount before discount is required'; end if;
-    if v_after is null or v_after < 0 then raise exception 'Bill amount after discount is required'; end if;
-    if v_after >= v_before then raise exception 'Amount after discount must be strictly less than before discount'; end if;
+    v_before := public._num(d, 'before_amount');
+    v_after := public._num(d, 'after_amount');
+    if v_before is null or v_before <= 0 then raise exception 'Enter the amount before discount'; end if;
+    if v_after is null or v_after < 0 then raise exception 'Enter the amount after discount'; end if;
+    if v_after >= v_before then raise exception 'After-discount amount must be less than the amount before discount'; end if;
     return jsonb_build_object(
-      'amount', round(v_before - v_after, 2),
+      'amount', v_before - v_after,
       'details', jsonb_strip_nulls(jsonb_build_object(
-        'customer_name', public._txt(d, 'customer_name', 200),
-        'customer_phone', public._txt(d, 'customer_phone', 40),
-        'bill_amount_before_discount', v_before,
-        'bill_amount_after_discount', v_after,
-        'discount_amount', round(v_before - v_after, 2),
-        'discount_pct', round(((v_before - v_after) / v_before) * 100, 2),
-        'reason', public._txt(d, 'reason', 1000))));
+        'before_amount', v_before, 'after_amount', v_after,
+        'discount_amount', v_before - v_after,
+        'discount_pct', round((v_before - v_after) / v_before * 100, 2),
+        'customer_name', public._txt(d, 'customer_name', 100),
+        'reference', public._txt(d, 'reference', 100),
+        'invoice_no', public._txt(d, 'invoice_no', 100),
+        'bill_date', public._txt(d, 'bill_date', 50))));
 
   elsif p_type = 'asset' or p_type = 'asset_below_20k' then
-    if p_amount is null or p_amount <= 0 then raise exception 'Amount must be more than zero'; end if;
+    if public._txt(d, 'asset_name') is null then raise exception 'Asset name is required'; end if;
+    if p_amount is null or p_amount <= 0 then raise exception 'Enter the quotation amounts'; end if;
     if p_type = 'asset_below_20k' and p_amount > 20000 then
       raise exception 'Amount cannot exceed ₹20,000 for Asset Buying Below 20k';
     end if;
@@ -196,69 +192,63 @@ begin
       'amount', round(p_amount, 2),
       'details', jsonb_strip_nulls(jsonb_build_object(
         'asset_name', public._txt(d, 'asset_name', 200),
-        'category', public._txt(d, 'category', 100),
-        'reason', public._txt(d, 'reason', 1000),
-        'selected_quote_id', public._txt(d, 'selected_quote_id', 100),
-        'admin_choice_override', coalesce((d->>'admin_choice_override')::boolean, false))));
+        'quantity', public._txt(d, 'quantity', 50),
+        'specification', public._txt(d, 'specification', 1000),
+        'purpose', public._txt(d, 'purpose', 1000))));
 
   elsif p_type = 'stock_transfer' then
-    v_mode := coalesce(d->>'transfer_mode', 'quick');
-    if v_mode = 'quick' then
-      v_pieces := public._int(d, 'total_pieces');
-      v_gross_wt := public._num(d, 'total_gross_weight');
-      v_mrp_total := public._num(d, 'total_mrp');
-      if v_pieces is null or v_pieces <= 0 then raise exception 'Total pieces must be at least 1'; end if;
-      if v_gross_wt is null or v_gross_wt <= 0 then raise exception 'Total gross weight must be greater than zero'; end if;
-      if v_mrp_total is null or v_mrp_total <= 0 then raise exception 'Total MRP must be greater than zero'; end if;
+    v_mode := public._txt(d, 'transfer_mode', 20);
+    if v_mode is null or v_mode not in ('itemized', 'bulk') then
+      raise exception 'Stock transfer mode must be itemized or bulk';
+    end if;
+    if (d->>'from_shop_id') is null or (d->>'to_shop_id') is null then
+      raise exception 'Select From Shop and To Shop';
+    end if;
+    if (d->>'from_shop_id') = (d->>'to_shop_id') then
+      raise exception 'From Shop and To Shop cannot be the same';
+    end if;
 
-      if (d->>'from_shop_id') ~ '^[0-9a-fA-F-]{36}$' then
-        select name into v_from_shop from public.shops where id = (d->>'from_shop_id')::uuid;
-      end if;
-      if (d->>'to_shop_id') ~ '^[0-9a-fA-F-]{36}$' then
-        select name into v_to_shop from public.shops where id = (d->>'to_shop_id')::uuid;
+    select name into v_from_shop from public.shops where id = (d->>'from_shop_id')::uuid;
+    select name into v_to_shop from public.shops where id = (d->>'to_shop_id')::uuid;
+
+    if v_mode = 'bulk' then
+      v_pieces := coalesce((d->>'total_pieces')::int, 0);
+      v_gross_wt := round(coalesce((d->>'total_gross_weight')::numeric, 0), 3);
+      v_mrp_total := round(coalesce((d->>'total_mrp')::numeric, 0), 2);
+      if v_pieces <= 0 then raise exception 'Total pieces count must be at least 1'; end if;
+      if v_gross_wt <= 0 then raise exception 'Total gross weight must be greater than 0'; end if;
+      if v_mrp_total <= 0 then raise exception 'Total MRP amount must be greater than 0'; end if;
+      if p_amount is null or p_amount <= 0 or round(p_amount, 2) <> v_mrp_total then
+        raise exception 'Request amount must match total MRP';
       end if;
 
       return jsonb_build_object(
-        'amount', round(v_mrp_total, 2),
+        'amount', v_mrp_total,
         'details', jsonb_strip_nulls(jsonb_build_object(
-          'transfer_mode', 'quick',
+          'transfer_mode', 'bulk',
           'from_shop_id', d->>'from_shop_id',
           'from_shop_name', coalesce(v_from_shop, d->>'from_shop_name'),
           'to_shop_id', d->>'to_shop_id',
           'to_shop_name', coalesce(v_to_shop, d->>'to_shop_name'),
+          'category_id', d->>'category_id',
+          'category_name', d->>'category_name',
           'total_pieces', v_pieces,
-          'total_gross_weight', round(v_gross_wt, 3),
-          'total_mrp', round(v_mrp_total, 2),
+          'total_gross_weight', v_gross_wt,
+          'total_mrp', v_mrp_total,
           'notes', public._txt(d, 'notes', 1000)
         ))
       );
     else
-      v_items := coalesce(d->'items', '[]'::jsonb);
-      if jsonb_array_length(v_items) = 0 then
-        raise exception 'At least one item is required for itemized stock transfer';
+      v_items := d->'items';
+      if v_items is null or jsonb_typeof(v_items) <> 'array' or jsonb_array_length(v_items) = 0 then
+        raise exception 'Itemized transfer requires at least one item';
       end if;
-
-      v_pieces := jsonb_array_length(v_items);
-      v_gross_wt := 0;
-      v_mrp_total := 0;
-
       for v_item in select * from jsonb_array_elements(v_items) loop
-        if coalesce((v_item->>'mrp')::numeric, 0) <= 0 then
-          raise exception 'Each item in stock transfer must have an MRP greater than zero';
-        end if;
-        if coalesce((v_item->>'gross_weight')::numeric, 0) <= 0 then
-          raise exception 'Each item in stock transfer must have gross weight greater than zero';
-        end if;
-        v_mrp_total := v_mrp_total + (v_item->>'mrp')::numeric;
-        v_gross_wt := v_gross_wt + (v_item->>'gross_weight')::numeric;
+        v_pieces := v_pieces + 1;
+        v_gross_wt := v_gross_wt + round(coalesce((v_item->>'gross_weight')::numeric, 0), 3);
+        v_mrp_total := v_mrp_total + round(coalesce((v_item->>'mrp')::numeric, 0), 2);
       end loop;
-
-      if (d->>'from_shop_id') ~ '^[0-9a-fA-F-]{36}$' then
-        select name into v_from_shop from public.shops where id = (d->>'from_shop_id')::uuid;
-      end if;
-      if (d->>'to_shop_id') ~ '^[0-9a-fA-F-]{36}$' then
-        select name into v_to_shop from public.shops where id = (d->>'to_shop_id')::uuid;
-      end if;
+      if v_mrp_total <= 0 then raise exception 'Total MRP amount must be greater than 0'; end if;
 
       return jsonb_build_object(
         'amount', round(v_mrp_total, 2),
@@ -613,6 +603,16 @@ with checks as (
          (public._build_details('petty_cash'::public.request_type, 1200,
             '{"petty_cash_category":"accommodation_cleaning","description":"test"}'::jsonb)
            -> 'details' ->> 'petty_cash_category') = 'accommodation_cleaning',
+         'this file'
+  union all
+  select 'discount form (before/after amount) works',
+         (public._build_details('discount'::public.request_type, 0,
+            '{"before_amount":1000,"after_amount":900}'::jsonb) ->> 'amount')::numeric = 100,
+         'this file'
+  union all
+  select 'asset keeps quantity / specification',
+         (public._build_details('asset'::public.request_type, 5000,
+            '{"asset_name":"Laptop","quantity":"2","specification":"i5"}'::jsonb) -> 'details' ->> 'quantity') = '2',
          'this file'
   union all
   select 'create_typed_draft uses category limit',
