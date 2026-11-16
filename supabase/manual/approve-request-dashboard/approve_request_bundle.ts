@@ -927,6 +927,8 @@ Deno.serve(handle(async (req) => {
   if (me.role !== "admin" && me.role !== "head") throw new HttpError(403, "forbidden", "Only a Head or Admin can approve.");
   // deno-lint-ignore no-explicit-any
   const body = await readJson<any>(req);
+  // Lets the web app check that this deployment supports browser-side signing.
+  if (body.mode === "version") return json({ version: 2, client_sign: true });
   const requestId = requireUuid(body.request_id, "Request");
 
   if (body.mode === "finalize") return await finalizeClientSigned(admin, me, requestId, body);

@@ -2910,6 +2910,13 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         let data: { approval_no: string } | null = null;
         let reserved = false;
+        // Is the deployed Edge Function new enough to let the browser do the signing?
+        // (Older deployments do all PDF work on the server → "not enough compute resources".)
+        let clientSignSupported = false;
+        try {
+          const ping = await invokeEdgeFunction<{ client_sign?: boolean }>('approve-request', { mode: 'version' });
+          clientSignSupported = ping.data?.client_sign === true;
+        } catch {}
         try {
           // Step 1 — edge function only reserves the approval number and hands out signed URLs
           // (no PDF work on the server → never hits the Edge Function compute limit).
@@ -2921,7 +2928,15 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
             // Client dispatches the unified approval_document_packet template with media_id
             skip_whatsapp: true,
           });
-          if (res.error) throw res.error;
+          if (res.error) {
+            if (!clientSignSupported) {
+              throw new Error(
+                `${res.error.message} — The "approve-request" Edge Function on Supabase is an OLD version that signs on the server. ` +
+                  `Deploy supabase/manual/approve-request-dashboard/approve_request_bundle.ts in Supabase Dashboard → Edge Functions → approve-request.`
+              );
+            }
+            throw res.error;
+          }
 
           const prep = res.data as PrepareResponse | { approval_no: string } | null;
           if (prep && 'mode' in prep && prep.mode === 'client_sign') {
