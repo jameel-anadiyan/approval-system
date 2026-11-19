@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -6,6 +6,7 @@ import { RequestCard } from '../../components/requests/RequestCard';
 import { EmptyState } from '../../components/common/EmptyState';
 import { canUserViewBillMissingRequest } from '../../lib/workflow';
 import { formatINR, typeOf } from '../../lib/formatters';
+import { usePersistedState } from '../../lib/persistedState';
 import type { RequestRecord } from '../../types/database';
 import {
   FileWarning,
@@ -25,10 +26,10 @@ export const BillMissingPage: React.FC = () => {
   const { requests } = useRequests();
   const navigate = useNavigate();
 
-  const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'missing' | 'submitted'>('all');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [scopeFilter, setScopeFilter] = useState<'all' | 'mine' | 'team'>('all');
+  const [query, setQuery] = usePersistedState('bill-missing:q', '');
+  const [statusFilter, setStatusFilter] = usePersistedState<'all' | 'missing' | 'submitted'>('bill-missing:status', 'all');
+  const [typeFilter, setTypeFilter] = usePersistedState<string>('bill-missing:type', 'all');
+  const [scopeFilter, setScopeFilter] = usePersistedState<'all' | 'mine' | 'team'>('bill-missing:scope', 'all');
 
   // Strictly filter requests associated with this specific user
   const billMissingList = useMemo(() => {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -6,6 +6,7 @@ import { RequestQueue } from '../../components/requests/RequestQueue';
 import { typeOf } from '../../lib/formatters';
 import { canUserViewBillMissingRequest, isOwningDepartmentHead } from '../../lib/workflow';
 import { useDirectory } from '../../lib/directory';
+import { usePersistedState } from '../../lib/persistedState';
 import {
   CheckCircle2,
   Clock,
@@ -33,7 +34,10 @@ export const HeadDashboardPage: React.FC = () => {
       (dir.users.find((u) => u.id === user.id)?.is_petty_cash_dealer ?? user.is_petty_cash_dealer)
   );
 
-  const [selectedQueue, setSelectedQueue] = useState<'to_approve' | 'bill_missing'>('to_approve');
+  const [selectedQueue, setSelectedQueue] = usePersistedState<'to_approve' | 'bill_missing'>(
+    'head-dashboard:selected-queue',
+    'to_approve'
+  );
 
   // Waitlist access & counts
   const canViewWaitlist = Boolean(user?.role === 'admin' || user?.can_view_exhibition_waitlist);
@@ -536,6 +540,7 @@ export const HeadDashboardPage: React.FC = () => {
           <RequestQueue
             items={toApproveQueue}
             bulkApprove
+            storageKey="head-dashboard:to_approve"
             initialFilters={{ sort: 'oldest' }}
             emptyIcon={CheckCircle2}
             emptyTitle="No Pending Direct Approvals"
@@ -563,6 +568,7 @@ export const HeadDashboardPage: React.FC = () => {
 
           <RequestQueue
             items={billMissingQueue}
+            storageKey="head-dashboard:bill_missing"
             initialFilters={{ sort: 'newest' }}
             emptyIcon={FileWarning}
             emptyTitle="No Missing Bills"

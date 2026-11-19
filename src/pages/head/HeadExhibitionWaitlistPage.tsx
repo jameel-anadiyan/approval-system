@@ -22,16 +22,20 @@ import {
   X,
 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
+import { usePersistedState } from '../../lib/persistedState';
 
 export const HeadExhibitionWaitlistPage: React.FC = () => {
   const { user } = useAuth();
   const { requests, decideExhibitionWaitlist } = useRequests();
 
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'all'>('pending');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [regionFilter, setRegionFilter] = useState<string>('all');
-  const [approvedFromDate, setApprovedFromDate] = useState<string>('');
-  const [approvedToDate, setApprovedToDate] = useState<string>('');
+  const [statusFilter, setStatusFilter] = usePersistedState<'pending' | 'approved' | 'all'>(
+    'exhibition-waitlist:status',
+    'pending'
+  );
+  const [searchQuery, setSearchQuery] = usePersistedState('exhibition-waitlist:q', '');
+  const [regionFilter, setRegionFilter] = usePersistedState<string>('exhibition-waitlist:region', 'all');
+  const [approvedFromDate, setApprovedFromDate] = usePersistedState<string>('exhibition-waitlist:from', '');
+  const [approvedToDate, setApprovedToDate] = usePersistedState<string>('exhibition-waitlist:to', '');
 
   // Decision Modal state
   const [activeModal, setActiveModal] = useState<{

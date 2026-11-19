@@ -3,7 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
-import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
+import {
+  hasActiveRequestFilters,
+  RequestFilters,
+  useRequestFilters,
+} from '../../components/requests/RequestFilters';
 import { EmptyState } from '../../components/common/EmptyState';
 import { CheckCircle2, Inbox, Info, Send, RotateCcw, AlertTriangle, FileWarning } from 'lucide-react';
 import { isMyRegionalRequest, canUserViewBillMissingRequest } from '../../lib/workflow';
@@ -80,9 +84,12 @@ export const RegionalInboxPage: React.FC = () => {
       ? billMissing
       : forwarded;
 
-  const { filters, setFilters, result: visible } = useRequestFilters(source, {
-    sort: tab === 'pending' ? 'oldest' : 'newest',
-  });
+  const { filters, setFilters, result: visible } = useRequestFilters(
+    source,
+    { sort: tab === 'pending' ? 'oldest' : 'newest' },
+    'submitted',
+    `regional-inbox:${tab}`
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -202,8 +209,15 @@ export const RegionalInboxPage: React.FC = () => {
         </button>
       </div>
 
-      {source.length > 0 && (
-        <RequestFilters value={filters} onChange={setFilters} source={source} showStatus resultCount={visible.length} />
+      {(source.length > 0 || hasActiveRequestFilters(filters)) && (
+        <RequestFilters
+          value={filters}
+          onChange={setFilters}
+          source={source}
+          showStatus
+          resultCount={visible.length}
+          storageKey={`regional-inbox:${tab}`}
+        />
       )}
 
       {source.length === 0 ? (

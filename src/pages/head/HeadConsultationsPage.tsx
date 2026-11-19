@@ -22,13 +22,15 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
+import { usePersistedState } from '../../lib/persistedState';
+
 export const HeadConsultationsPage: React.FC = () => {
   const { user } = useAuth();
   const { requests, respondHeadConsultation } = useRequests();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
-  const [filter, setFilter] = useState<'all' | 'pending' | 'responded'>('all');
+  const [activeTab, setActiveTab] = usePersistedState<'received' | 'sent'>('head-consultations:tab', 'received');
+  const [filter, setFilter] = usePersistedState<'all' | 'pending' | 'responded'>('head-consultations:filter', 'all');
   const [actingId, setActingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 

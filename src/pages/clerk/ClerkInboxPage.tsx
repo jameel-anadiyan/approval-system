@@ -2,13 +2,18 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
-import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
+import {
+  hasActiveRequestFilters,
+  RequestFilters,
+  useRequestFilters,
+} from '../../components/requests/RequestFilters';
 import { EmptyState } from '../../components/common/EmptyState';
 import { RouteModal } from '../../components/portals/RouteModal';
 import { ReturnModal } from '../../components/portals/ReturnModal';
 import { RequestRecord } from '../../types/database';
 import { Inbox, CheckCircle2, ShieldAlert, FileWarning, ArrowRightLeft } from 'lucide-react';
 import { formatINRWhole } from '../../lib/formatters';
+import { usePersistedState } from '../../lib/persistedState';
 import { isMyRoutingRequest, canUserViewBillMissingRequest } from '../../lib/workflow';
 
 export const ClerkInboxPage: React.FC = () => {
@@ -16,7 +21,10 @@ export const ClerkInboxPage: React.FC = () => {
   const { requests, routeRequest, returnRequest, threshold } = useRequests();
   const limit = formatINRWhole(threshold);
 
-  const [activeTab, setActiveTab] = useState<'routing' | 'bill_missing'>('routing');
+  const [activeTab, setActiveTab] = usePersistedState<'routing' | 'bill_missing'>(
+    'clerk-inbox:tab',
+    'routing'
+  );
   const [activeRequest, setActiveRequest] = useState<RequestRecord | null>(null);
   const [modalType, setModalType] = useState<'route' | 'return' | null>(null);
 
@@ -30,9 +38,12 @@ export const ClerkInboxPage: React.FC = () => {
   const billMissingQueue = requests.filter((r) => canUserViewBillMissingRequest(r, user));
 
   const source = activeTab === 'routing' ? pendingRouting : billMissingQueue;
-  const { filters, setFilters, result: visible } = useRequestFilters(source, {
-    sort: activeTab === 'routing' ? 'oldest' : 'newest',
-  });
+  const { filters, setFilters, result: visible } = useRequestFilters(
+    source,
+    { sort: activeTab === 'routing' ? 'oldest' : 'newest' },
+    'submitted',
+    `clerk-inbox:${activeTab}`
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 space-y-6 pb-24">
@@ -141,8 +152,14 @@ export const ClerkInboxPage: React.FC = () => {
         </div>
       )}
 
-      {source.length > 0 && (
-        <RequestFilters value={filters} onChange={setFilters} source={source} resultCount={visible.length} />
+      {(source.length > 0 || hasActiveRequestFilters(filters)) && (
+        <RequestFilters
+          value={filters}
+          onChange={setFilters}
+          source={source}
+          resultCount={visible.length}
+          storageKey={`clerk-inbox:${activeTab}`}
+        />
       )}
 
       {/* Queue Content */}

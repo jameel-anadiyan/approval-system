@@ -8,6 +8,7 @@ import { useStockTransferReport, type StockTransferRow } from '../../lib/stockTr
 import { formatINR, formatINRWhole, formatISTDate } from '../../lib/formatters';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
+import { usePersistedState } from '../../lib/persistedState';
 import type { RequestStatus } from '../../types/database';
 
 // ───────────────────────── helpers ─────────────────────────
@@ -97,18 +98,18 @@ type ShopView = 'outflow' | 'inflow';
 type RowSort = 'newest' | 'oldest' | 'mrp_desc' | 'pieces_desc' | 'completed_desc';
 
 export const StockTransferReportPage: React.FC = () => {
-  const [preset, setPreset] = useState<Preset>('this_month');
-  const [range, setRange] = useState(presetRange('this_month'));
+  const [preset, setPreset] = usePersistedState<Preset>('stock-report:preset', 'this_month');
+  const [range, setRange] = usePersistedState('stock-report:range', () => presetRange('this_month'));
   const { rows, loading, error } = useStockTransferReport(range.from, range.to);
 
-  const [group, setGroup] = useState<StatusGroup>('approved');
-  const [fromShop, setFromShop] = useState('');
-  const [toShop, setToShop] = useState('');
-  const [employee, setEmployee] = useState('');
-  const [mode, setMode] = useState<'' | 'itemized' | 'bulk'>('');
-  const [search, setSearch] = useState('');
-  const [shopView, setShopView] = useState<ShopView>('outflow');
-  const [rowSort, setRowSort] = useState<RowSort>('newest');
+  const [group, setGroup] = usePersistedState<StatusGroup>('stock-report:group', 'approved');
+  const [fromShop, setFromShop] = usePersistedState('stock-report:fromShop', '');
+  const [toShop, setToShop] = usePersistedState('stock-report:toShop', '');
+  const [employee, setEmployee] = usePersistedState('stock-report:employee', '');
+  const [mode, setMode] = usePersistedState<'' | 'itemized' | 'bulk'>('stock-report:mode', '');
+  const [search, setSearch] = usePersistedState('stock-report:q', '');
+  const [shopView, setShopView] = usePersistedState<ShopView>('stock-report:shopView', 'outflow');
+  const [rowSort, setRowSort] = usePersistedState<RowSort>('stock-report:rowSort', 'newest');
   const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 

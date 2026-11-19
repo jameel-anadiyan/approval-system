@@ -1,4 +1,5 @@
-import React, { useId, useMemo, useState } from 'react';
+import React, { useId, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import type { RequestRecord, RequestStatus, RequestType } from '../../types/database';
 import {
   getTodayIST,
@@ -8,6 +9,7 @@ import {
   TYPE_LABELS,
   typeOf,
 } from '../../lib/formatters';
+import { usePersistedState } from '../../lib/persistedState';
 import { Search, SlidersHorizontal, ArrowDownUp, Calendar, X } from 'lucide-react';
 
 export type SortKey = 'newest' | 'oldest' | 'amount_desc' | 'amount_asc';
@@ -97,12 +99,37 @@ export function applyFilters(
   return out.sort(cmp[f.sort]);
 }
 
+export function hasActiveRequestFilters(f: FilterState): boolean {
+  return (
+    Boolean(f.q.trim()) ||
+    Boolean(f.employee.trim()) ||
+    f.shop !== 'all' ||
+    f.type !== 'all' ||
+    f.status !== 'all' ||
+    f.dept !== 'all' ||
+    Boolean(f.from) ||
+    Boolean(f.to) ||
+    Boolean(f.entryOfficer && f.entryOfficer !== 'all')
+  );
+}
+
 export function useRequestFilters(
   list: RequestRecord[],
   initial: Partial<FilterState> = {},
-  dateField: FilterDateField = 'submitted'
+  dateField: FilterDateField = 'submitted',
+  storageKey?: string
 ) {
-  const [filters, setFilters] = useState<FilterState>({ ...EMPTY_FILTERS, ...initial });
+  const location = useLocation();
+  const effectiveKey = `request-filters:${storageKey || location.pathname}`;
+  const [rawFilters, setFilters] = usePersistedState<FilterState>(effectiveKey, () => ({
+    ...EMPTY_FILTERS,
+    ...initial,
+  }));
+  const filters = useMemo<FilterState>(
+    () => ({ ...EMPTY_FILTERS, ...initial, ...rawFilters }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawFilters]
+  );
   const result = useMemo(() => applyFilters(list, filters, dateField), [list, filters, dateField]);
   return { filters, setFilters, result };
 }
@@ -119,6 +146,7 @@ interface RequestFiltersProps {
   resultCount?: number;
   dateField?: FilterDateField;
   inlineDateFilter?: boolean;
+  storageKey?: string;
 }
 
 const inputCls =
@@ -136,8 +164,23 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
   resultCount,
   dateField = 'submitted',
   inlineDateFilter = false,
+  storageKey,
 }) => {
-  const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const activeCount =
+    (value.employee ? 1 : 0) +
+    (value.shop !== 'all' ? 1 : 0) +
+    (value.type !== 'all' ? 1 : 0) +
+    (value.status !== 'all' ? 1 : 0) +
+    (value.dept !== 'all' ? 1 : 0) +
+    (value.from ? 1 : 0) +
+    (value.to ? 1 : 0) +
+    (value.entryOfficer && value.entryOfficer !== 'all' ? 1 : 0);
+
+  const [open, setOpen] = usePersistedState<boolean>(
+    `request-filters-open:${storageKey || location.pathname}`,
+    () => activeCount > 0
+  );
   const set = <K extends keyof FilterState>(k: K, v: FilterState[K]) => onChange({ ...value, [k]: v });
 
   const effectiveDateField: FilterDateField =
@@ -175,25 +218,21 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
     onChange({ ...value, from: nextFrom, to: toVal });
   };
 
-  const shops = useMemo(
-    () => Array.from(new Set(source.map((r) => r.shop_name).filter((s): s is string => !!s))).sort(),
-    [source]
-  );
-  const employees = useMemo(() => Array.from(new Set(source.map((r) => r.requester_name))).sort(), [source]);
-  const statuses = useMemo(
-    () => statusOptions ?? (Array.from(new Set(source.map((r) => r.status))) as RequestStatus[]),
-    [source, statusOptions]
-  );
+  const shops = useMemo(() => {
+    const setShops = new Set(source.map((r) => r.shop_name).filter((s): s is string => !!s));
+    if (value.shop && value.shop !== 'all') setShops.add(value.shop);
+    return Array.from(setShops).sort();
+  }, [source, value.shop]);
 
-  const activeCount =
-    (value.employee ? 1 : 0) +
-    (value.shop !== 'all' ? 1 : 0) +
-    (value.type !== 'all' ? 1 : 0) +
-    (value.status !== 'all' ? 1 : 0) +
-    (value.dept !== 'all' ? 1 : 0) +
-    (value.from ? 1 : 0) +
-    (value.to ? 1 : 0) +
-    (value.entryOfficer && value.entryOfficer !== 'all' ? 1 : 0);
+  const employees = useMemo(() => Array.from(new Set(source.map((r) => r.requester_name))).sort(), [source]);
+
+  const statuses = useMemo(() => {
+    const base = statusOptions ?? (Array.from(new Set(source.map((r) => r.status))) as RequestStatus[]);
+    if (value.status !== 'all' && !base.includes(value.status)) {
+      return [...base, value.status];
+    }
+    return base;
+  }, [source, statusOptions, value.status]);
 
   const entryOfficers = useMemo(() => {
     const map = new Map<string, string>();
@@ -450,14 +489,57 @@ export const RequestFilters: React.FC<RequestFiltersProps> = ({
       )}
 
       {(activeCount > 0 || value.q || resultCount !== undefined) && (
-        <div className="flex items-center justify-between text-[11px] text-slate-500">
-          <span>{resultCount !== undefined ? `${resultCount} result${resultCount === 1 ? '' : 's'}` : ''}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {resultCount !== undefined && (
+              <span>{`${resultCount} result${resultCount === 1 ? '' : 's'}`}</span>
+            )}
+            {value.type !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-50 text-brand-800 border border-brand-200 font-semibold">
+                <span>Type: {TYPE_LABELS[value.type] ?? value.type}</span>
+                <button
+                  type="button"
+                  onClick={() => set('type', 'all')}
+                  aria-label="Remove request type filter"
+                  className="hover:text-brand-950 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {value.shop !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-semibold">
+                <span>Shop: {value.shop}</span>
+                <button
+                  type="button"
+                  onClick={() => set('shop', 'all')}
+                  aria-label="Remove shop filter"
+                  className="hover:text-slate-950 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {value.status !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-semibold">
+                <span>Status: {STATUS_META[value.status]?.label ?? value.status}</span>
+                <button
+                  type="button"
+                  onClick={() => set('status', 'all')}
+                  aria-label="Remove status filter"
+                  className="hover:text-slate-950 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+          </div>
           {(activeCount > 0 || value.q) && (
             <button
               type="button"
               id="filter-clear"
               onClick={() => onChange({ ...EMPTY_FILTERS, sort: value.sort })}
-              className="inline-flex items-center gap-1 font-semibold text-brand-700 hover:text-brand-900"
+              className="inline-flex items-center gap-1 font-semibold text-brand-700 hover:text-brand-900 cursor-pointer"
             >
               <X className="w-3 h-3" /> Clear filters
             </button>

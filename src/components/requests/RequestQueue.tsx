@@ -3,7 +3,12 @@ import type { LucideIcon } from 'lucide-react';
 import { SearchX } from 'lucide-react';
 import type { RequestRecord } from '../../types/database';
 import { RequestCard } from './RequestCard';
-import { RequestFilters, useRequestFilters, type FilterState } from './RequestFilters';
+import {
+  hasActiveRequestFilters,
+  RequestFilters,
+  useRequestFilters,
+  type FilterState,
+} from './RequestFilters';
 import { EmptyState } from '../common/EmptyState';
 import { BulkApproveBar, useSelection } from '../portals/BulkApprove';
 
@@ -17,6 +22,7 @@ interface RequestQueueProps {
   initialFilters?: Partial<FilterState>;
   showStatus?: boolean;
   showDepartment?: boolean;
+  storageKey?: string;
 }
 
 /** Filterable card grid used by the work queues, optionally with bulk approve. */
@@ -29,17 +35,31 @@ export const RequestQueue: React.FC<RequestQueueProps> = ({
   initialFilters,
   showStatus = false,
   showDepartment = true,
+  storageKey,
 }) => {
-  const { filters, setFilters, result } = useRequestFilters(items, initialFilters);
+  const { filters, setFilters, result } = useRequestFilters(
+    items,
+    initialFilters,
+    'submitted',
+    storageKey
+  );
   const selection = useSelection(result.map((r) => r.id));
+  const hasFilters = hasActiveRequestFilters(filters);
 
-  if (items.length === 0) {
+  if (items.length === 0 && !hasFilters) {
     return <EmptyState icon={emptyIcon} title={emptyTitle} description={emptyDescription} />;
   }
 
   return (
     <div className="space-y-4">
-      <RequestFilters value={filters} onChange={setFilters} source={items} showStatus={showStatus} resultCount={result.length} />
+      <RequestFilters
+        value={filters}
+        onChange={setFilters}
+        source={items}
+        showStatus={showStatus}
+        resultCount={result.length}
+        storageKey={storageKey}
+      />
       {bulkApprove && <BulkApproveBar items={result} selection={selection} />}
       {result.length === 0 ? (
         <EmptyState icon={SearchX} title="No matching requests" description="Try clearing the filters." />

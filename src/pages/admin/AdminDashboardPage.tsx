@@ -225,6 +225,7 @@ export const AdminDashboardPage: React.FC = () => {
         <RequestQueue
           items={pendingApprovals}
           bulkApprove
+          storageKey="admin-dashboard:awaiting"
           initialFilters={{ sort: 'oldest' }}
           emptyIcon={ShieldCheck}
           emptyTitle="Nothing pending"

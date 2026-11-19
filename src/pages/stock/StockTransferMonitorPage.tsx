@@ -55,10 +55,12 @@ export const StockTransferMonitorPage: React.FC = () => {
   const completedList = useMemo(() => approved.filter((r) => !!r.transfer_completed_at), [approved]);
   const current = tab === 'pending' ? pendingList : completedList;
 
-  const { filters, setFilters, result } = useRequestFilters(current, { sort: tab === 'pending' ? 'oldest' : 'newest' });
-  useEffect(() => {
-    setFilters((f) => ({ ...f, sort: tab === 'pending' ? 'oldest' : 'newest' }));
-  }, [tab]);
+  const { filters, setFilters, result } = useRequestFilters(
+    current,
+    { sort: tab === 'pending' ? 'oldest' : 'newest' },
+    'approved',
+    `stock-transfers:${tab}`
+  );
 
   const sorted = useMemo(() => {
     if (tab !== 'completed') return result;
@@ -160,7 +162,13 @@ export const StockTransferMonitorPage: React.FC = () => {
         />
       </div>
 
-      <RequestFilters value={filters} onChange={setFilters} source={current} resultCount={sorted.length} />
+      <RequestFilters
+        value={filters}
+        onChange={setFilters}
+        source={current}
+        resultCount={sorted.length}
+        storageKey={`stock-transfers:${tab}`}
+      />
 
       {sorted.length === 0 ? (
         <EmptyState

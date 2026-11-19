@@ -51,6 +51,7 @@ export const AdminApprovePage: React.FC = () => {
       <RequestQueue
         items={toApproveQueue}
         bulkApprove
+        storageKey="admin-approve:queue"
         initialFilters={{ sort: 'oldest' }}
         emptyIcon={CheckCircle2}
         emptyTitle="No Requests Pending Approval"

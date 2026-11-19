@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
+import { usePersistedState } from '../../lib/persistedState';
 import {
   formatINR,
   formatISTDate,
@@ -34,10 +35,10 @@ export const ReturnedRequestsPage: React.FC = () => {
   const { requests } = useRequests();
   const navigate = useNavigate();
 
-  const [query, setQuery] = useState('');
-  const [selectedType, setSelectedType] = useState<string>('all');
-  const [scopeFilter, setScopeFilter] = useState<'all' | 'mine' | 'team'>('all');
-  const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
+  const [query, setQuery] = usePersistedState('returned-requests:q', '');
+  const [selectedType, setSelectedType] = usePersistedState<string>('returned-requests:type', 'all');
+  const [scopeFilter, setScopeFilter] = usePersistedState<'all' | 'mine' | 'team'>('returned-requests:scope', 'all');
+  const [dateRange, setDateRange] = usePersistedState<'all' | '7d' | '30d' | '90d'>('returned-requests:dateRange', 'all');
 
   // Only returned requests that this user is associated with (associated head, associated clerk, requester, regional head, admin)
   const returnedList = useMemo(() => {

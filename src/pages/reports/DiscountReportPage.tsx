@@ -8,6 +8,7 @@ import { useDiscountReport, type DiscountRow } from '../../lib/discountReport';
 import { formatINR, formatINRWhole, formatISTDate } from '../../lib/formatters';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
+import { usePersistedState } from '../../lib/persistedState';
 import type { RequestStatus } from '../../types/database';
 
 // ───────────────────────── helpers ─────────────────────────
@@ -89,19 +90,19 @@ type ShopSort = 'value' | 'count' | 'avg' | 'name';
 type RowSort = 'newest' | 'oldest' | 'value_desc' | 'value_asc' | 'pct_desc' | 'pct_asc';
 
 export const DiscountReportPage: React.FC = () => {
-  const [preset, setPreset] = useState<Preset>('this_month');
-  const [range, setRange] = useState(presetRange('this_month'));
+  const [preset, setPreset] = usePersistedState<Preset>('discount-report:preset', 'this_month');
+  const [range, setRange] = usePersistedState('discount-report:range', () => presetRange('this_month'));
   const { rows, loading, error } = useDiscountReport(range.from, range.to);
 
-  const [group, setGroup] = useState<StatusGroup>('approved');
-  const [shop, setShop] = useState('');
-  const [dept, setDept] = useState('');
-  const [employee, setEmployee] = useState('');
-  const [search, setSearch] = useState('');
-  const [minPct, setMinPct] = useState('');
-  const [maxPct, setMaxPct] = useState('');
-  const [shopSort, setShopSort] = useState<ShopSort>('value');
-  const [rowSort, setRowSort] = useState<RowSort>('newest');
+  const [group, setGroup] = usePersistedState<StatusGroup>('discount-report:group', 'approved');
+  const [shop, setShop] = usePersistedState('discount-report:shop', '');
+  const [dept, setDept] = usePersistedState('discount-report:dept', '');
+  const [employee, setEmployee] = usePersistedState('discount-report:employee', '');
+  const [search, setSearch] = usePersistedState('discount-report:q', '');
+  const [minPct, setMinPct] = usePersistedState('discount-report:minPct', '');
+  const [maxPct, setMaxPct] = usePersistedState('discount-report:maxPct', '');
+  const [shopSort, setShopSort] = usePersistedState<ShopSort>('discount-report:shopSort', 'value');
+  const [rowSort, setRowSort] = usePersistedState<RowSort>('discount-report:rowSort', 'newest');
   const [showAll, setShowAll] = useState(false);
 
   const choosePreset = (p: Preset) => {

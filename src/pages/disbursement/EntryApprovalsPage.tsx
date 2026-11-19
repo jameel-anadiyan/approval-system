@@ -15,6 +15,7 @@ import {
   isDisbursementAssociated,
 } from '../../types/database';
 import { formatINR, formatISTDate, getTodayIST, toISTDateKey, typeOf } from '../../lib/formatters';
+import { usePersistedState } from '../../lib/persistedState';
 import { errMsg } from '../../lib/errorUtils';
 import {
   CheckSquare,
@@ -97,7 +98,10 @@ export const EntryApprovalsPage: React.FC = () => {
   const [directEntries, setDirectEntries] = useState<DisbursementEntry[]>([]);
   const [directRequests, setDirectRequests] = useState<Map<string, RequestRecord>>(new Map());
   const [isDirectLoading, setIsDirectLoading] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'pending' | 'on_hold' | 'approved' | 'rejected'>('pending');
+  const [activeTab, setActiveTab] = usePersistedState<'pending' | 'on_hold' | 'approved' | 'rejected'>(
+    'entry-approvals:tab',
+    'pending'
+  );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rejectTarget, setRejectTarget] = useState<EntryWithRequest | null>(null);
   const [rejectReason, setRejectReason] = useState<string>('');
@@ -108,11 +112,11 @@ export const EntryApprovalsPage: React.FC = () => {
   const [partialStr, setPartialStr] = useState<string>('');
   const [partialError, setPartialError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [modeFilter, setModeFilter] = useState<'all' | 'cash' | 'bank'>('all');
-  const [entryAccountFilter, setEntryAccountFilter] = useState<string>('all');
-  const [approvedFromDate, setApprovedFromDate] = useState<string>('');
-  const [approvedToDate, setApprovedToDate] = useState<string>('');
+  const [searchQuery, setSearchQuery] = usePersistedState<string>('entry-approvals:q', '');
+  const [modeFilter, setModeFilter] = usePersistedState<'all' | 'cash' | 'bank'>('entry-approvals:mode', 'all');
+  const [entryAccountFilter, setEntryAccountFilter] = usePersistedState<string>('entry-approvals:officer', 'all');
+  const [approvedFromDate, setApprovedFromDate] = usePersistedState<string>('entry-approvals:from', '');
+  const [approvedToDate, setApprovedToDate] = usePersistedState<string>('entry-approvals:to', '');
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{
     path: string;
     name: string;

@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, TYPE_LABELS, typeOf } from '../../lib/formatters';
+import { usePersistedState } from '../../lib/persistedState';
 import {
   isMyRegionalRequest,
   isMyRoutingRequest,
@@ -248,7 +249,10 @@ export const SpecialRequestTypePage: React.FC<SpecialRequestTypePageProps> = ({ 
     [approvedItems]
   );
 
-  const [selectedTab, setSelectedTab] = useState<SpecialTab | null>(null);
+  const [selectedTab, setSelectedTab] = usePersistedState<SpecialTab | null>(
+    `special:${requestType}:tab`,
+    null
+  );
   const tab: SpecialTab = selectedTab ?? (actionMeta.items.length > 0 ? 'action' : 'all');
 
   const items =
@@ -395,6 +399,7 @@ export const SpecialRequestTypePage: React.FC<SpecialRequestTypePageProps> = ({ 
 
       <RequestQueue
         items={items}
+        storageKey={`special:${requestType}:${tab}`}
         bulkApprove={tab === 'action' && actionMeta.canBulkApprove}
         initialFilters={{ sort: tab === 'action' ? 'oldest' : 'newest' }}
         emptyIcon={tab === 'action' ? CheckCircle2 : TypeIcon}

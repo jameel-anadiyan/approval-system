@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestQueue } from '../../components/requests/RequestQueue';
 import { formatINR, typeOf } from '../../lib/formatters';
 import { isOwningDepartmentHead } from '../../lib/workflow';
+import { usePersistedState } from '../../lib/persistedState';
 import { RequestRecord } from '../../types/database';
 import { Wallet, PlusCircle, CheckCircle2, Clock, Inbox, FileCheck } from 'lucide-react';
 
@@ -73,7 +74,7 @@ export const PettyCashPage: React.FC = () => {
     [scopedPettyCash]
   );
 
-  const [selectedTab, setSelectedTab] = useState<PettyTab | null>(null);
+  const [selectedTab, setSelectedTab] = usePersistedState<PettyTab | null>('petty-cash:tab', null);
   const tab: PettyTab = selectedTab ?? (actionItems.length > 0 ? 'action' : 'all');
 
   const items =
@@ -210,6 +211,7 @@ export const PettyCashPage: React.FC = () => {
 
       <RequestQueue
         items={items}
+        storageKey={`petty-cash:${tab}`}
         bulkApprove={tab === 'action'}
         initialFilters={{ sort: tab === 'action' ? 'oldest' : 'newest' }}
         emptyIcon={tab === 'action' ? CheckCircle2 : Wallet}

@@ -10,6 +10,7 @@ import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAcc
 import { DisbursementClarificationModal } from '../../components/portals/DisbursementClarificationModal';
 import { DisbursementEntry, RequestRecord, paymentSummary, entryPayable, entryOutstanding, entryHasBalanceAwaitingApproval, entriesTotal, entryAvailable, isDisbursementAssociated } from '../../types/database';
 import { formatINR, formatISTDate, typeOf, isEntryCheckingUser } from '../../lib/formatters';
+import { usePersistedState } from '../../lib/persistedState';
 import {
   Banknote,
   Clock,
@@ -62,7 +63,9 @@ export const DisbursementPage: React.FC = () => {
   const canAddEntry = isEntryOnly || isAdmin;
   const canPay = isPaymentOnly || isAdmin;
 
-  const [activeTab, setActiveTab] = useState<'new_entry' | 'awaiting' | 'clarification' | 'bill_missing' | 'rejected' | 'paid'>(() => {
+  const [activeTab, setActiveTab] = usePersistedState<
+    'new_entry' | 'awaiting' | 'clarification' | 'bill_missing' | 'rejected' | 'paid'
+  >(`disbursement:tab:${location.pathname}`, () => {
     if (location.pathname.endsWith('/paid')) return 'paid';
     if (location.pathname.endsWith('/awaiting')) return 'awaiting';
     if (location.pathname.endsWith('/new-entry')) return 'new_entry';
@@ -102,19 +105,18 @@ export const DisbursementPage: React.FC = () => {
     );
   };
 
-  const hasSetDefaultTab = React.useRef(false);
+  const prevPathnameRef = React.useRef(location.pathname);
   useEffect(() => {
+    if (prevPathnameRef.current === location.pathname) return;
+    prevPathnameRef.current = location.pathname;
     if (location.pathname.endsWith('/paid')) {
       setActiveTab('paid');
     } else if (location.pathname.endsWith('/awaiting')) {
       setActiveTab('awaiting');
     } else if (location.pathname.endsWith('/new-entry')) {
       setActiveTab('new_entry');
-    } else if (!hasSetDefaultTab.current) {
-      setActiveTab(isEntryOnly ? 'new_entry' : 'awaiting');
-      hasSetDefaultTab.current = true;
     }
-  }, [location.pathname, isEntryOnly]);
+  }, [location.pathname, setActiveTab]);
 
   const handleDownload = async (req: RequestRecord) => {
     setNotice(null);
@@ -190,9 +192,17 @@ export const DisbursementPage: React.FC = () => {
       ? paidQueue
       : [];
 
-  const { filters, setFilters, result: filtered } = useRequestFilters(currentList, {
-    sort: (activeTab === 'new_entry' || activeTab === 'awaiting' || activeTab === 'bill_missing') ? 'oldest' : 'newest',
-  });
+  const { filters, setFilters, result: filtered } = useRequestFilters(
+    currentList,
+    {
+      sort:
+        activeTab === 'new_entry' || activeTab === 'awaiting' || activeTab === 'bill_missing'
+          ? 'oldest'
+          : 'newest',
+    },
+    activeTab === 'paid' ? 'approved' : 'submitted',
+    `disbursement:${activeTab}`
+  );
   const search = filters.q;
   const partialCount = awaitingPaymentQueue.filter((r) => paymentSummary(r).partial).length;
   const newEntryAvailableBalance = newEntryWaitQueue.reduce((s, r) => s + entryAvailable(r), 0);
@@ -684,7 +694,13 @@ export const DisbursementPage: React.FC = () => {
             </div>
           )}
 
-          <RequestFilters value={filters} onChange={setFilters} source={currentList} resultCount={filtered.length} />
+          <RequestFilters
+            value={filters}
+            onChange={setFilters}
+            source={currentList}
+            resultCount={filtered.length}
+            storageKey={`disbursement:${activeTab}`}
+          />
 
           {/* Results */}
           {filtered.length === 0 ? (

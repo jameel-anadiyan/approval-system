@@ -29,6 +29,7 @@ import { useDirectory } from '../../lib/directory';
 import { AssignEntryAccountModal } from '../../components/portals/AssignEntryAccountModal';
 import { SignedDocPreviewModal } from '../../components/requests/SignedDocPreviewModal';
 import { downloadSignedPacket } from '../../lib/files';
+import { usePersistedState } from '../../lib/persistedState';
 import type { RequestRecord } from '../../types/database';
 
 type DatePreset = 'all' | 'today' | '7d' | '30d' | '90d' | 'custom';
@@ -39,13 +40,13 @@ export const ApprovedRequestsPage: React.FC = () => {
   const dir = useDirectory();
   const navigate = useNavigate();
 
-  const [query, setQuery] = useState('');
-  const [selectedType, setSelectedType] = useState<string>('all');
-  const [selectedShop, setSelectedShop] = useState<string>('all');
-  const [adminOnly, setAdminOnly] = useState<boolean>(false);
-  const [dateRange, setDateRange] = useState<DatePreset>('all');
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
+  const [query, setQuery] = usePersistedState('approved-requests:q', '');
+  const [selectedType, setSelectedType] = usePersistedState<string>('approved-requests:type', 'all');
+  const [selectedShop, setSelectedShop] = usePersistedState<string>('approved-requests:shop', 'all');
+  const [adminOnly, setAdminOnly] = usePersistedState<boolean>('approved-requests:adminOnly', false);
+  const [dateRange, setDateRange] = usePersistedState<DatePreset>('approved-requests:dateRange', 'all');
+  const [fromDate, setFromDate] = usePersistedState<string>('approved-requests:fromDate', '');
+  const [toDate, setToDate] = usePersistedState<string>('approved-requests:toDate', '');
   const [assignTarget, setAssignTarget] = useState<RequestRecord | null>(null);
   const [previewSignedDoc, setPreviewSignedDoc] = useState<{
     path: string;
@@ -94,8 +95,11 @@ export const ApprovedRequestsPage: React.FC = () => {
         map.set(conductingShop.trim(), conductingShop.trim());
       }
     });
+    if (selectedShop && selectedShop !== 'all') {
+      map.set(selectedShop, selectedShop);
+    }
     return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
-  }, [dir.shops, approvedList]);
+  }, [dir.shops, approvedList, selectedShop]);
 
   const adminApprovedCount = useMemo(() => {
     const adminUserIds = new Set(

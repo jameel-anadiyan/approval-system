@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
@@ -6,6 +6,7 @@ import { RequestQueue } from '../../components/requests/RequestQueue';
 import { isOwningDepartmentHead } from '../../lib/workflow';
 import { typeOf } from '../../lib/formatters';
 import { useDirectory } from '../../lib/directory';
+import { usePersistedState } from '../../lib/persistedState';
 import { CheckCircle, CheckCircle2, Clock, CornerDownRight, Wallet, ShieldCheck, Send, Search } from 'lucide-react';
 
 export const HeadReviewPage: React.FC = () => {
@@ -14,7 +15,19 @@ export const HeadReviewPage: React.FC = () => {
   const dir = useDirectory();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') === 'admin' ? 'admin' : 'review';
+  const [persistedTab, setPersistedTab] = usePersistedState<'review' | 'admin'>(
+    'head-review:tab',
+    'review'
+  );
+  const urlTab = searchParams.get('tab');
+  const activeTab: 'review' | 'admin' =
+    urlTab === 'admin' ? 'admin' : urlTab === 'review' ? 'review' : persistedTab;
+
+  useEffect(() => {
+    if (urlTab === 'admin' || urlTab === 'review') {
+      if (persistedTab !== urlTab) setPersistedTab(urlTab);
+    }
+  }, [urlTab, persistedTab, setPersistedTab]);
 
   const isPettyCashDealer = Boolean(
     user?.role === 'head' &&
@@ -58,7 +71,10 @@ export const HeadReviewPage: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setSearchParams({ tab: 'review' })}
+          onClick={() => {
+            setPersistedTab('review');
+            setSearchParams({ tab: 'review' });
+          }}
           className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 shrink-0 transition-all cursor-pointer ${
             activeTab === 'review'
               ? 'bg-indigo-600 text-white shadow-xs'
@@ -78,7 +94,10 @@ export const HeadReviewPage: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setSearchParams({ tab: 'admin' })}
+          onClick={() => {
+            setPersistedTab('admin');
+            setSearchParams({ tab: 'admin' });
+          }}
           className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 shrink-0 transition-all cursor-pointer ${
             activeTab === 'admin'
               ? 'bg-blue-600 text-white shadow-xs'
@@ -154,6 +173,7 @@ export const HeadReviewPage: React.FC = () => {
 
           <RequestQueue
             items={toReviewQueue}
+            storageKey="head-review:review"
             initialFilters={{ sort: 'oldest' }}
             emptyIcon={CheckCircle2}
             emptyTitle="Review Queue Cleared"
@@ -191,6 +211,7 @@ export const HeadReviewPage: React.FC = () => {
 
           <RequestQueue
             items={pendingAdminQueue}
+            storageKey="head-review:admin"
             initialFilters={{ sort: 'newest' }}
             emptyIcon={CheckCircle2}
             emptyTitle="No Requests Pending Admin Approval"

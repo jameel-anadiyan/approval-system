@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRequests } from '../../context/RequestContext';
 import { RequestCard } from '../../components/requests/RequestCard';
 import { RequestFilters, useRequestFilters } from '../../components/requests/RequestFilters';
 import { EmptyState } from '../../components/common/EmptyState';
+import { usePersistedState } from '../../lib/persistedState';
 import { PlusCircle, FileText } from 'lucide-react';
 
 type TabKey = 'under_process' | 'returned' | 'bill_missing' | 'approved' | 'rejected' | 'paid' | 'draft';
@@ -14,7 +15,7 @@ export const MyRequestsPage: React.FC = () => {
   const { requests } = useRequests();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<TabKey>('under_process');
+  const [activeTab, setActiveTab] = usePersistedState<TabKey>('my-requests:tab', 'under_process');
 
   // Filter requests belonging to current user
   const myRequests = requests.filter((r) => r.requester_id === user?.id);
